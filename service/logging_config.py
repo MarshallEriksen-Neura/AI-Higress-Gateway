@@ -1,27 +1,97 @@
+import datetime
 import logging
-from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
+
+from .settings import settings
 
 
 _LOGGING_CONFIGURED = False
 
 
-class DailyFileHandler(TimedRotatingFileHandler):
+class DailyFileHandler(logging.Handler):
     """
-    TimedRotatingFileHandler that names rotated files like:
-    logs/app-YYYY-MM-DD.log
-    while the current-day file remains logs/app.log.
+    Simple daily file handler that writes each day's logs into
+    logs/app-YYYY-MM-DD.log, keeping at most backup_count files.
     """
 
-    def rotation_filename(self, default_name: str) -> str:  # type: ignore[override]
-        # default_name is usually "<base>.YYYY-MM-DD" because suffix is "%Y-%m-%d".
-        base = Path(self.baseFilename)
-        prefix = base.stem  # "app" from "app.log"
-        ext = base.suffix  # ".log"
-        # Extract the date part from default_name (after the last dot).
-        date_suffix = default_name.rsplit(".", 1)[-1]
-        rotated = base.with_name(f"{prefix}-{date_suffix}{ext}")
-        return str(rotated)
+    def __init__(
+        self,
+        log_dir: Path,
+        filename_prefix: str = "app",
+        backup_count: int = 7,
+        encoding: str = "utf-8",
+    ) -> None:
+        super().__init__()
+        self.log_dir = log_dir
+        self.filename_prefix = filename_prefix
+        self.backup_count = backup_count
+        self.encoding = encoding
+        self.terminator = "\n"
+        self._current_date: datetime.date | None = None
+        self._stream = None
+        self._ensure_stream()
+
+    def _file_path_for_date(self, day: datetime.date) -> Path:
+        return self.log_dir / f"{self.filename_prefix}-{day.isoformat()}.log"
+
+    def _cleanup_old_files(self) -> None:
+        if self.backup_count <= 0:
+            return
+        prefix = f"{self.filename_prefix}-"
+        candidates = sorted(
+            p
+            for p in self.log_dir.iterdir()
+            if p.is_file() and p.name.startswith(prefix) and p.suffix == ".log"
+        )
+        if len(candidates) <= self.backup_count:
+            return
+        for old in candidates[: len(candidates) - self.backup_count]:
+            try:
+                old.unlink()
+            except OSError:
+                # Best-effort cleanup; ignore failures.
+                pass
+
+    def _ensure_stream(self) -> None:
+        today = datetime.date.today()
+        if self._current_date == today and self._stream:
+            return
+
+        # Date changed or first use: rotate to a new file.
+        self._current_date = today
+        if self._stream:
+            try:
+                self._stream.close()
+            except OSError:
+                pass
+            self._stream = None
+
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        file_path = self._file_path_for_date(today)
+        self._stream = open(file_path, "a", encoding=self.encoding)
+        self._cleanup_old_files()
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            msg = self.format(record)
+            self._ensure_stream()
+            if self._stream is None:
+                return
+            self._stream.write(msg + self.terminator)
+            self._stream.flush()
+        except Exception:
+            self.handleError(record)
+
+    def close(self) -> None:
+        try:
+            if self._stream:
+                try:
+                    self._stream.close()
+                except OSError:
+                    pass
+                self._stream = None
+        finally:
+            super().close()
 
 
 def setup_logging() -> None:
@@ -37,37 +107,38 @@ def setup_logging() -> None:
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    log_file = log_dir / "app.log"
-
     root_logger = logging.getLogger()
     app_logger = logging.getLogger("apiproxy")
+
+    # Resolve log level from settings (LOG_LEVEL env var), defaulting to INFO.
+    level_name = getattr(settings, "log_level", "INFO")
+    if not isinstance(level_name, str):
+        level_name = "INFO"
+    level_value = getattr(logging, level_name.upper(), logging.INFO)
 
     formatter = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s - %(message)s"
     )
 
-    # File handler: only for our application logs.
+    # File handler: one log file per day, e.g. logs/app-YYYY-MM-DD.log
     file_handler = DailyFileHandler(
-        log_file,
-        when="midnight",
-        interval=1,
-        backupCount=7,
+        log_dir=log_dir,
+        filename_prefix="app",
+        backup_count=7,
         encoding="utf-8",
     )
-    # Use date-only suffix; DailyFileHandler will remap it to the desired pattern.
-    file_handler.suffix = "%Y-%m-%d"
     file_handler.setFormatter(formatter)
 
     # Only application logs (logger "apiproxy") go into the daily log file.
     # Extra safety: filter by logger name in case handlers get attached higher up.
     file_handler.addFilter(lambda record: record.name.startswith("apiproxy"))
-    app_logger.setLevel(logging.INFO)
+    app_logger.setLevel(level_value)
     app_logger.propagate = True  # let logs also go to root/uvicorn handlers (console)
     app_logger.addHandler(file_handler)
 
     # Console handler: attach to root so that uvicorn/watchfiles and apiproxy
     # logs are visible in the terminal, but not written to our file.
-    root_logger.setLevel(logging.INFO)
+    root_logger.setLevel(level_value)
     has_console = False
     for h in root_logger.handlers:
         if isinstance(h, logging.StreamHandler) and not isinstance(

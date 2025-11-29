@@ -1,0 +1,92 @@
+"""
+Provider health-check helpers.
+
+User Story 1 requires that misconfigured providers are skipped and that
+we can check basic health for a given provider. This module exposes a
+simple health probe based on calling the models endpoint and measuring
+latency.
+"""
+
+from __future__ import annotations
+
+import time
+from typing import Optional
+
+import httpx
+from pydantic import BaseModel, Field
+
+from service.logging_config import logger
+from service.models import ProviderConfig, ProviderStatus
+
+
+class HealthStatus(BaseModel):
+    """
+    Minimal health status model aligned with provider-api.yaml.
+    """
+
+    provider_id: str = Field(..., description="Provider id")
+    status: ProviderStatus = Field(..., description="Health status")
+    timestamp: float = Field(..., description="Check timestamp (epoch seconds)")
+    response_time_ms: Optional[float] = Field(
+        None, description="Response time in milliseconds"
+    )
+    error_message: Optional[str] = Field(
+        None, description="Error message if check failed"
+    )
+    last_successful_check: Optional[float] = Field(
+        None, description="Timestamp of last successful check"
+    )
+
+
+async def check_provider_health(
+    client: httpx.AsyncClient, provider: ProviderConfig
+) -> HealthStatus:
+    """
+    Perform a lightweight health check by calling the provider's models endpoint.
+    """
+    base = str(provider.base_url).rstrip("/")
+    path = provider.models_path or "/v1/models"
+    url = f"{base}/{path.lstrip('/')}"
+
+    headers = {
+        "Authorization": f"Bearer {provider.api_key}",
+        "Accept": "application/json",
+    }
+    if provider.custom_headers:
+        headers.update(provider.custom_headers)
+
+    logger.info("Health check for provider %s at %s", provider.id, url)
+
+    start = time.perf_counter()
+    status = ProviderStatus.HEALTHY
+    error_message: Optional[str] = None
+    last_success: Optional[float] = None
+
+    try:
+        resp = await client.get(url, headers=headers)
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        if resp.status_code >= 500:
+            status = ProviderStatus.DOWN
+            error_message = f"HTTP {resp.status_code}"
+        elif resp.status_code >= 400:
+            status = ProviderStatus.DEGRADED
+            error_message = f"HTTP {resp.status_code}"
+        else:
+            last_success = time.time()
+    except httpx.HTTPError as exc:
+        duration_ms = (time.perf_counter() - start) * 1000.0
+        status = ProviderStatus.DOWN
+        error_message = str(exc)
+
+    return HealthStatus(
+        provider_id=provider.id,
+        status=status,
+        timestamp=time.time(),
+        response_time_ms=duration_ms,
+        error_message=error_message,
+        last_successful_check=last_success,
+    )
+
+
+__all__ = ["HealthStatus", "check_provider_health"]
+

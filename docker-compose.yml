@@ -17,8 +17,6 @@ services:
       - .env
     environment:
       # Fallbacks if .env is missing
-      A4F_BASE_URL: "REDACTED_API_URL"
-      A4F_API_KEY: "REDACTED_API_KEY"
       REDIS_URL: "redis://redis:6379/0"
     depends_on:
       - redis

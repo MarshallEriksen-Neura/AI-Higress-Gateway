@@ -1,6 +1,9 @@
 from typing import Any, Dict, Optional
 
-from redis.asyncio import Redis
+try:
+    from redis.asyncio import Redis
+except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is missing
+    Redis = object  # type: ignore[misc,assignment]
 
 
 async def save_context(
@@ -22,4 +25,3 @@ async def save_context(
     # Keep last 50 turns by trimming the list
     await redis.lpush(key, str(entry))
     await redis.ltrim(key, 0, 49)
-

@@ -1,7 +1,25 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+
+try:
+    # Prefer real pydantic-settings when available.
+    from pydantic_settings import BaseSettings, SettingsConfigDict
+except ModuleNotFoundError:  # pragma: no cover - lightweight fallback for tests
+    class BaseSettings:  # type: ignore[misc]
+        """
+        Minimal stand-in for pydantic_settings.BaseSettings used when the
+        dependency is not installed (e.g., in constrained test environments).
+
+        It behaves like a simple object with attribute defaults.
+        """
+
+        def __init__(self, **data):
+            for k, v in data.items():
+                setattr(self, k, v)
+
+    class SettingsConfigDict(dict):  # type: ignore[misc]
+        pass
 
 
 class Settings(BaseSettings):
@@ -12,14 +30,12 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Upstream A4F API
-    a4f_base_url: str = Field("REDACTED_API_URL", alias="A4F_BASE_URL")
-    a4f_api_key: str = Field(
-        "REDACTED_API_KEY", alias="A4F_API_KEY"
+    # Redis connection string
+    redis_url: str = Field(
+        "redis://localhost:6379/0",
+        alias="REDIS_URL",
+        description="Redis connection URL, e.g. 'redis://redis:6379/0'",
     )
-
-    # Redis
-    redis_url: str = Field("redis://redis:6379/0", alias="REDIS_URL")
 
     # HTTP timeouts
     upstream_timeout: float = 600.0
@@ -38,6 +54,35 @@ class Settings(BaseSettings):
     mask_origin: Optional[str] = Field(None, alias="MASK_ORIGIN")
     mask_referer: Optional[str] = Field(None, alias="MASK_REFERER")
 
+    # Multi-provider configuration (001-model-routing).
+    # Raw provider id list; concrete provider configs are derived from this.
+    llm_providers_raw: Optional[str] = Field(
+        default=None,
+        alias="LLM_PROVIDERS",
+        description="Comma-separated provider ids, e.g. 'openai,azure,local'",
+    )
+
+    # Application log level for our apiproxy logger.
+    # Can be overridden via LOG_LEVEL env var, e.g. "DEBUG" while debugging.
+    log_level: str = Field(
+        "INFO",
+        alias="LOG_LEVEL",
+        description="Application log level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
+    )
+
+    def get_llm_provider_ids(self) -> List[str]:
+        """
+        Return configured provider ids from LLM_PROVIDERS.
+        Whitespace is stripped and empty entries are ignored.
+        """
+        if not self.llm_providers_raw:
+            return []
+        return [
+            item.strip()
+            for item in self.llm_providers_raw.split(",")
+            if item.strip()
+        ]
+
 
 settings = Settings()  # Reads from environment if available
 
@@ -45,9 +90,13 @@ settings = Settings()  # Reads from environment if available
 def build_upstream_headers() -> Dict[str, str]:
     """
     Build headers for calling upstream, optionally mimicking a browser page.
+
+    This is a generic helper used in places where we do not have a
+    ProviderConfig instance (e.g. some legacy utilities). The
+    multi-provider routing layer constructs provider-specific headers
+    separately based on ProviderConfig.
     """
     headers: Dict[str, str] = {
-        "Authorization": f"Bearer {settings.a4f_api_key}",
         "Accept": "application/json",
     }
 

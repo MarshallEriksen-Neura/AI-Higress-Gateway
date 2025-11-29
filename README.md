@@ -1,146 +1,260 @@
 # APIProxy - AI Gateway
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)](https://github.com)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[Chinese README](README.zh.md)
 
-APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上游 AI 服务提供了一个统一、兼容 OpenAI 标准的接口，并内置了模型缓存、会话管理和格式转换等功能，旨在简化客户端集成、提升性能和稳定性。
+APIProxy is a FastAPI-based AI gateway that exposes a single, OpenAI-compatible HTTP API on top of multiple upstream model providers. It adds routing, caching, session management, request-format adapters and cross-provider failover so your clients can talk to many LLMs through one stable endpoint.
 
 ---
 
-## ✨ 功能特性
+## Features
 
-- **🚀 OpenAI 兼容接口**: 提供标准的 `/v1/chat/completions` 和 `/models` 端点，无缝对接现有生态。
-- **🔄 格式自动转换**: 智能检测并转换不同厂商的 API 请求格式（例如，将 Gemini 风格的输入自动转为 OpenAI 的 `messages` 格式）。
-- **⚡️ 模型列表缓存**: 将上游模型列表缓存在 Redis 中，减少不必要的 API 请求，加快响应速度。
-- **🗣️ 会话上下文管理**: 通过 `X-Session-Id` 请求头，自动记录和管理对话历史。
-- **🔌 流式 & 非流式支持**: 自动检测客户端需求，同时支持流式（SSE）和非流式响应。
-- **🛠️ 灵活配置**: 所有关键参数（如上游地址、API 密钥、Redis 地址等）均可通过环境变量配置。
-- **🐳 Docker 一键部署**: 提供 `docker-compose.yml`，一键启动网关服务和所需的 Redis 数据库。
-- **📝 请求日志**: 内置中间件，详细记录请求和响应信息，便于调试和监控。
+- OpenAI-compatible API  
+  Exposes `/v1/chat/completions` and `/models` so you can reuse existing OpenAI SDKs and tools.
 
-## 🛠️ 技术栈
+- Multi-provider routing with logical models  
+  Configure multiple providers via environment variables, map them into logical models stored in Redis, and let the gateway choose the best upstream based on weights and runtime metrics.
 
-- **后端框架**: [FastAPI](https://fastapi.tiangolo.com/)
-- **ASGI 服务器**: [Uvicorn](https://www.uvicorn.org/)
-- **HTTP 客户端**: [HTTPX](https://www.python-httpx.org/)
-- **数据缓存/会话存储**: [Redis](https://redis.io/)
-- **配置管理**: [Pydantic Settings](https://docs.pydantic.dev/latest/usage/settings/)
-- **依赖管理**: [uv](https://github.com/astral-sh/uv) / pip
+- Cross-provider failover (non-streaming and streaming)  
+  - Non-streaming: when the selected provider returns a retryable error (e.g. 429, 5xx) or a transport error, the gateway automatically falls back to the next candidate provider.  
+  - Streaming: if an upstream fails before any bytes have been sent, the gateway retries on the next provider; once output has started, a structured SSE error event is sent to the client instead.  
+  - Retryable HTTP status codes are configurable per provider via `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES`, with sensible defaults for `openai`, `gemini` and `claude/anthropic` (429, 500, 502, 503, 504).
 
-## 🚀 快速开始
+- Request format adapters  
+  Automatically detects and adapts different request shapes, such as Gemini-style `input` lists, into the OpenAI-style `messages` format expected by upstream chat APIs.
 
-我们强烈推荐使用 Docker 进行部署，因为它提供了最简单、最一致的运行环境。
+- Model list aggregation and caching  
+  Fetches model lists from all configured providers, normalises them into an OpenAI-style `/models` response and caches them in Redis.
 
-### 先决条件
+- Session context storage  
+  Uses the `X-Session-Id` header to persist request/response snippets into Redis so you can inspect simple conversation history via an HTTP endpoint.
 
-- [Docker](https://www.docker.com/products/docker-desktop/) 和 [Docker Compose](https://docs.docker.com/compose/install/)
-- Git
+- Streaming and non-streaming support  
+  Detects `stream` in the payload and `Accept: text/event-stream` to support both SSE streaming and plain JSON responses.
 
-### 1. Docker 部署 (推荐)
+- Flexible configuration  
+  Upstream addresses, API keys, Redis URL, provider weights and failover behaviour are all controlled through environment variables.
 
-1.  **克隆项目仓库**
-    ```bash
-    git clone <your-repository-url>
-    cd APIProxy
-    ```
+- Docker-friendly  
+  Includes a `docker-compose.yml` that starts the API gateway and Redis with a single command.
 
-2.  **创建并配置 `.env` 文件**
-    从模板文件复制一份配置，并填入你的上游 API 信息。
-    ```bash
-    cp .env.example .env
-    ```
-    编辑 `.env` 文件:
-    ```dotenv
-    A4F_BASE_URL=REDACTED_API_URL  # 你的上游 API 地址
-    A4F_API_KEY=your_upstream_api_key   # 你的上游 API 密钥
-    REDIS_URL=redis://redis:6379/0      # Docker 环境下的 Redis 地址，通常无需修改
-    ```
+---
 
-3.  **启动服务**
-    使用 Docker Compose 在后台启动所有服务：
-    ```bash
-    docker-compose up -d
-    ```
-    服务将在 `http://localhost:8000` 上可用。
+## Tech Stack
 
-4.  **查看日志 (可选)**
-    ```bash
-    docker-compose logs -f api
-    ```
+- Web framework: FastAPI  
+- ASGI server: Uvicorn  
+- HTTP client: HTTPX  
+- Cache / storage: Redis  
+- Config management: Pydantic Settings  
+- Dependency management: uv / pip
 
-5.  **停止服务**
-    ```bash
-    docker-compose down
-    ```
+---
 
-### 2. 本地开发环境
+## Quick Start
 
-1.  **克隆项目并安装依赖**
-    确保你已安装 Python 3.12+。
-    ```bash
-    git clone <your-repository-url>
-    cd APIProxy
-    python -m venv .venv
-    source .venv/bin/activate
-    pip install .
-    ```
+Docker is the easiest way to run APIProxy locally or in production.
 
-2.  **配置 `.env` 文件**
-    与 Docker 步骤类似，创建 `.env` 文件，但需要将 `REDIS_URL` 指向本地运行的 Redis 实例。
-    ```bash
-    cp .env.example .env
-    ```
-    编辑 `.env` 文件:
-    ```dotenv
-    A4F_BASE_URL=REDACTED_API_URL
-    A4F_API_KEY=your_upstream_api_key
-    REDIS_URL=redis://localhost:6379/0 # 指向本地 Redis
-    ```
-    确保你已经在本地启动了 Redis 服务。
+### Prerequisites
 
-3.  **启动服务**
-    项目已配置好脚本，可以直接运行：
-    ```bash
-    apiproxy
-    ```
-    或者使用 Uvicorn (支持热重载):
-    ```bash
-    uvicorn main:app --reload
-    ```
-    服务将在 `http://localhost:8000` 上可用。
+- Docker and Docker Compose  
+- Git  
+- Redis (containerised or external)
 
-## ⚙️ 配置
+### 1. Run with Docker (recommended)
 
-应用通过环境变量进行配置，启动时会从 `.env` 文件加载。
+1. Clone the repo:
 
-| 环境变量          | 描述                                     | 默认值                                    |
-| ----------------- | ---------------------------------------- | ----------------------------------------- |
-| `A4F_BASE_URL`    | 上游 AI 服务的基地址。                   | `需在 .env 文件中设置`                      |
-| `A4F_API_KEY`     | 用于访问上游服务的 API 密钥。            | `需在 .env 文件中设置`                    |
-| `REDIS_URL`       | Redis 连接字符串。                       | `redis://redis:6379/0`                    |
-| `MODELS_CACHE_TTL`| 模型列表缓存的过期时间（秒）。             | `300`                                     |
-| `MASK_AS_BROWSER` | 是否将发往上游的请求伪装成浏览器。         | `True`                                    |
+   ```bash
+   git clone <https://github.com/MarshallEriksen-shaomingyang/ai-higress.git>
+   cd APIProxy
+   ```
 
-## API 端点
+2. Create and configure `.env`:
 
-- `GET /health`: 健康检查端点。
-- `GET /models`: 获取兼容 OpenAI 格式的模型列表（需要认证）。
-- `POST /v1/chat/completions`: 代理聊天补全请求（需要认证）。
-- `GET /context/{session_id}`: 获取指定会话的上下文历史（需要认证）。
+   ```bash
+   cp .env.example .env
+   ```
 
-## ✅ 运行测试
+   - Set `REDIS_URL` to point to your Redis instance;  
+   - Configure `LLM_PROVIDERS` and `LLM_PROVIDER_{id}_*` for each provider;  
+   - Optionally configure cross-provider failover per provider:
 
-项目使用 `pytest` 进行测试。
+     ```env
+     LLM_PROVIDER_openai_RETRYABLE_STATUS_CODES=429,500,502-504
+     LLM_PROVIDER_gemini_RETRYABLE_STATUS_CODES=429,500,502,503,504
+     LLM_PROVIDER_claude_RETRYABLE_STATUS_CODES=429,500,502,503,504
+     ```
+
+     See `docs/configuration.md` for a full description.
+
+3. Start the stack:
+
+   ```bash
+   docker-compose up -d
+   ```
+
+   The API will be available at `http://localhost:8000`.
+
+4. Tail logs (optional):
+
+   ```bash
+   docker-compose logs -f api
+   ```
+
+5. Stop the stack:
+
+   ```bash
+   docker-compose down
+   ```
+
+### 2. Local development
+
+1. Clone the repo and install dependencies (Python 3.12+):
+
+   ```bash
+   git clone <https://github.com/MarshallEriksen-shaomingyang/ai-higress.git>
+   cd APIProxy
+   python -m venv .venv
+   source .venv/bin/activate
+   pip install .
+   ```
+
+2. Configure `.env`:
+
+   ```bash
+   cp .env.example .env
+   ```
+
+   - Point `REDIS_URL` at your local Redis;  
+   - Set up `LLM_PROVIDERS` and `LLM_PROVIDER_{id}_*`;  
+   - Optionally override retryable status codes per provider with `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES`.
+
+3. Start the dev server:
+
+   ```bash
+   apiproxy
+   # or
+   uvicorn main:app --reload
+   ```
+
+   The API will be available at `http://localhost:8000`.
+
+---
+
+## Configuration
+
+APIProxy is configured entirely via environment variables, typically loaded from `.env`. For full details see `.env.example` and `docs/configuration.md`.
+
+Common settings:
+
+| Variable                           | Description                                                                                         | Default                     |
+|------------------------------------|-----------------------------------------------------------------------------------------------------|-----------------------------|
+| `REDIS_URL`                        | Redis connection URL                                                                                | `redis://redis:6379/0`      |
+| `MODELS_CACHE_TTL`                 | TTL for the aggregated models cache (seconds)                                                       | `300`                       |
+| `MASK_AS_BROWSER`                  | When true, adds browser-like headers (User-Agent/Origin/Referer) to upstream requests              | `True`                      |
+| `MASK_USER_AGENT`                  | User-Agent string to use when `MASK_AS_BROWSER` is enabled                                         | see `.env.example`          |
+| `MASK_ORIGIN`                      | Optional Origin header when masking as a browser                                                    | `None`                      |
+| `MASK_REFERER`                     | Optional Referer header when masking as a browser                                                   | `None`                      |
+| `LLM_PROVIDERS`                    | Comma-separated provider ids, e.g. `openai,gemini,claude`                                           | `None`                      |
+| `LLM_PROVIDER_{id}_NAME`           | Human-readable provider name                                                                        | required                    |
+| `LLM_PROVIDER_{id}_BASE_URL`       | Provider API base URL                                                                               | required                    |
+| `LLM_PROVIDER_{id}_API_KEY`        | API key / token for this provider                                                                   | required                    |
+| `LLM_PROVIDER_{id}_MODELS_PATH`    | Path for listing models (relative to `BASE_URL`)                                                    | `/v1/models`                |
+| `LLM_PROVIDER_{id}_WEIGHT`         | Base routing weight used by the scheduler                                                           | `1.0`                       |
+| `LLM_PROVIDER_{id}_REGION`         | Optional region label such as `global` or `us-east`                                                 | `None`                      |
+| `LLM_PROVIDER_{id}_MAX_QPS`        | Provider-level QPS limit                                                                            | `None`                      |
+| `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES` | Comma-separated HTTP status codes or ranges (e.g. `429,500,502-504`) treated as retryable. When unset, built-in defaults apply for `openai`, `gemini`, and `claude/anthropic` (`[429,500,502,503,504]`); otherwise a generic rule of 429 and 5xx is used. | `None` (fall back to defaults) |
+
+---
+
+## API Endpoints
+
+### Core gateway endpoints
+
+- `GET /health`  
+  Basic health check.
+
+- `GET /models` (auth required)  
+  Returns an OpenAI-style models list aggregated from all configured providers.
+
+- `POST /v1/chat/completions` (auth required)  
+  Main chat endpoint. Supports:
+  - OpenAI-style requests;  
+  - Claude-style requests;  
+  - Gemini-style `input` payloads (auto-converted to `messages`);  
+  - Streaming and non-streaming responses;  
+  - Multi-provider routing and cross-provider failover.
+
+- `GET /context/{session_id}` (auth required)  
+  Returns stored conversation history for the given session id.
+
+### Provider and routing endpoints
+
+- `GET /providers`  
+  List all configured providers.
+
+- `GET /providers/{provider_id}`  
+  Return configuration for a single provider.
+
+- `GET /providers/{provider_id}/models`  
+  Return (and cache) the raw models list for a provider.
+
+- `GET /providers/{provider_id}/health`  
+  Perform a lightweight health-check against the provider.
+
+- `GET /providers/{provider_id}/metrics`  
+  Return routing metrics snapshots for a provider.
+
+- `GET /logical-models`  
+  List all logical models stored in Redis.
+
+- `GET /logical-models/{logical_model_id}`  
+  Return a single logical model definition.
+
+- `GET /logical-models/{logical_model_id}/upstreams`  
+  Return the upstream physical models mapped to a logical model.
+
+- `POST /routing/decide`  
+  Compute a routing decision for a logical model, returning the selected upstream and scored candidates.
+
+- `GET /routing/sessions/{conversation_id}`  
+  Inspect the session stickiness binding for a conversation.
+
+- `DELETE /routing/sessions/{conversation_id}`  
+  Delete a session binding (cancel stickiness).
+
+---
+
+## Testing
+
+The project uses `pytest` and `pytest-asyncio` for testing.
+
+Run the full test suite:
 
 ```bash
 pytest
 ```
 
-## 🤝 贡献
+Or run a specific file:
 
-欢迎提交问题和合并请求！
+```bash
+pytest tests/test_chat_greeting.py
+```
 
-## 📄 许可证
+Note: by repository convention, AI agents (Codex/LLM helpers) do not run tests themselves; human developers should run the commands above and confirm the results.
 
-本项目采用 MIT 许可证。详情请见 `LICENSE` 文件。
+---
+
+## Contributing
+
+Contributions are welcome. Before opening a PR:
+
+- Add or update tests for any new endpoints, routing behaviour, or context handling;  
+- Run `pytest` and ensure the suite passes locally;  
+- Keep commits focused and follow the existing short, descriptive commit message style (Chinese or English is fine, e.g. `添加跨厂商故障转移` or `Add cross-provider failover`).
+
+---
+
+## License
+
+This project is licensed under the MIT License. See `LICENSE` for details.

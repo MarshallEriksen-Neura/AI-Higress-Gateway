@@ -1,12 +1,16 @@
 import json
 from typing import Any, Dict, Optional
 
-from redis.asyncio import Redis
+try:
+    from redis.asyncio import Redis
+except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is missing
+    Redis = object  # type: ignore[misc,assignment]
 
 from .settings import settings
 
 
-MODELS_CACHE_KEY = "a4f:models:all"
+# Aggregated /models cache key (no longer tied to legacy A4F upstream).
+MODELS_CACHE_KEY = "gateway:models:all"
 
 
 async def get_models_from_cache(redis: Redis) -> Optional[Dict[str, Any]]:
@@ -29,4 +33,3 @@ async def set_models_cache(redis: Redis, data: Dict[str, Any]) -> None:
     """
     ttl = settings.models_cache_ttl
     await redis.set(MODELS_CACHE_KEY, json.dumps(data), ex=ttl)
-

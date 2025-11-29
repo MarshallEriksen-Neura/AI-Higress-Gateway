@@ -39,7 +39,8 @@ As a result:
   calls do not write anything to Redis.
 - Logs now capture:
   - all request headers (with `Authorization` redacted),
-  - the raw request body (`incoming_raw_body=...`) before normalization.
+  - a concise summary of the request body (`incoming_raw_body summary=...`)
+    before normalization.
 
 
 Two context modes
@@ -104,7 +105,7 @@ We distinguish two classes of clients:
    - The gateway does **not** persist Redis context for these calls.
    - Analysis/debugging relies on:
      - request header logs, and
-     - `incoming_raw_body` logs.
+     - concise `incoming_raw_body` summary logs.
 
 
 Role of Redis
@@ -167,4 +168,3 @@ Summary
 - If future requirements appear, we can extend the design with explicit Cherry
   session ids, pseudo-session grouping, and/or simple deduplication and
   incremental storage strategies.
-
