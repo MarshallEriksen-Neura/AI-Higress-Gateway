@@ -1,0 +1,4 @@
+- Name: APIProxy
+- Purpose: FastAPI-based AI proxy gateway offering a unified OpenAI-compatible interface that routes to multiple upstream LLM providers, handles auth, caching, session context, and failover.
+- Tech stack: Python 3.12, FastAPI, Redis (for context/cache), pytest + pytest-asyncio for tests, Docker/Docker Compose for local stack.
+- Key directories: `main.py` FastAPI entry + CLI, `service/` core routing/auth/cache/context settings, `tests/` pytest suite, `scripts/` helper CLIs, `docs/` design notes, `.specify/` development process assets.

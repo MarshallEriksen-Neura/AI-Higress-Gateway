@@ -35,24 +35,33 @@ def _decode_token(token: str) -> str:
     return decoded
 
 
-async def require_api_key(authorization: str | None = Header(default=None)) -> str:
+async def require_api_key(
+    authorization: str | None = Header(default=None),
+    x_api_key: str | None = Header(default=None, alias="X-API-Key"),
+) -> str:
     """
     Simple API key guard.
 
-    Expects header: Authorization: Bearer <base64(token)>
+    Preferred：Authorization: Bearer <base64(token)>；兼容 X-API-Key: <base64(token)>。
     After base64 解码结果必须与 APIPROXY_AUTH_TOKEN 的值一致，否则返回 401。
     """
-    if not authorization:
+    token_value: str | None = None
+
+    if authorization:
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid Authorization header, expected 'Bearer <token>'",
+            )
+        token_value = token
+    elif x_api_key:
+        token_value = x_api_key.strip() or None
+
+    if not token_value:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing Authorization header",
+            detail="Missing Authorization or X-API-Key header",
         )
 
-    scheme, _, token = authorization.partition(" ")
-    if scheme.lower() != "bearer" or not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Authorization header, expected 'Bearer <token>'",
-        )
-
-    return _decode_token(token)
+    return _decode_token(token_value)

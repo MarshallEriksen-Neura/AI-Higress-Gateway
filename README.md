@@ -211,10 +211,16 @@ Common settings:
 | `LLM_PROVIDER_{id}_BASE_URL`       | Provider API base URL                                                                               | required                    |
 | `LLM_PROVIDER_{id}_API_KEY`        | API key / token for this provider                                                                   | required                    |
 | `LLM_PROVIDER_{id}_MODELS_PATH`    | Path for listing models (relative to `BASE_URL`)                                                    | `/v1/models`                |
+| `LLM_PROVIDER_{id}_MESSAGES_PATH`  | Preferred Claude Messages path; set empty to force `/v1/messages` requests to fallback to `/v1/chat/completions` | `/v1/message`               |
 | `LLM_PROVIDER_{id}_WEIGHT`         | Base routing weight used by the scheduler                                                           | `1.0`                       |
 | `LLM_PROVIDER_{id}_REGION`         | Optional region label such as `global` or `us-east`                                                 | `None`                      |
 | `LLM_PROVIDER_{id}_MAX_QPS`        | Provider-level QPS limit                                                                            | `None`                      |
 | `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES` | Comma-separated HTTP status codes or ranges (e.g. `429,500,502-504`) treated as retryable. When unset, built-in defaults apply for `openai`, `gemini`, and `claude/anthropic` (`[429,500,502,503,504]`); otherwise a generic rule of 429 and 5xx is used. | `None` (fall back to defaults) |
+
+> Providers that do not expose Anthropic-style `/v1/message(s)` endpoints should leave
+> `LLM_PROVIDER_{id}_MESSAGES_PATH` empty. The gateway will automatically convert
+> Claude payloads into OpenAI Chat Completions when clients call `/v1/messages` and
+> adapt the upstream response back into Claude format.
 
 ---
 

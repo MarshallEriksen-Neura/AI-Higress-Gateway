@@ -210,10 +210,15 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 | `LLM_PROVIDER_{id}_BASE_URL`    | 提供商 API 基础地址                                                 | 必填                      |
 | `LLM_PROVIDER_{id}_API_KEY`     | 访问该提供商的密钥或 token                                           | 必填                      |
 | `LLM_PROVIDER_{id}_MODELS_PATH` | 模型列表路径，通常为 `/v1/models`                                   | `/v1/models`              |
+| `LLM_PROVIDER_{id}_MESSAGES_PATH` | Claude Messages 端点路径，留空表示不支持并直接回退到 `/v1/chat/completions` | `/v1/message`             |
 | `LLM_PROVIDER_{id}_WEIGHT`      | 路由基础权重（影响流量分配）                                         | `1.0`                     |
 | `LLM_PROVIDER_{id}_REGION`      | 区域标签，如 `global`、`us-east`                                    | `None`                    |
 | `LLM_PROVIDER_{id}_MAX_QPS`     | 提供商允许的最大 QPS                                                | `None`                    |
 | `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES` | 可重试的 HTTP 状态码列表或区间，例如 `429,500,502-504`。如不配置，则对 `openai` / `gemini` / `claude/anthropic` 使用默认的 `[429,500,502,503,504]` | `None`（按内置默认或通用规则） |
+
+> 如果某个提供商没有原生的 `/v1/message(s)` 接口，可将 `LLM_PROVIDER_{id}_MESSAGES_PATH`
+> 置空。网关会在收到 `/v1/messages` 请求时自动转换为 `/v1/chat/completions`，并把上游
+> OpenAI 风格响应再转换回 Claude 格式。
 
 > 注意：`LLM_PROVIDERS` 中的 id 必须和下面变量中的 `{id}` 一一对应。  
 > 例如：

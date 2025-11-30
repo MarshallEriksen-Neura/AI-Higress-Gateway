@@ -109,6 +109,7 @@ def _load_raw_provider_env(provider_id: str) -> Dict[str, str]:
         "BASE_URL",
         "API_KEY",
         "MODELS_PATH",
+        "MESSAGES_PATH",
         "WEIGHT",
         "REGION",
         "COST_INPUT",
@@ -288,6 +289,9 @@ def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderCon
 
     if "MODELS_PATH" in raw:
         data["models_path"] = raw["MODELS_PATH"]
+    if "MESSAGES_PATH" in raw:
+        value = raw["MESSAGES_PATH"].strip()
+        data["messages_path"] = value or None
 
     # Optional numeric fields with safe parsing.
     if "WEIGHT" in raw:

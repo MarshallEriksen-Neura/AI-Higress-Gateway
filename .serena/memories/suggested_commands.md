@@ -1,0 +1,6 @@
+- Setup env & install: `python -m venv .venv && source .venv/bin/activate && pip install .`
+- Run dev server: `apiproxy` or `uvicorn main:app --reload`
+- Docker stack (app + Redis): `docker-compose up -d` / `docker-compose down`
+- Tests: `pytest` (or target files like `pytest tests/test_chat_greeting.py`)
+- Pre-commit: `pre-commit install` once, then `pre-commit run --all-files`
+- Encode auth token: `uv run scripts/encode_token.py <token>`

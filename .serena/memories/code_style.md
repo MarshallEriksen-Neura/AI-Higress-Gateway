@@ -1,0 +1,3 @@
+- Python 3.12, follow PEP 8 with 4-space indents, `snake_case` for vars/functions, `PascalCase` for classes.
+- Prefer type hints, concise FastAPI endpoints, keep config in `service/settings.py`, dependencies in `service/deps.py`, logging in `service/logging_config.py`.
+- Reuse existing route patterns for auth/context/upstream wiring; mirror code changes in docs/tests.

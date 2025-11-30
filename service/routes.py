@@ -1,8 +1,11 @@
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import json
 import re
 import time
+import uuid
+from dataclasses import dataclass
+from urllib.parse import urlsplit, urlunsplit
 import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -52,6 +55,21 @@ class ModelsResponse(BaseModel):
     data: list[ModelInfo] = Field(default_factory=list)
 
 
+def _apply_upstream_path_override(endpoint: str, override_path: Optional[str]) -> str:
+    """
+    Replace the path portion of an upstream endpoint when an override is required.
+    """
+    if not override_path:
+        return endpoint
+
+    parsed = urlsplit(endpoint)
+    if not parsed.scheme or not parsed.netloc:
+        return endpoint
+
+    normalized = override_path if override_path.startswith("/") else f"/{override_path}"
+    return urlunsplit((parsed.scheme, parsed.netloc, normalized, "", ""))
+
+
 def _build_provider_headers(provider_id: str) -> Dict[str, str]:
     """
     Build headers for calling a concrete provider upstream.
@@ -84,6 +102,674 @@ def _build_provider_headers(provider_id: str) -> Dict[str, str]:
         headers.update(cfg.custom_headers)
 
     return headers
+
+
+@dataclass
+class ClaudeFallbackOutcome:
+    response: Optional[Any] = None
+    retryable: bool = False
+    status_code: Optional[int] = None
+    error_text: Optional[str] = None
+
+
+class ClaudeMessagesFallbackStreamError(Exception):
+    def __init__(
+        self,
+        *,
+        status_code: Optional[int],
+        text: str,
+        retryable: bool,
+    ) -> None:
+        super().__init__(text)
+        self.status_code = status_code
+        self.text = text
+        self.retryable = retryable
+
+
+def _build_chat_completions_fallback_url(endpoint: str) -> Optional[str]:
+    if not endpoint:
+        return None
+    return _apply_upstream_path_override(endpoint, "/v1/chat/completions")
+
+
+def _claude_content_blocks_to_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        segments: list[str] = []
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            block_type = block.get("type")
+            text_value = block.get("text")
+            if isinstance(text_value, str):
+                segments.append(text_value)
+                continue
+            if block_type == "tool_use" and block.get("input") is not None:
+                segments.append(json.dumps(block["input"], ensure_ascii=False))
+            elif block_type == "tool_result" and isinstance(block.get("content"), list):
+                for part in block["content"]:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        segments.append(part["text"])
+        return "\n".join(seg for seg in segments if seg)
+    if content is None:
+        return ""
+    return json.dumps(content, ensure_ascii=False)
+
+
+def _claude_messages_to_openai_chat_payload(
+    payload: Dict[str, Any],
+    *,
+    upstream_model_id: Optional[str],
+) -> Dict[str, Any]:
+    messages: list[Dict[str, Any]] = []
+    system_prompt = payload.get("system")
+    if isinstance(system_prompt, str) and system_prompt.strip():
+        messages.append({"role": "system", "content": system_prompt})
+    elif isinstance(system_prompt, list):
+        joined = "\n".join(str(item) for item in system_prompt if item)
+        if joined:
+            messages.append({"role": "system", "content": joined})
+
+    for msg in payload.get("messages", []):
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role") or "user"
+        content_text = _claude_content_blocks_to_text(msg.get("content"))
+        messages.append({"role": role, "content": content_text})
+
+    if not messages:
+        messages.append({"role": "user", "content": ""})
+
+    converted: Dict[str, Any] = {
+        "model": upstream_model_id or payload.get("model"),
+        "messages": messages,
+    }
+
+    if payload.get("stream") is True:
+        converted["stream"] = True
+
+    for key in ("temperature", "top_p", "frequency_penalty", "presence_penalty"):
+        if payload.get(key) is not None:
+            converted[key] = payload[key]
+
+    stop_sequences = payload.get("stop_sequences") or payload.get("stop")
+    if stop_sequences:
+        converted["stop"] = stop_sequences
+
+    if payload.get("max_tokens") is not None:
+        converted["max_tokens"] = payload["max_tokens"]
+    elif payload.get("max_tokens_to_sample") is not None:
+        converted["max_tokens"] = payload["max_tokens_to_sample"]
+
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict) and metadata.get("user"):
+        converted["user"] = str(metadata["user"])
+
+    return converted
+
+
+def _openai_content_to_claude_segments(content: Any) -> list[Dict[str, Any]]:
+    if isinstance(content, str):
+        return [{"type": "text", "text": content}]
+    if isinstance(content, list):
+        segments: list[Dict[str, Any]] = []
+        for item in content:
+            if not isinstance(item, dict):
+                continue
+            text_value = item.get("text")
+            if isinstance(text_value, str):
+                segments.append({"type": "text", "text": text_value})
+        return segments
+    return []
+
+
+def _openai_usage_to_claude_usage(usage: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(usage, dict):
+        return usage if usage is None else None
+    return {
+        "input_tokens": usage.get("prompt_tokens"),
+        "output_tokens": usage.get("completion_tokens"),
+        "total_tokens": usage.get("total_tokens"),
+    }
+
+
+def _map_openai_finish_reason(finish_reason: Optional[str]) -> Optional[str]:
+    if finish_reason is None:
+        return None
+    mapping = {"stop": "end_turn", "length": "max_tokens"}
+    return mapping.get(finish_reason, finish_reason)
+
+
+def _openai_chat_to_claude_response(
+    openai_payload: Dict[str, Any],
+    *,
+    request_model: Optional[str],
+) -> Dict[str, Any]:
+    response_id = openai_payload.get("id") or f"msg_{uuid.uuid4().hex}"
+    created = openai_payload.get("created") or int(time.time())
+    choices = openai_payload.get("choices")
+    first_choice: Dict[str, Any] = {}
+    if isinstance(choices, list) and choices:
+        candidate = choices[0]
+        if isinstance(candidate, dict):
+            first_choice = candidate
+    message = first_choice.get("message") if isinstance(first_choice.get("message"), dict) else {}
+    segments = _openai_content_to_claude_segments(message.get("content"))
+    if not segments:
+        text_value = message.get("content")
+        if isinstance(text_value, str):
+            segments = [{"type": "text", "text": text_value}]
+        else:
+            segments = [{"type": "text", "text": ""}]
+
+    return {
+        "id": response_id,
+        "type": "message",
+        "role": message.get("role") or "assistant",
+        "model": request_model or openai_payload.get("model"),
+        "content": segments,
+        "stop_reason": _map_openai_finish_reason(first_choice.get("finish_reason")),
+        "stop_sequence": None,
+        "usage": _openai_usage_to_claude_usage(openai_payload.get("usage")),
+        "created": created,
+    }
+
+
+def _should_attempt_claude_messages_fallback(
+    *,
+    api_style: str,
+    upstream_path_override: Optional[str],
+    status_code: Optional[int],
+    response_text: Optional[str],
+) -> bool:
+    if api_style != "claude":
+        return False
+    if not upstream_path_override:
+        return False
+    normalized_path = upstream_path_override.lower()
+    if "message" not in normalized_path:
+        return False
+    if status_code == 404:
+        return True
+    if status_code in (400, 405):
+        text = (response_text or "").lower()
+        markers = ["invalid url", "not found", "/v1/message", "unknown path"]
+        return any(marker in text for marker in markers)
+    return False
+
+
+class OpenAIToClaudeStreamAdapter:
+    def __init__(self, model: Optional[str]) -> None:
+        self.model = model
+        self.message_id = f"msg_{uuid.uuid4().hex}"
+        self.content_block_id = f"{self.message_id}-cb-0"
+        self.buffer = ""
+        self.started = False
+        self.stop_reason: Optional[str] = None
+        self.usage: Optional[Dict[str, Any]] = None
+        self.aggregate_text: str = ""
+
+    def _encode_event(self, event: str, payload: Dict[str, Any]) -> bytes:
+        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode(
+            "utf-8"
+        )
+
+    def _emit_start_events(self) -> list[bytes]:
+        self.started = True
+        message_payload = {
+            "type": "message_start",
+            "message": {
+                "id": self.message_id,
+                "type": "message",
+                "role": "assistant",
+                "model": self.model,
+                "content": [],
+            },
+        }
+        content_block_payload = {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "id": self.content_block_id,
+                "type": "text",
+                "text": "",
+            },
+        }
+        return [
+            self._encode_event("message_start", message_payload),
+            self._encode_event("content_block_start", content_block_payload),
+        ]
+
+    def _extract_text_delta(self, content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if not isinstance(item, dict):
+                    continue
+                text_value = item.get("text")
+                if isinstance(text_value, str):
+                    parts.append(text_value)
+            return "".join(parts)
+        return ""
+
+    def process_chunk(self, chunk: bytes) -> list[bytes]:
+        outputs: list[bytes] = []
+        try:
+            decoded = chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            return outputs
+        self.buffer += decoded
+        while "\n\n" in self.buffer:
+            raw_event, self.buffer = self.buffer.split("\n\n", 1)
+            raw_event = raw_event.strip()
+            if not raw_event.startswith("data:"):
+                continue
+            payload_str = raw_event[len("data:") :].strip()
+            if not payload_str:
+                continue
+            if payload_str == "[DONE]":
+                continue
+            try:
+                data = json.loads(payload_str)
+            except json.JSONDecodeError:
+                continue
+            choices = data.get("choices")
+            if not isinstance(choices, list):
+                continue
+            for choice in choices:
+                if not isinstance(choice, dict):
+                    continue
+                delta = choice.get("delta") or {}
+                text_delta = self._extract_text_delta(delta.get("content"))
+                if text_delta:
+                    if not self.started:
+                        outputs.extend(self._emit_start_events())
+                    self.aggregate_text += text_delta
+                    outputs.append(
+                        self._encode_event(
+                            "content_block_delta",
+                            {
+                                "type": "content_block_delta",
+                                "index": 0,
+                                "delta": {"type": "text_delta", "text": text_delta},
+                            },
+                        )
+                    )
+                finish_reason = choice.get("finish_reason")
+                if isinstance(finish_reason, str):
+                    self.stop_reason = _map_openai_finish_reason(finish_reason)
+            usage = data.get("usage")
+            if isinstance(usage, dict):
+                self.usage = _openai_usage_to_claude_usage(usage)
+        return outputs
+
+    def finalize(self) -> list[bytes]:
+        outputs: list[bytes] = []
+        if not self.started:
+            outputs.extend(self._emit_start_events())
+        outputs.append(
+            self._encode_event("content_block_stop", {"type": "content_block_stop", "index": 0})
+        )
+        outputs.append(
+            self._encode_event(
+                "message_delta",
+                {
+                    "type": "message_delta",
+                    "delta": {
+                        "stop_reason": self.stop_reason or "end_turn",
+                        "stop_sequence": None,
+                    },
+                    "usage": self.usage,
+                },
+            )
+        )
+        outputs.append(
+            self._encode_event(
+                "message_stop",
+                {
+                    "type": "message_stop",
+                    "message": {
+                        "id": self.message_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "model": self.model,
+                        "content": [
+                            {"type": "text", "text": self.aggregate_text},
+                        ],
+                    },
+                },
+            )
+        )
+        return outputs
+
+
+async def _send_claude_fallback_non_stream(
+    *,
+    client: httpx.AsyncClient,
+    headers: Dict[str, str],
+    provider_id: str,
+    model_id: str,
+    payload: Dict[str, Any],
+    fallback_url: Optional[str],
+    redis,
+    x_session_id: Optional[str],
+    bind_session,
+) -> ClaudeFallbackOutcome:
+    if not fallback_url:
+        return ClaudeFallbackOutcome(
+            response=None,
+            retryable=False,
+            status_code=None,
+            error_text="Claude fallback URL unavailable",
+        )
+    logger.info(
+        "claude_fallback: retrying via chat.completions (provider=%s model=%s url=%s)",
+        provider_id,
+        model_id,
+        fallback_url,
+    )
+    fallback_payload = _claude_messages_to_openai_chat_payload(
+        payload, upstream_model_id=model_id
+    )
+    try:
+        response = await client.post(fallback_url, headers=headers, json=fallback_payload)
+    except httpx.HTTPError as exc:
+        return ClaudeFallbackOutcome(
+            response=None, retryable=True, status_code=None, error_text=str(exc)
+        )
+
+    text = response.text
+    status_code = response.status_code
+
+    if status_code >= 400:
+        return ClaudeFallbackOutcome(
+            response=None,
+            retryable=_is_retryable_upstream_status(provider_id, status_code),
+            status_code=status_code,
+            error_text=text,
+        )
+
+    await bind_session(provider_id, model_id)
+    await save_context(redis, x_session_id, payload, text)
+
+    try:
+        payload_json = response.json()
+    except ValueError:
+        payload_json = None
+
+    if not isinstance(payload_json, dict):
+        return ClaudeFallbackOutcome(
+            response=JSONResponse(content={"raw": text}, status_code=status_code)
+        )
+
+    claude_payload = _openai_chat_to_claude_response(
+        payload_json, request_model=payload.get("model") or model_id
+    )
+    return ClaudeFallbackOutcome(
+        response=JSONResponse(content=claude_payload, status_code=status_code)
+    )
+
+
+async def _claude_streaming_fallback_iterator(
+    *,
+    client: httpx.AsyncClient,
+    headers: Dict[str, str],
+    provider_id: str,
+    model_id: str,
+    fallback_url: Optional[str],
+    payload: Dict[str, Any],
+    redis,
+    session_id: Optional[str],
+    bind_session_cb,
+) -> AsyncIterator[bytes]:
+    if not fallback_url:
+        raise ClaudeMessagesFallbackStreamError(
+            status_code=None, text="Claude fallback URL unavailable", retryable=False
+        )
+    logger.info(
+        "claude_fallback: streaming via chat.completions (provider=%s model=%s url=%s)",
+        provider_id,
+        model_id,
+        fallback_url,
+    )
+    fallback_payload = _claude_messages_to_openai_chat_payload(
+        payload, upstream_model_id=model_id
+    )
+    adapter = OpenAIToClaudeStreamAdapter(payload.get("model") or model_id)
+    first_chunk = True
+    try:
+        async for chunk in stream_upstream(
+            client=client,
+            method="POST",
+            url=fallback_url,
+            headers=headers,
+            json_body=fallback_payload,
+            redis=redis,
+            session_id=session_id,
+        ):
+            if first_chunk:
+                first_chunk = False
+                await bind_session_cb(provider_id, model_id)
+            for converted in adapter.process_chunk(chunk):
+                yield converted
+    except UpstreamStreamError as err:
+        raise ClaudeMessagesFallbackStreamError(
+            status_code=err.status_code,
+            text=err.text,
+            retryable=_is_retryable_upstream_status(provider_id, err.status_code),
+        ) from err
+
+    for tail in adapter.finalize():
+        yield tail
+
+
+def _inline_data_to_data_url(inline: Any) -> Optional[str]:
+    if not isinstance(inline, dict):
+        return None
+    data = inline.get("data")
+    mime = inline.get("mimeType") or "application/octet-stream"
+    if isinstance(data, str) and data:
+        return f"data:{mime};base64,{data}"
+    return None
+
+
+def _convert_gemini_content_to_segments(content: Any) -> list[Dict[str, Any]]:
+    segments: list[Dict[str, Any]] = []
+
+    def _walk(item: Any) -> None:
+        if isinstance(item, dict):
+            inline_url = _inline_data_to_data_url(item.get("inlineData"))
+            if inline_url:
+                segments.append({"type": "image_url", "image_url": {"url": inline_url}})
+            text_val = item.get("text")
+            if isinstance(text_val, str):
+                segments.append({"type": "text", "text": text_val})
+            parts = item.get("parts")
+            if isinstance(parts, list):
+                for part in parts:
+                    _walk(part)
+        elif isinstance(item, list):
+            for sub in item:
+                _walk(sub)
+        elif isinstance(item, str):
+            segments.append({"type": "text", "text": item})
+
+    _walk(content)
+    return segments
+
+
+def _segments_to_plain_text(segments: list[Dict[str, Any]]) -> str:
+    texts: list[str] = []
+    for seg in segments:
+        if seg.get("type") == "text":
+            text_val = seg.get("text")
+            if isinstance(text_val, str):
+                texts.append(text_val)
+    return "".join(texts)
+
+
+def _convert_gemini_usage_to_openai(source: Dict[str, Any]) -> Dict[str, Any]:
+    usage = source.get("usageMetadata") or {}
+    if not isinstance(usage, dict):
+        return {}
+    mapped = {
+        "prompt_tokens": usage.get("promptTokenCount") or usage.get("promptTokens"),
+        "completion_tokens": usage.get("candidatesTokenCount")
+        or usage.get("completionTokens"),
+        "total_tokens": usage.get("totalTokenCount") or usage.get("totalTokens"),
+    }
+    return {k: v for k, v in mapped.items() if v is not None}
+
+
+def _build_openai_completion_from_gemini(
+    payload: Dict[str, Any],
+    model: Optional[str],
+) -> Dict[str, Any]:
+    response_id = payload.get("id") or _ensure_response_id(None)
+    created_ts = int(time.time())
+    create_time = payload.get("createTime") or payload.get("created")
+    if isinstance(create_time, (int, float)):
+        created_ts = int(create_time)
+    choices: list[Dict[str, Any]] = []
+    candidates = payload.get("candidates") or []
+    if isinstance(candidates, list):
+        for idx, cand in enumerate(candidates):
+            if not isinstance(cand, dict):
+                continue
+            content = cand.get("content")
+            segments = _convert_gemini_content_to_segments(content)
+            has_non_text = any(seg.get("type") != "text" for seg in segments)
+            if has_non_text and segments:
+                message_content: Any = segments
+            else:
+                message_content = _segments_to_plain_text(segments)
+            finish_reason = cand.get("finishReason")
+            if isinstance(finish_reason, str):
+                finish_reason = finish_reason.lower()
+            choices.append(
+                {
+                    "index": idx,
+                    "message": {"role": "assistant", "content": message_content},
+                    "finish_reason": finish_reason or "stop",
+                }
+            )
+    completion = {
+        "id": response_id,
+        "object": "chat.completion",
+        "created": created_ts or int(time.time()),
+        "model": model,
+        "choices": choices,
+        "usage": _convert_gemini_usage_to_openai(payload),
+    }
+    return completion
+
+
+class GeminiToOpenAIStreamAdapter:
+    def __init__(self, model: Optional[str]) -> None:
+        self.model = model
+        self.response_id = _ensure_response_id(None)
+        self.created = int(time.time())
+        self.buffer = ""
+        self.done = False
+        self.index_to_text: Dict[int, str] = {}
+
+    def _build_chunk_payload(
+        self,
+        *,
+        index: int,
+        text_delta: Optional[str] = None,
+        finish_reason: Optional[str] = None,
+        segments: Optional[list[Dict[str, Any]]] = None,
+    ) -> Dict[str, Any]:
+        choice: Dict[str, Any] = {
+            "index": index,
+        }
+        new_delta: Dict[str, Any] = {}
+        if segments is not None:
+            new_delta["content"] = segments
+        elif text_delta:
+            new_delta["content"] = text_delta
+        choice["delta"] = new_delta
+        if new_delta:
+            choice["delta"] = new_delta
+        if finish_reason:
+            choice["finish_reason"] = finish_reason
+        return {
+            "id": self.response_id,
+            "object": "chat.completion.chunk",
+            "created": self.created,
+            "model": self.model,
+            "choices": [choice],
+        }
+
+    def process_chunk(self, chunk: bytes) -> list[bytes]:
+        outputs: list[bytes] = []
+        try:
+            decoded = chunk.decode("utf-8")
+        except UnicodeDecodeError:
+            return outputs
+        self.buffer += decoded
+        while "\n\n" in self.buffer:
+            raw_event, self.buffer = self.buffer.split("\n\n", 1)
+            raw_event = raw_event.strip()
+            if not raw_event.startswith("data:"):
+                continue
+            payload_str = raw_event[len("data:") :].strip()
+            if not payload_str:
+                continue
+            if payload_str == "[DONE]":
+                outputs.append(b"data: [DONE]\n\n")
+                self.done = True
+                continue
+            try:
+                data = json.loads(payload_str)
+            except json.JSONDecodeError:
+                continue
+            candidates = data.get("candidates") or []
+            if not isinstance(candidates, list):
+                continue
+            for idx, cand in enumerate(candidates):
+                if not isinstance(cand, dict):
+                    continue
+                content = cand.get("content")
+                segments = _convert_gemini_content_to_segments(content)
+                has_non_text = any(seg.get("type") != "text" for seg in segments)
+                if has_non_text and segments:
+                    outputs.append(
+                        _encode_sse_payload(
+                            self._build_chunk_payload(index=idx, segments=segments)
+                        )
+                    )
+                else:
+                    text_delta = _segments_to_plain_text(segments)
+                    if text_delta:
+                        existing = self.index_to_text.get(idx, "")
+                        self.index_to_text[idx] = existing + text_delta
+                        outputs.append(
+                            _encode_sse_payload(
+                                self._build_chunk_payload(index=idx, text_delta=text_delta)
+                            )
+                        )
+                finish_reason = cand.get("finishReason")
+                if isinstance(finish_reason, str):
+                    outputs.append(
+                        _encode_sse_payload(
+                            self._build_chunk_payload(
+                                index=idx,
+                                text_delta="",
+                                finish_reason=finish_reason.lower(),
+                            )
+                        )
+                    )
+        return outputs
+
+    def finalize(self) -> list[bytes]:
+        if self.done:
+            return []
+        return [b"data: [DONE]\n\n"]
 
 
 async def _load_metrics_for_candidates(
@@ -254,14 +940,6 @@ async def _build_dynamic_logical_model_for_group(
     candidate_upstreams: list[PhysicalModel] = []
     now = time.time()
 
-    # Precompute common upstream path for chat based on API style.
-    if api_style == "claude":
-        upstream_path = "/v1/messages"
-    elif api_style == "responses":
-        upstream_path = "/v1/responses"
-    else:
-        upstream_path = "/v1/chat/completions"
-
     for cfg in providers:
         try:
             items = await ensure_provider_models_cached(client, redis, cfg)
@@ -306,7 +984,14 @@ async def _build_dynamic_logical_model_for_group(
         if matched_full_id is None:
             continue
 
-        endpoint = f"{str(cfg.base_url).rstrip('/')}{upstream_path}"
+        if api_style == "claude":
+            relative_path = getattr(cfg, "messages_path", None) or "/v1/message"
+        elif api_style == "responses":
+            relative_path = "/v1/responses"
+        else:
+            relative_path = "/v1/chat/completions"
+
+        endpoint = f"{str(cfg.base_url).rstrip('/')}{relative_path}"
         base_weight = getattr(cfg, "weight", 1.0) or 1.0
 
         candidate_upstreams.append(
@@ -921,6 +1606,8 @@ def create_app() -> FastAPI:
         payload = dict(raw_body)  # shallow copy
         api_style_override = payload.pop("_apiproxy_api_style", None)
         skip_normalization = bool(payload.pop("_apiproxy_skip_normalize", False))
+        messages_path_override = payload.pop("_apiproxy_messages_path", None)
+        fallback_path_override = payload.pop("_apiproxy_fallback_path", "/v1/chat/completions")
 
         # First normalize payload based on model/provider conventions
         # (e.g. Gemini-style `input` -> OpenAI-style `messages`).
@@ -1108,10 +1795,65 @@ def create_app() -> FastAPI:
                 last_error_text: Optional[str] = None
 
                 for cand in ordered_candidates:
-                    url = cand.upstream.endpoint
+                    base_endpoint = cand.upstream.endpoint
+                    url = base_endpoint
                     provider_id = cand.upstream.provider_id
                     model_id = cand.upstream.model_id
                     headers = _build_provider_headers(provider_id)
+                    provider_cfg = get_provider_config(provider_id)
+                    if provider_cfg is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=f"Provider '{provider_id}' is not configured",
+                        )
+                    fallback_path = fallback_path_override or "/v1/chat/completions"
+                    fallback_url = (
+                        _apply_upstream_path_override(base_endpoint, fallback_path)
+                        if fallback_path
+                        else None
+                    )
+
+                    preferred_messages_path: Optional[str] = None
+                    if api_style == "claude":
+                        preferred_messages_path = messages_path_override
+                        if preferred_messages_path is None:
+                            preferred_messages_path = provider_cfg.messages_path
+                        if preferred_messages_path:
+                            url = _apply_upstream_path_override(
+                                url, preferred_messages_path
+                            )
+                        else:
+                            outcome = await _send_claude_fallback_non_stream(
+                                client=client,
+                                headers=headers,
+                                provider_id=provider_id,
+                                model_id=model_id,
+                                payload=payload,
+                                fallback_url=fallback_url or base_endpoint,
+                                redis=redis,
+                                x_session_id=x_session_id,
+                                bind_session=_bind_session_for_upstream,
+                            )
+                            if outcome.response is not None:
+                                return outcome.response
+                            last_status = outcome.status_code
+                            last_error_text = outcome.error_text
+                            if outcome.retryable:
+                                continue
+                            detail = outcome.error_text or (
+                                f"Upstream error {outcome.status_code or '?'}"
+                            )
+                            logger.warning(
+                                "Claude fallback non-streaming failed for provider=%s model=%s: %s",
+                                provider_id,
+                                model_id,
+                                detail,
+                            )
+                            await save_context(redis, x_session_id, payload, detail)
+                            raise HTTPException(
+                                status_code=status.HTTP_502_BAD_GATEWAY,
+                                detail=detail,
+                            )
 
                     logger.info(
                         "chat_completions: sending non-streaming request to "
@@ -1154,6 +1896,44 @@ def create_app() -> FastAPI:
                         len(text or ""),
                     )
 
+                    if _should_attempt_claude_messages_fallback(
+                        api_style=api_style,
+                        upstream_path_override=preferred_messages_path,
+                        status_code=status_code,
+                        response_text=text,
+                    ):
+                        outcome = await _send_claude_fallback_non_stream(
+                            client=client,
+                            headers=headers,
+                            provider_id=provider_id,
+                            model_id=model_id,
+                            payload=payload,
+                            fallback_url=fallback_url or base_endpoint,
+                            redis=redis,
+                            x_session_id=x_session_id,
+                            bind_session=_bind_session_for_upstream,
+                        )
+                        if outcome.response is not None:
+                            return outcome.response
+                        last_status = outcome.status_code
+                        last_error_text = outcome.error_text
+                        if outcome.retryable:
+                            continue
+                        detail = outcome.error_text or (
+                            f"Upstream error {outcome.status_code or '?'}"
+                        )
+                        logger.warning(
+                            "Claude fallback non-streaming failed for provider=%s model=%s: %s",
+                            provider_id,
+                            model_id,
+                            detail,
+                        )
+                        await save_context(redis, x_session_id, payload, detail)
+                        raise HTTPException(
+                            status_code=status.HTTP_502_BAD_GATEWAY,
+                            detail=detail,
+                        )
+
                     if status_code >= 400 and _is_retryable_upstream_status(
                         provider_id, status_code
                     ):
@@ -1193,8 +1973,30 @@ def create_app() -> FastAPI:
                             detail=f"Upstream error {status_code}: {text}",
                         )
 
+                    converted_payload: Any
+                    try:
+                        converted_payload = r.json()
+                    except ValueError:
+                        converted_payload = None
+
+                    if (
+                        api_style == "openai"
+                        and _GEMINI_MODEL_REGEX.search(model_id or "")
+                        and isinstance(converted_payload, dict)
+                        and converted_payload.get("candidates") is not None
+                    ):
+                        converted_payload = _build_openai_completion_from_gemini(
+                            converted_payload, payload.get("model") or model_id
+                        )
+
+                    if converted_payload is not None:
+                        return JSONResponse(
+                            content=converted_payload,
+                            status_code=status_code,
+                        )
+
                     return JSONResponse(
-                        content=r.json(),
+                        content={"raw": text},
                         status_code=status_code,
                     )
 
@@ -1226,11 +2028,54 @@ def create_app() -> FastAPI:
                 last_error_text: Optional[str] = None
 
                 for idx, cand in enumerate(ordered_candidates):
-                    url = cand.upstream.endpoint
+                    base_endpoint = cand.upstream.endpoint
+                    url = base_endpoint
                     provider_id = cand.upstream.provider_id
                     model_id = cand.upstream.model_id
                     headers = _build_provider_headers(provider_id)
+                    provider_cfg = get_provider_config(provider_id)
+                    if provider_cfg is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                            detail=f"Provider '{provider_id}' is not configured",
+                        )
                     is_last = idx == len(ordered_candidates) - 1
+                    fallback_path = fallback_path_override or "/v1/chat/completions"
+                    fallback_url = (
+                        _apply_upstream_path_override(base_endpoint, fallback_path)
+                        if fallback_path
+                        else None
+                    )
+                    preferred_messages_path: Optional[str] = None
+                    if api_style == "claude":
+                        preferred_messages_path = messages_path_override
+                        if preferred_messages_path is None:
+                            preferred_messages_path = provider_cfg.messages_path
+                        if preferred_messages_path:
+                            url = _apply_upstream_path_override(
+                                url, preferred_messages_path
+                            )
+                        else:
+                            async for chunk in _claude_streaming_fallback_iterator(
+                                client=client,
+                                headers=headers,
+                                provider_id=provider_id,
+                                model_id=model_id,
+                                fallback_url=fallback_url or base_endpoint,
+                                payload=payload,
+                                redis=redis,
+                                session_id=x_session_id,
+                                bind_session_cb=_bind_session_for_upstream,
+                            ):
+                                yield chunk
+                            return
+                    stream_adapter: Optional[GeminiToOpenAIStreamAdapter] = None
+                    if api_style == "openai" and _GEMINI_MODEL_REGEX.search(
+                        model_id or ""
+                    ):
+                        stream_adapter = GeminiToOpenAIStreamAdapter(
+                            payload.get("model") or model_id
+                        )
 
                     logger.info(
                         "chat_completions: starting streaming request to "
@@ -1267,7 +2112,12 @@ def create_app() -> FastAPI:
                                     provider_id,
                                     model_id,
                                 )
-                            yield chunk
+                            if stream_adapter:
+                                converted = stream_adapter.process_chunk(chunk)
+                                for item in converted:
+                                    yield item
+                            else:
+                                yield chunk
 
                         # Stream finished successfully, stop iterating.
                         logger.info(
@@ -1276,6 +2126,9 @@ def create_app() -> FastAPI:
                             provider_id,
                             model_id,
                         )
+                        if stream_adapter:
+                            for tail in stream_adapter.finalize():
+                                yield tail
                         return
                     except UpstreamStreamError as err:
                         last_status = err.status_code
@@ -1283,6 +2136,31 @@ def create_app() -> FastAPI:
                         retryable = _is_retryable_upstream_status(
                             provider_id, err.status_code
                         )
+
+                        if _should_attempt_claude_messages_fallback(
+                            api_style=api_style,
+                            upstream_path_override=preferred_messages_path,
+                            status_code=err.status_code,
+                            response_text=err.text,
+                        ):
+                            try:
+                                async for chunk in _claude_streaming_fallback_iterator(
+                                    client=client,
+                                    headers=headers,
+                                    provider_id=provider_id,
+                                    model_id=model_id,
+                                    fallback_url=fallback_url or base_endpoint,
+                                    payload=payload,
+                                    redis=redis,
+                                    session_id=x_session_id,
+                                    bind_session_cb=_bind_session_for_upstream,
+                                ):
+                                    yield chunk
+                                return
+                            except ClaudeMessagesFallbackStreamError as fallback_err:
+                                last_status = fallback_err.status_code
+                                last_error_text = fallback_err.text
+                                retryable = fallback_err.retryable
 
                         logger.warning(
                             "Upstream streaming error for %s "
@@ -1405,6 +2283,34 @@ def create_app() -> FastAPI:
                 headers=headers,
             )
         return base_response
+
+    @app.post(
+        "/v1/messages",
+        dependencies=[Depends(require_api_key)],
+    )
+    async def claude_messages_endpoint(
+        request: Request,
+        client: httpx.AsyncClient = Depends(get_http_client),
+        redis=Depends(get_redis),
+        x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
+        raw_body: Dict[str, Any] = Body(...),
+    ):
+        """
+        Claude/Anthropic Messages API 兼容端点，向上游的 /v1/message 转发。
+        """
+        forward_body = dict(raw_body)
+        forward_body["_apiproxy_api_style"] = "claude"
+        forward_body["_apiproxy_skip_normalize"] = True
+        forward_body["_apiproxy_messages_path"] = "/v1/message"
+        forward_body["_apiproxy_fallback_path"] = "/v1/chat/completions"
+
+        return await chat_completions(
+            request=request,
+            client=client,
+            redis=redis,
+            x_session_id=x_session_id,
+            raw_body=forward_body,
+        )
 
     @app.get(
         "/context/{session_id}",

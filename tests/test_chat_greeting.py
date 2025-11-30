@@ -1,3 +1,4 @@
+import base64
 import json
 import sys
 import time
@@ -14,6 +15,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from service.deps import get_http_client, get_redis  # noqa: E402
+from service.settings import settings  # noqa: E402
 from service.models import LogicalModel, ModelCapability, PhysicalModel, ProviderConfig  # noqa: E402
 from service.routes import create_app  # noqa: E402
 from service.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE  # noqa: E402
@@ -178,6 +180,36 @@ def _mock_send(request: httpx.Request) -> httpx.Response:
         }
         return httpx.Response(200, json=response_payload)
 
+    if path.endswith("/v1/message") and request.method == "POST":
+        body = json.loads(request.content.decode("utf-8"))
+        user_segments: list[str] = []
+        for item in body.get("messages", []):
+            if not isinstance(item, dict):
+                continue
+            if item.get("role") != "user":
+                continue
+            content = item.get("content")
+            if isinstance(content, list):
+                for part in content:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        user_segments.append(part["text"])
+            elif isinstance(content, str):
+                user_segments.append(content)
+        reply_text = (
+            f"Claude 模式响应: {user_segments[-1]}" if user_segments else "Claude 模式响应"
+        )
+        claude_payload = {
+            "id": "msg-test",
+            "type": "message",
+            "role": "assistant",
+            "model": body.get("model"),
+            "content": [{"type": "text", "text": reply_text}],
+            "stop_reason": "end_turn",
+            "stop_sequence": None,
+            "usage": {"input_tokens": 12, "output_tokens": 6},
+        }
+        return httpx.Response(200, json=claude_payload)
+
     # Default: return 404 to highlight unexpected calls.
     return httpx.Response(404, json={"error": "unexpected mock path", "path": path})
 
@@ -253,6 +285,164 @@ def _mock_send_responses_stream(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"error": "unexpected mock path", "path": path})
 
 
+def _mock_send_claude_message_missing(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    if path.endswith("/v1/message") and request.method == "POST":
+        return httpx.Response(
+            404,
+            json={
+                "error": {
+                    "message": "Invalid URL (POST /v1/message)",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    return _mock_send(request)
+
+
+def _mock_send_claude_stream_fallback(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+    if path.endswith("/v1/message") and request.method == "POST":
+        return httpx.Response(
+            404,
+            json={
+                "error": {
+                    "message": "Invalid URL (POST /v1/message)",
+                    "type": "invalid_request_error",
+                }
+            },
+        )
+    if path.endswith("/v1/chat/completions") and request.method == "POST":
+        body = "".join(
+            (
+                "data: {\"id\":\"cmpl-stream\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Claude Fallback \",\"role\":\"assistant\"},\"index\":0}]}\n\n",
+                "data: {\"id\":\"cmpl-stream\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"delta\":{\"content\":\"Stream\"},\"index\":0,\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":6,\"total_tokens\":11}}\n\n",
+                "data: [DONE]\n\n",
+            )
+        )
+        return httpx.Response(
+            200,
+            content=body.encode("utf-8"),
+            headers={"content-type": "text/event-stream"},
+        )
+    return _mock_send(request)
+
+
+def _mock_send_gemini_non_stream(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+
+    if path.endswith("/v1/models") and request.method == "GET":
+        data = {
+            "object": "list",
+            "data": [
+                {"id": "gemini-3-pro", "object": "model"},
+            ],
+        }
+        return httpx.Response(200, json=data)
+
+    if path.endswith("/v1/chat/completions") and request.method == "POST":
+        data = {
+            "id": "gemini-non-stream",
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": "Gemini 非流式返回"},
+                        ]
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 10,
+                "candidatesTokenCount": 5,
+                "totalTokenCount": 15,
+            },
+        }
+        return httpx.Response(200, json=data)
+
+    return httpx.Response(404, json={"error": "unexpected mock path", "path": path})
+
+
+def _mock_send_gemini_stream(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+
+    if path.endswith("/v1/chat/completions") and request.method == "POST":
+        chunk_1 = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": "Gemini 流响应"},
+                        ]
+                    }
+                }
+            ]
+        }
+        chunk_2 = {
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {"text": " 第二段"},
+                        ]
+                    },
+                    "finishReason": "STOP",
+                }
+            ]
+        }
+        body = "".join(
+            f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
+            for chunk in (chunk_1, chunk_2)
+        )
+        body += "data: [DONE]\n\n"
+        return httpx.Response(
+            200,
+            content=body.encode("utf-8"),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    return httpx.Response(404, json={"error": "unexpected mock path", "path": path})
+
+
+def _mock_send_gemini_image(request: httpx.Request) -> httpx.Response:
+    path = request.url.path
+
+    if path.endswith("/v1/models") and request.method == "GET":
+        data = {
+            "object": "list",
+            "data": [
+                {"id": "gemini-2.5-flash-image-preview", "object": "model"},
+            ],
+        }
+        return httpx.Response(200, json=data)
+
+    if path.endswith("/v1/chat/completions") and request.method == "POST":
+        data = {
+            "id": "gemini-image",
+            "candidates": [
+                {
+                    "content": {
+                        "parts": [
+                            {
+                                "inlineData": {
+                                    "mimeType": "image/png",
+                                    "data": base64.b64encode(b"Gemini Inline Image").decode(
+                                        "utf-8"
+                                    ),
+                                }
+                            }
+                        ]
+                    },
+                    "finishReason": "STOP",
+                }
+            ],
+        }
+        return httpx.Response(200, json=data)
+
+    return httpx.Response(404, json={"error": "unexpected mock path", "path": path})
+
+
 async def override_get_redis():
     return fake_redis
 
@@ -272,6 +462,36 @@ async def _override_get_http_client_responses_stream():
         yield client
 
 
+async def _override_get_http_client_claude_missing():
+    transport = httpx.MockTransport(_mock_send_claude_message_missing)
+    async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+        yield client
+
+
+async def _override_get_http_client_claude_stream_fallback():
+    transport = httpx.MockTransport(_mock_send_claude_stream_fallback)
+    async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+        yield client
+
+
+async def _override_get_http_client_gemini_non_stream():
+    transport = httpx.MockTransport(_mock_send_gemini_non_stream)
+    async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+        yield client
+
+
+async def _override_get_http_client_gemini_stream():
+    transport = httpx.MockTransport(_mock_send_gemini_stream)
+    async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+        yield client
+
+
+async def _override_get_http_client_gemini_image():
+    transport = httpx.MockTransport(_mock_send_gemini_image)
+    async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+        yield client
+
+
 def _seed_logical_model() -> None:
     """
     Store a simple LogicalModel for 'test-model' into the fake Redis so
@@ -281,6 +501,11 @@ def _seed_logical_model() -> None:
 
 
 def _prepare_basic_app(monkeypatch):
+    monkeypatch.setattr(settings, "api_auth_token", "timeline", raising=False)
+    monkeypatch.setattr(settings, "mask_as_browser", False, raising=False)
+    monkeypatch.setattr(settings, "mask_user_agent", "pytest-client", raising=False)
+    monkeypatch.setattr(settings, "mask_origin", None, raising=False)
+    monkeypatch.setattr(settings, "mask_referer", None, raising=False)
     # Provide a single mock provider configuration so that the routing
     # layer can build headers for the selected upstream.
     cfg = ProviderConfig(
@@ -288,6 +513,7 @@ def _prepare_basic_app(monkeypatch):
         name="Mock Provider",
         base_url="https://mock.local",
         api_key="sk-test",  # pragma: allowlist secret
+        messages_path="/v1/message",
     )
 
     def _load_provider_configs():
@@ -371,6 +597,28 @@ def test_chat_greeting_returns_reply(monkeypatch):
         assert "你好" in message.get("content", "")
 
 
+def test_chat_greeting_accepts_x_api_key_header(monkeypatch):
+    app = _prepare_basic_app(monkeypatch)
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "test-model",
+            "messages": [
+                {"role": "user", "content": "你好?"},
+            ],
+            "stream": False,
+        }
+        headers = {
+            "X-API-Key": "dGltZWxpbmU=",
+        }
+
+        resp = client.post("/v1/chat/completions", json=payload, headers=headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("object") == "chat.completion"
+
+
 def test_responses_endpoint_adapts_payload(monkeypatch):
     """
     /v1/responses 应兼容 Responses API 风格的 instructions/input 字段，
@@ -409,6 +657,114 @@ def test_responses_endpoint_adapts_payload(monkeypatch):
         text_segments = first_block["content"]
         assert text_segments and text_segments[0]["text"].startswith("你好")
         assert "Responses API" in data.get("output_text", "")
+
+
+def test_messages_endpoint_overrides_upstream_path(monkeypatch):
+    """
+    /v1/messages 应该能透传到上游的 /v1/message，以兼容某些 Anthropic 客户端。
+    """
+    app = _prepare_basic_app(monkeypatch)
+    _seed_named_logical_model("claude-model", endpoint_path="/v1/messages")
+
+    recorded_paths: list[str] = []
+
+    async def _override_get_http_client_with_recorder():
+        def _send(request: httpx.Request) -> httpx.Response:
+            recorded_paths.append(request.url.path)
+            return _mock_send(request)
+
+        transport = httpx.MockTransport(_send)
+        async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+            yield client
+
+    app.dependency_overrides[get_http_client] = _override_get_http_client_with_recorder
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "claude-model",
+            "anthropic_version": "2023-06-01",
+            "max_tokens": 64,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "请用 Claude 风格问好"}],
+                }
+            ],
+        }
+        headers = {
+            "Authorization": "Bearer dGltZWxpbmU=",
+        }
+
+        resp = client.post("/v1/messages", json=payload, headers=headers)
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("type") == "message"
+        assert data.get("role") == "assistant"
+        assert recorded_paths, "mock transport should record upstream calls"
+        assert recorded_paths[-1].endswith(
+            "/v1/message"
+        ), f"expected override to /v1/message, got {recorded_paths[-1]}"
+
+
+def test_claude_messages_fallback_non_stream(monkeypatch):
+    app = _prepare_basic_app(monkeypatch)
+    _seed_named_logical_model("claude-model", endpoint_path="/v1/messages")
+    app.dependency_overrides[get_http_client] = _override_get_http_client_claude_missing
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "claude-model",
+            "anthropic_version": "2023-06-01",
+            "max_tokens": 32,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "Fallback 测试"}],
+                }
+            ],
+        }
+        headers = {
+            "Authorization": "Bearer dGltZWxpbmU=",
+        }
+
+        resp = client.post("/v1/messages", json=payload, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("type") == "message"
+        assert data.get("role") == "assistant"
+        assert data["content"][0]["text"].startswith("你好")
+
+
+def test_claude_messages_streaming_fallback(monkeypatch):
+    app = _prepare_basic_app(monkeypatch)
+    _seed_named_logical_model("claude-model", endpoint_path="/v1/messages")
+    app.dependency_overrides[
+        get_http_client
+    ] = _override_get_http_client_claude_stream_fallback
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "claude-model",
+            "anthropic_version": "2023-06-01",
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [{"type": "text", "text": "流式 fallback"}],
+                }
+            ],
+            "stream": True,
+        }
+        headers = {
+            "Authorization": "Bearer dGltZWxpbmU=",
+            "Accept": "text/event-stream",
+        }
+
+        with client.stream("POST", "/v1/messages", json=payload, headers=headers) as resp:
+            assert resp.status_code == 200
+            body = b"".join(resp.iter_bytes()).decode("utf-8")
+            assert "Claude Fallback" in body
+            assert "event: message_stop" in body
 
 
 def _seed_failover_logical_model() -> None:
@@ -710,3 +1066,97 @@ def test_responses_sync_request_for_gpt_codex(monkeypatch):
         assert (
             "你是一名回归测试助手" in output[0]["content"][0].get("text", "")
         )
+
+
+def test_gemini_non_streaming_converted_to_openai(monkeypatch):
+    app = _prepare_basic_app(monkeypatch)
+    app.dependency_overrides[get_http_client] = _override_get_http_client_gemini_non_stream
+    _seed_named_logical_model("gemini-3-pro")
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gemini-3-pro",
+            "messages": [
+                {"role": "user", "content": "测试 Gemini 非流式"},
+            ],
+        }
+        headers = {"Authorization": "Bearer dGltZWxpbmU="}
+        resp = client.post("/v1/chat/completions", json=payload, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("object") == "chat.completion"
+        assert data["choices"][0]["message"]["content"].startswith("Gemini 非流式")
+
+
+def test_gemini_streaming_converted_to_openai(monkeypatch):
+    app = _prepare_basic_app(monkeypatch)
+    app.dependency_overrides[get_http_client] = _override_get_http_client_gemini_stream
+    _seed_named_logical_model("gemini-3-pro")
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gemini-3-pro",
+            "messages": [
+                {"role": "user", "content": "测试 Gemini 流式"},
+            ],
+            "stream": True,
+        }
+        headers = {
+            "Authorization": "Bearer dGltZWxpbmU=",
+            "Accept": "text/event-stream",
+        }
+        with client.stream("POST", "/v1/chat/completions", json=payload, headers=headers) as resp:
+            assert resp.status_code == 200
+            body = b"".join(resp.iter_bytes()).decode("utf-8")
+            assert "chat.completion.chunk" in body
+            assert "Gemini 流响应" in body
+            assert "data: [DONE]" in body
+
+
+def test_gemini_image_inline_data_converted(monkeypatch):
+    app = _prepare_basic_app(monkeypatch)
+    app.dependency_overrides[get_http_client] = _override_get_http_client_gemini_image
+    _seed_named_logical_model("gemini-2.5-flash-image-preview")
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gemini-2.5-flash-image-preview",
+            "messages": [
+                {"role": "user", "content": "画一张图片"},
+            ],
+        }
+        headers = {"Authorization": "Bearer dGltZWxpbmU="}
+        resp = client.post("/v1/chat/completions", json=payload, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        assert isinstance(content, list)
+        first_segment = content[0]
+        assert first_segment["type"] == "image_url"
+        url = first_segment["image_url"]["url"]
+        assert url.startswith("data:image/png;base64,")
+
+
+def test_gemini_image_saved_to_file(monkeypatch, tmp_path):
+    app = _prepare_basic_app(monkeypatch)
+    app.dependency_overrides[get_http_client] = _override_get_http_client_gemini_image
+    _seed_named_logical_model("gemini-2.5-flash-image-preview")
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gemini-2.5-flash-image-preview",
+            "messages": [
+                {"role": "user", "content": "喜羊羊"},
+            ],
+        }
+        headers = {"Authorization": "Bearer dGltZWxpbmU="}
+        resp = client.post("/v1/chat/completions", json=payload, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+        encoded_url = content[0]["image_url"]["url"]
+        encoded = encoded_url.split(",", 1)[1]
+        image_bytes = base64.b64decode(encoded)
+        out_path = tmp_path / "test.png"
+        out_path.write_bytes(image_bytes)
+        assert out_path.exists()

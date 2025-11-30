@@ -27,6 +27,13 @@ class ProviderConfig(BaseModel):
     models_path: str = Field(
         default="/v1/models", description="Path for listing models"
     )
+    messages_path: Optional[str] = Field(
+        default="/v1/message",
+        description=(
+            "Preferred Claude Messages API path. Set to empty/None when the "
+            "provider only supports chat completions and requires fallback."
+        ),
+    )
     weight: float = Field(
         default=1.0,
         description="Base routing weight used by the scheduler",
