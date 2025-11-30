@@ -86,6 +86,59 @@ async def test_fetch_models_from_provider_uses_static_models():
 
 
 @pytest.mark.asyncio
+async def test_fetch_models_from_provider_falls_back_to_env_static_on_invalid_json(
+    monkeypatch,
+):
+    provider = _make_provider()
+
+    fallback_provider = _make_provider(
+        static_models=[{"id": "env-manual-1", "context_length": 1234}]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/v1/models")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/json"},
+            content=b"<html>not json</html>",
+        )
+
+    monkeypatch.setattr(
+        "service.provider.discovery.get_provider_config",
+        lambda provider_id: fallback_provider if provider_id == provider.id else None,
+    )
+
+    transport = httpx.MockTransport(handler)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        models: List[Model] = await fetch_models_from_provider(client, provider)
+
+    assert [m.model_id for m in models] == ["env-manual-1"]
+    assert [m.context_length for m in models] == [1234]
+
+
+@pytest.mark.asyncio
+async def test_fetch_models_from_provider_raises_when_no_fallback(monkeypatch):
+    provider = _make_provider()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/v1/models")
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "application/json"},
+            content=b"*invalid-json*",
+        )
+
+    monkeypatch.setattr("service.provider.discovery.get_provider_config", lambda _: None)
+
+    transport = httpx.MockTransport(handler)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        with pytest.raises(ValueError):
+            await fetch_models_from_provider(client, provider)
+
+
+@pytest.mark.asyncio
 async def test_ensure_provider_models_cached_uses_redis_cache():
     provider = _make_provider()
     redis = DummyRedis()

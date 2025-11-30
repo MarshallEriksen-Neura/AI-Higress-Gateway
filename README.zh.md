@@ -22,6 +22,7 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 - **请求格式适配器**  
   - 自动将不同的请求格式转换为统一的 OpenAI 风格的 `messages` 结构。
   - 支持 Gemini 风格的 `input`、Claude 风格的请求以及 OpenAI Responses API (`/v1/responses`)。
+  - 当客户端直接访问 `/v1/responses` 时，请求会以 Responses 原生格式贯穿全链路：路由层会将流量转发至上游的 `/v1/responses` 端点，使得仅支持 Responses API 的模型（例如 `gpt-5.1-codex`）无需额外适配即可调用。
   - 处理带前缀的模型名称（例如 `my-provider/some-model`），以简化路由逻辑。
 
 - **会话粘性**  
@@ -246,6 +247,13 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
   - 多提供商智能路由与跨厂商故障转移。
 - `POST /v1/responses`：OpenAI Responses API 兼容端点，自动将 `instructions`/`input` 映射到 `messages`，并复用上述路由/流式能力。
 - `GET /context/{session_id}`：查询指定会话的历史上下文（需要认证）。
+
+### 如何使用 `/v1/responses`
+
+- 当客户端直接调用 `/v1/responses` 时，APIProxy 会在内部标记该请求，使路由层选择上游的 `/v1/responses` 端点，而不是 `/v1/chat/completions`，从而保持 Responses 原生格式。
+- 若使用动态模型发现，只要入口是 `/v1/responses` 就会自动沿用；若你自己在 Redis 中维护逻辑模型，请把对应 `PhysicalModel.endpoint` 配置为提供商的 `/v1/responses` URL，以满足只支持 Responses API 的上游。
+- 流式调用会透传 `response.*` SSE 事件，便于官方 SDK 正常解析；如果仍需 OpenAI Chat 式的 chunk，可以继续访问 `/v1/chat/completions`。
+- 像 `gpt-5.1-codex` 这类已经拒绝 `/v1/chat/completions` 的新模型，必须通过 `/v1/responses` 才能成功调用。
 
 ### 多提供商管理与路由接口
 

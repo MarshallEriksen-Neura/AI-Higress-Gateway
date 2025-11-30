@@ -257,6 +257,8 @@ async def _build_dynamic_logical_model_for_group(
     # Precompute common upstream path for chat based on API style.
     if api_style == "claude":
         upstream_path = "/v1/messages"
+    elif api_style == "responses":
+        upstream_path = "/v1/responses"
     else:
         upstream_path = "/v1/chat/completions"
 
@@ -592,8 +594,45 @@ def _build_completed_event_payload(
         "metadata": {},
     }
     return {
+        "id": rid,
         "type": "response.completed",
         "response": response_body,
+    }
+
+
+def _build_created_event_payload(
+    response_id: Optional[str],
+    model: Optional[str],
+    created: Optional[int],
+) -> Dict[str, Any]:
+    rid = _ensure_response_id(response_id)
+    created_ts = created or int(time.time())
+    response_body = {
+        "id": rid,
+        "object": "response",
+        "created": created_ts,
+        "model": model,
+        "status": "in_progress",
+        "output": [],
+        "metadata": {},
+    }
+    return {
+        "id": rid,
+        "type": "response.created",
+        "response": response_body,
+    }
+
+
+def _build_output_done_event_payload(
+    response_id: Optional[str],
+    output_index: int,
+) -> Dict[str, Any]:
+    rid = _ensure_response_id(response_id)
+    return {
+        "id": rid,
+        "type": "response.output_text.done",
+        "response_id": rid,
+        "output_index": output_index,
     }
 
 
@@ -609,7 +648,45 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
         model: Optional[str] = None
         created: Optional[int] = None
         usage: Optional[Dict[str, Any]] = None
+        created_emitted = False
         completed_emitted = False
+        done_indices: set[int] = set()
+
+        def _get_or_create_response_id() -> str:
+            nonlocal response_id
+            rid = _ensure_response_id(response_id)
+            response_id = rid
+            return rid
+
+        def _maybe_emit_created_event() -> Optional[bytes]:
+            nonlocal created_emitted
+            if created_emitted:
+                return None
+            rid = _get_or_create_response_id()
+            created_payload = _build_created_event_payload(
+                rid,
+                model,
+                created,
+            )
+            created_emitted = True
+            return _encode_sse_payload(created_payload)
+
+        def _emit_output_done(idx: int) -> Optional[bytes]:
+            if idx in done_indices:
+                return None
+            rid = _get_or_create_response_id()
+            done_indices.add(idx)
+            return _encode_sse_payload(
+                _build_output_done_event_payload(rid, idx)
+            )
+
+        def _flush_all_output_done_events() -> list[bytes]:
+            payloads: list[bytes] = []
+            for idx in sorted(index_to_text):
+                payload = _emit_output_done(idx)
+                if payload:
+                    payloads.append(payload)
+            return payloads
 
         async for chunk in chat_response.body_iterator:
             try:
@@ -628,6 +705,12 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
                     continue
 
                 if payload_str == "[DONE]":
+                    if not created_emitted:
+                        created_payload = _maybe_emit_created_event()
+                        if created_payload:
+                            yield created_payload
+                    for payload in _flush_all_output_done_events():
+                        yield payload
                     if not completed_emitted:
                         completed = _build_completed_event_payload(
                             response_id,
@@ -649,7 +732,8 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
                 if data.get("object") != "chat.completion.chunk":
                     continue
 
-                response_id = response_id or data.get("id")
+                if isinstance(data.get("id"), str):
+                    response_id = response_id or data["id"]
                 model = model or data.get("model")
                 created = created or data.get("created")
                 if data.get("usage"):
@@ -665,15 +749,29 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
                     if text_delta:
                         existing = index_to_text.get(idx, "")
                         index_to_text[idx] = existing + text_delta
+                        created_payload = _maybe_emit_created_event()
+                        if created_payload:
+                            yield created_payload
+                        rid = _get_or_create_response_id()
                         yield _encode_sse_payload(
                             {
+                                "id": rid,
                                 "type": "response.output_text.delta",
-                                "index": idx,
+                                "response_id": rid,
+                                "output_index": idx,
                                 "delta": text_delta,
                             }
                         )
 
+                    if choice.get("finish_reason"):
+                        done_payload = _emit_output_done(idx)
+                        if done_payload:
+                            yield done_payload
                     if choice.get("finish_reason") and not completed_emitted:
+                        if not created_emitted:
+                            created_payload = _maybe_emit_created_event()
+                            if created_payload:
+                                yield created_payload
                         completed = _build_completed_event_payload(
                             response_id,
                             model,
@@ -686,6 +784,12 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
 
         # Safety net: emit completion even if upstream stream ended abruptly.
         if not completed_emitted:
+            if not created_emitted:
+                created_payload = _maybe_emit_created_event()
+                if created_payload:
+                    yield created_payload
+            for payload in _flush_all_output_done_events():
+                yield payload
             completed = _build_completed_event_payload(
                 response_id,
                 model,
@@ -815,10 +919,13 @@ def create_app() -> FastAPI:
         )
 
         payload = dict(raw_body)  # shallow copy
+        api_style_override = payload.pop("_apiproxy_api_style", None)
+        skip_normalization = bool(payload.pop("_apiproxy_skip_normalize", False))
 
         # First normalize payload based on model/provider conventions
         # (e.g. Gemini-style `input` -> OpenAI-style `messages`).
-        payload = _normalize_payload_by_model(payload)
+        if not skip_normalization:
+            payload = _normalize_payload_by_model(payload)
 
         # 自动感应是否需要流式：
         # 1. 显式 payload.stream = True
@@ -837,7 +944,7 @@ def create_app() -> FastAPI:
         if stream and payload_stream_raw is None:
             payload["stream"] = True
 
-        api_style = detect_request_format(payload)
+        api_style = api_style_override or detect_request_format(payload)
         requested_model = payload.get("model")
         normalized_model = _strip_model_group_prefix(requested_model)
         lookup_model_id = normalized_model or requested_model
@@ -1258,23 +1365,31 @@ def create_app() -> FastAPI:
         raw_body: Dict[str, Any] = Body(...),
     ):
         """
-        OpenAI Responses API compatibility endpoint.
-
-        It adapts Responses-style payloads into OpenAI Chat Completions
-        format and reuses the same routing/streaming logic.
+        OpenAI Responses API 兼容端点，默认以 Responses 形态透传到上游。
         """
-        adapted_payload = _adapt_responses_payload(raw_body)
+        passthrough_payload = dict(raw_body)
+        passthrough_payload["_apiproxy_api_style"] = "responses"
+        passthrough_payload["_apiproxy_skip_normalize"] = True
+        passthrough = True
+        forward_body = (
+            passthrough_payload if passthrough else _adapt_responses_payload(raw_body)
+        )
+
         base_response = await chat_completions(
             request=request,
             client=client,
             redis=redis,
             x_session_id=x_session_id,
-            raw_body=adapted_payload,
+            raw_body=forward_body,
         )
         if isinstance(base_response, StreamingResponse):
+            if passthrough:
+                return base_response
             return _wrap_chat_stream_response(base_response)
 
         if isinstance(base_response, JSONResponse):
+            if passthrough:
+                return base_response
             try:
                 payload_bytes = base_response.body
                 chat_payload = json.loads(payload_bytes.decode("utf-8"))

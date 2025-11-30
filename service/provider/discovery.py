@@ -21,6 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 
 from service.logging_config import logger
 from service.models import Model, ModelCapability, ProviderConfig
+from service.provider.config import get_provider_config
 from service.storage.redis_service import get_provider_models_json, set_provider_models
 
 
@@ -99,6 +100,35 @@ def _normalise_single_model(
     )
 
 
+def _fallback_to_static_models(
+    provider: ProviderConfig, error: Exception
+) -> List[Dict[str, Any]]:
+    """
+    Try to use statically configured models when remote discovery fails.
+    """
+    fallback = provider.static_models
+    if fallback is None:
+        refreshed = get_provider_config(provider.id)
+        if refreshed is not None:
+            fallback = refreshed.static_models
+
+    if fallback:
+        logger.warning(
+            "Provider %s: failed to load models from upstream (%s); using %d static models",
+            provider.id,
+            error,
+            len(fallback),
+        )
+        return fallback
+
+    logger.error(
+        "Provider %s: models endpoint failed and no static models configured (%s)",
+        provider.id,
+        error,
+    )
+    raise error
+
+
 async def fetch_models_from_provider(
     client: httpx.AsyncClient, provider: ProviderConfig
 ) -> List[Model]:
@@ -128,10 +158,16 @@ async def fetch_models_from_provider(
 
         logger.info("Fetching models from provider %s at %s", provider.id, url)
 
-        resp = await client.get(url, headers=headers)
-        resp.raise_for_status()
-
-        payload = resp.json()
+        try:
+            resp = await client.get(url, headers=headers)
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            payload = _fallback_to_static_models(provider, exc)
+        else:
+            try:
+                payload = resp.json()
+            except ValueError as exc:
+                payload = _fallback_to_static_models(provider, exc)
 
     raw_models: List[Dict[str, Any]] = []
     if isinstance(payload, dict) and "data" in payload and isinstance(

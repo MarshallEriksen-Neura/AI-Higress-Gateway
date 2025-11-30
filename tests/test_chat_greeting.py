@@ -65,6 +65,35 @@ class FakeRedis:
 fake_redis = FakeRedis()
 
 
+def _seed_named_logical_model(
+    logical_id: str,
+    *,
+    endpoint_path: str = "/v1/chat/completions",
+) -> None:
+    logical = LogicalModel(
+        logical_id=logical_id,
+        display_name=f"{logical_id} Display",
+        description=f"Logical model for {logical_id}",
+        capabilities=[ModelCapability.CHAT],
+        upstreams=[
+            PhysicalModel(
+                provider_id="mock",
+                model_id=logical_id,
+                endpoint=f"https://mock.local{endpoint_path}",
+                base_weight=1.0,
+                region="global",
+                max_qps=50,
+                meta_hash=None,
+                updated_at=time.time(),
+            )
+        ],
+        enabled=True,
+        updated_at=time.time(),
+    )
+    key = LOGICAL_MODEL_KEY_TEMPLATE.format(logical_model=logical.logical_id)
+    fake_redis._data[key] = json.dumps(logical.model_dump(), ensure_ascii=False)
+
+
 def _mock_send(request: httpx.Request) -> httpx.Response:
     """
     Mock transport handler that emulates an upstream LLM API for tests.
@@ -104,6 +133,51 @@ def _mock_send(request: httpx.Request) -> httpx.Response:
         }
         return httpx.Response(200, json=data)
 
+    if path.endswith("/v1/responses") and request.method == "POST":
+        body = json.loads(request.content.decode("utf-8"))
+        instructions = body.get("instructions") or ""
+        input_value = body.get("input")
+        user_text = ""
+        if isinstance(input_value, list):
+            segments: list[str] = []
+            for item in input_value:
+                if not isinstance(item, dict):
+                    continue
+                content = item.get("content")
+                if isinstance(content, list):
+                    for part in content:
+                        if isinstance(part, dict) and isinstance(part.get("text"), str):
+                            segments.append(part["text"])
+                elif isinstance(content, str):
+                    segments.append(content)
+            user_text = "".join(segments)
+        elif isinstance(input_value, str):
+            user_text = input_value
+        reply = f"你好！{instructions} - {user_text}".strip(" -")
+        response_payload = {
+            "id": "resp-test",
+            "object": "response",
+            "created": int(time.time()),
+            "model": body.get("model"),
+            "status": "completed",
+            "output": [
+                {
+                    "type": "message",
+                    "id": "resp-test-msg-0",
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": reply}],
+                }
+            ],
+            "output_text": reply,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 8,
+                "total_tokens": 18,
+            },
+            "metadata": body.get("metadata") or {},
+        }
+        return httpx.Response(200, json=response_payload)
+
     # Default: return 404 to highlight unexpected calls.
     return httpx.Response(404, json={"error": "unexpected mock path", "path": path})
 
@@ -111,41 +185,63 @@ def _mock_send(request: httpx.Request) -> httpx.Response:
 def _mock_send_responses_stream(request: httpx.Request) -> httpx.Response:
     path = request.url.path
 
-    if path.endswith("/v1/chat/completions") and request.method == "POST":
-        chunk_1 = {
-            "id": "cmpl-stream",
-            "object": "chat.completion.chunk",
-            "created": 1,
-            "model": "test-model",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"role": "assistant", "content": "你好"},
-                    "finish_reason": None,
-                }
-            ],
+    if path.endswith("/v1/responses") and request.method == "POST":
+        response_id = "resp-stream"
+        created_chunk = {
+            "id": response_id,
+            "type": "response.created",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created": 1,
+                "model": "test-model",
+                "status": "in_progress",
+                "output": [],
+                "metadata": {},
+            },
         }
-        chunk_2 = {
-            "id": "cmpl-stream",
-            "object": "chat.completion.chunk",
-            "created": 1,
-            "model": "test-model",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"content": "，Responses 测试"},
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 5,
-                "completion_tokens": 5,
-                "total_tokens": 10,
+        delta_chunk = {
+            "id": response_id,
+            "type": "response.output_text.delta",
+            "response_id": response_id,
+            "output_index": 0,
+            "delta": "Responses 测试",
+        }
+        output_done_chunk = {
+            "id": response_id,
+            "type": "response.output_text.done",
+            "response_id": response_id,
+            "output_index": 0,
+        }
+        done_chunk = {
+            "id": response_id,
+            "type": "response.completed",
+            "response": {
+                "id": response_id,
+                "object": "response",
+                "created": 1,
+                "model": "test-model",
+                "status": "completed",
+                "output": [
+                    {
+                        "type": "message",
+                        "id": f"{response_id}-msg-0",
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "Responses 测试"}],
+                    }
+                ],
+                "output_text": "Responses 测试",
+                "usage": {
+                    "input_tokens": 5,
+                    "output_tokens": 5,
+                    "total_tokens": 10,
+                },
+                "metadata": {},
             },
         }
         body = "".join(
             f"data: {json.dumps(chunk, ensure_ascii=False)}\n\n"
-            for chunk in (chunk_1, chunk_2)
+            for chunk in (created_chunk, delta_chunk, output_done_chunk, done_chunk)
         )
         body += "data: [DONE]\n\n"
         return httpx.Response(
@@ -181,28 +277,7 @@ def _seed_logical_model() -> None:
     Store a simple LogicalModel for 'test-model' into the fake Redis so
     that /v1/chat/completions can route via the multi-provider layer.
     """
-    logical = LogicalModel(
-        logical_id="test-model",
-        display_name="Test Model",
-        description="Test logical model for greeting",
-        capabilities=[ModelCapability.CHAT],
-        upstreams=[
-            PhysicalModel(
-                provider_id="mock",
-                model_id="test-model",
-                endpoint="https://mock.local/v1/chat/completions",
-                base_weight=1.0,
-                region="global",
-                max_qps=50,
-                meta_hash=None,
-                updated_at=time.time(),
-            )
-        ],
-        enabled=True,
-        updated_at=time.time(),
-    )
-    key = LOGICAL_MODEL_KEY_TEMPLATE.format(logical_model=logical.logical_id)
-    fake_redis._data[key] = json.dumps(logical.model_dump(), ensure_ascii=False)
+    _seed_named_logical_model("test-model")
 
 
 def _prepare_basic_app(monkeypatch):
@@ -299,9 +374,10 @@ def test_chat_greeting_returns_reply(monkeypatch):
 def test_responses_endpoint_adapts_payload(monkeypatch):
     """
     /v1/responses 应兼容 Responses API 风格的 instructions/input 字段，
-    并最终触发与 chat completions 相同的上游请求。
+    并将请求透传到上游 /v1/responses。
     """
     app = _prepare_basic_app(monkeypatch)
+    _seed_named_logical_model("test-model", endpoint_path="/v1/responses")
 
     with TestClient(app=app, base_url="http://test") as client:
         payload = {
@@ -577,6 +653,7 @@ def test_chat_failover_streaming(monkeypatch):
 def test_responses_streaming_rewrites_sse(monkeypatch):
     app = _prepare_basic_app(monkeypatch)
     app.dependency_overrides[get_http_client] = _override_get_http_client_responses_stream
+    _seed_named_logical_model("test-model", endpoint_path="/v1/responses")
 
     with TestClient(app=app, base_url="http://test") as client:
         payload = {
@@ -593,7 +670,43 @@ def test_responses_streaming_rewrites_sse(monkeypatch):
         with client.stream("POST", "/v1/responses", json=payload, headers=headers) as resp:
             assert resp.status_code == 200
             body = b"".join(resp.iter_bytes()).decode("utf-8")
+            assert "response.created" in body
             assert "response.output_text.delta" in body
+            assert "response.output_text.done" in body
             assert "response.completed" in body
+            assert '"response_id":' in body
+            assert '"output_index":' in body
             assert "Responses 测试" in body
             assert "data: [DONE]" in body
+
+
+def test_responses_sync_request_for_gpt_codex(monkeypatch):
+    """
+    使用 gpt-5.1-codex 模型调用 /v1/responses，验证非流式回归。
+    """
+    app = _prepare_basic_app(monkeypatch)
+    _seed_named_logical_model("gpt-5.1-codex", endpoint_path="/v1/responses")
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gpt-5.1-codex",
+            "instructions": "你是一名回归测试助手",
+            "input": "回归测试请求",
+            "stream": False,
+        }
+        headers = {
+            "Authorization": "Bearer dGltZWxpbmU=",
+        }
+
+        resp = client.post("/v1/responses", json=payload, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("status") == "completed"
+        assert "output_text" in data
+        assert "回归测试请求" in data["output_text"]
+        assert "你是一名回归测试助手" in data["output_text"]
+        output = data.get("output") or []
+        assert output and isinstance(output[0].get("content"), list)
+        assert (
+            "你是一名回归测试助手" in output[0]["content"][0].get("text", "")
+        )

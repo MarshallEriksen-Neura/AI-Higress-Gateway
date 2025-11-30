@@ -22,6 +22,7 @@ APIProxy is a FastAPI-based AI gateway that exposes a single, OpenAI-compatible 
 - **Request Format Adapters**  
   - Automatically converts different request formats into a unified OpenAI-style `messages` structure.
   - Supports Gemini-style `input`, Claude-style requests, and the OpenAI Responses API (`/v1/responses`).
+  - When clients call `/v1/responses`, the payload now stays in native Responses shape end-to-end: the router forwards traffic to upstream `/v1/responses` endpoints so models that have dropped `/v1/chat/completions` (e.g. `gpt-5.1-codex`) continue to work without extra adapters.
   - Handles prefixed model names (e.g., `my-provider/some-model`) for simpler routing logic.
 
 - **Session Stickiness**  
@@ -240,6 +241,13 @@ Common settings:
 
 - `GET /context/{session_id}` (auth required)  
   Returns stored conversation history for the given session id.
+
+### Working with `/v1/responses`
+
+- POSTing to `/v1/responses` keeps the request in OpenAI Responses format all the way to the upstream: the gateway tags the payload so the routing layer selects `/v1/responses` endpoints instead of `/v1/chat/completions`.
+- Dynamic routing automatically follows suit when the client used `/v1/responses`; for statically configured logical models, point each `PhysicalModel.endpoint` to the provider's `/v1/responses` URL if the upstream requires it.
+- Streaming calls are forwarded verbatim, so SDKs receive native `response.*` SSE events; `/v1/chat/completions` continues to provide OpenAI chat-style chunks.
+- Use this endpoint for newer OpenAI models such as `gpt-5.1-codex`, which reject `/v1/chat/completions` entirely.
 
 ### Provider and routing endpoints
 
