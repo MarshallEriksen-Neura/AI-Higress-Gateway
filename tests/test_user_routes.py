@@ -142,3 +142,79 @@ def test_update_missing_user_returns_404(client_with_db):
         headers=_auth_headers(),
     )
     assert resp.status_code == 404
+
+
+def test_superuser_can_ban_user_and_revoke_access(client_with_db):
+    client, _ = client_with_db
+
+    create_payload = {
+        "username": "diana",
+        "email": "diana@example.com",
+        "password": "Secret123!",
+    }
+    resp_user = client.post("/users", json=create_payload, headers=_auth_headers())
+    assert resp_user.status_code == 201
+    user_id = resp_user.json()["id"]
+
+    resp_key = client.post(
+        f"/users/{user_id}/api-keys",
+        json={"name": "diana-key", "expiry": "never"},
+        headers=_auth_headers(),
+    )
+    assert resp_key.status_code == 201
+    user_token = resp_key.json()["token"]
+    user_headers = auth_headers(user_token)
+
+    resp_cache = client.put(
+        f"/users/{user_id}",
+        json={"display_name": "Diana"},
+        headers=user_headers,
+    )
+    assert resp_cache.status_code == 200
+
+    ban_resp = client.put(
+        f"/users/{user_id}/status",
+        json={"is_active": False},
+        headers=_auth_headers(),
+    )
+    assert ban_resp.status_code == 200
+    assert ban_resp.json()["is_active"] is False
+
+    resp_after_ban = client.put(
+        f"/users/{user_id}",
+        json={"display_name": "Diana 2"},
+        headers=user_headers,
+    )
+    assert resp_after_ban.status_code == 403
+    assert resp_after_ban.json()["detail"] == "API token owner is inactive"
+
+
+def test_non_superuser_cannot_ban_user(client_with_db):
+    client, session_factory = client_with_db
+
+    target_payload = {
+        "username": "eve",
+        "email": "eve@example.com",
+        "password": "Secret123!",
+    }
+    resp_user = client.post("/users", json=target_payload, headers=_auth_headers())
+    assert resp_user.status_code == 201
+    target_id = resp_user.json()["id"]
+
+    with session_factory() as session:
+        _, _ = seed_user_and_key(
+            session,
+            token_plain="worker",
+            username="worker",
+            email="worker@example.com",
+            is_superuser=False,
+        )
+
+    worker_headers = auth_headers("worker")
+    resp_ban = client.put(
+        f"/users/{target_id}/status",
+        json={"is_active": False},
+        headers=worker_headers,
+    )
+
+    assert resp_ban.status_code == 403

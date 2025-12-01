@@ -17,6 +17,7 @@ class CachedAPIKey(BaseModel):
     id: str
     user_id: str
     user_username: str
+    user_is_active: bool
     user_is_superuser: bool
     name: str
     expires_at: datetime | None = None
@@ -25,11 +26,13 @@ class CachedAPIKey(BaseModel):
 def build_cache_entry(api_key: APIKey) -> CachedAPIKey:
     user = api_key.user
     username = user.username if user is not None else ""
+    is_active = user.is_active if user is not None else False
     is_superuser = user.is_superuser if user is not None else False
     return CachedAPIKey(
         id=str(api_key.id),
         user_id=str(api_key.user_id),
         user_username=username,
+        user_is_active=is_active,
         user_is_superuser=is_superuser,
         name=api_key.name,
         expires_at=api_key.expires_at,

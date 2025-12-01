@@ -83,6 +83,12 @@ async def require_api_key(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="API token expired",
             )
+        if not cached.user_is_active:
+            await invalidate_cached_api_key(redis, key_hash)
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="API token owner is inactive",
+            )
         return _cached_to_authenticated(cached)
 
     api_key = find_api_key_by_hash(db, key_hash)

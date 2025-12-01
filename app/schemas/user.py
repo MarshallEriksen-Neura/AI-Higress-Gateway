@@ -34,6 +34,10 @@ class UserUpdateRequest(BaseModel):
         return self
 
 
+class UserStatusUpdateRequest(BaseModel):
+    is_active: bool
+
+
 class UserResponse(BaseModel):
     id: UUID
     username: str
@@ -48,4 +52,9 @@ class UserResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-__all__ = ["UserCreateRequest", "UserResponse", "UserUpdateRequest"]
+__all__ = [
+    "UserCreateRequest",
+    "UserResponse",
+    "UserStatusUpdateRequest",
+    "UserUpdateRequest",
+]

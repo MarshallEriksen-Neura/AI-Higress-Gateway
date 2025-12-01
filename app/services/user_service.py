@@ -125,6 +125,20 @@ def update_user(session: Session, user: User, payload: UserUpdateRequest) -> Use
     return user
 
 
+def set_user_active(
+    session: Session, user: User, *, is_active: bool
+) -> tuple[User, list[str]]:
+    """Toggle whether a user is active and return related API key hashes."""
+
+    user.is_active = is_active
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+
+    key_hashes = [key.key_hash for key in user.api_keys]
+    return user, key_hashes
+
+
 __all__ = [
     "EmailAlreadyExistsError",
     "UserServiceError",
@@ -132,5 +146,6 @@ __all__ = [
     "create_user",
     "get_user_by_id",
     "hash_user_password",
+    "set_user_active",
     "update_user",
 ]

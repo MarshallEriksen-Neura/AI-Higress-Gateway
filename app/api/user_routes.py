@@ -5,17 +5,24 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, status
 from sqlalchemy.orm import Session
 
-from app.auth import require_api_key
-from app.deps import get_db
-from app.errors import bad_request, not_found
-from app.schemas import UserCreateRequest, UserResponse, UserUpdateRequest
+from app.auth import AuthenticatedAPIKey, require_api_key
+from app.deps import get_db, get_redis
+from app.errors import bad_request, forbidden, not_found
+from app.schemas import (
+    UserCreateRequest,
+    UserResponse,
+    UserStatusUpdateRequest,
+    UserUpdateRequest,
+)
 from app.services.user_service import (
     EmailAlreadyExistsError,
     UsernameAlreadyExistsError,
     create_user,
     get_user_by_id,
+    set_user_active,
     update_user,
 )
+from app.services.api_key_cache import invalidate_cached_api_key
 
 router = APIRouter(
     tags=["users"],
@@ -55,6 +62,34 @@ def update_user_endpoint(
         updated = update_user(db, user, payload)
     except EmailAlreadyExistsError:
         raise bad_request("邮箱已被使用")
+    return UserResponse.model_validate(updated)
+
+
+async def _invalidate_user_api_keys(redis, key_hashes: list[str]) -> None:
+    for key_hash in key_hashes:
+        await invalidate_cached_api_key(redis, key_hash)
+
+
+@router.put("/users/{user_id}/status", response_model=UserResponse)
+async def update_user_status_endpoint(
+    user_id: UUID,
+    payload: UserStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    redis=Depends(get_redis),
+    current_key: AuthenticatedAPIKey = Depends(require_api_key),
+) -> UserResponse:
+    """Allow superusers to禁用/恢复用户，立即撤销其 API 密钥缓存。"""
+
+    if not current_key.is_superuser:
+        raise forbidden("只有超级管理员可以封禁用户")
+
+    user = get_user_by_id(db, user_id)
+    if user is None:
+        raise not_found(f"User {user_id} not found")
+
+    updated, key_hashes = set_user_active(db, user, is_active=payload.is_active)
+    await _invalidate_user_api_keys(redis, key_hashes)
+
     return UserResponse.model_validate(updated)
 
 

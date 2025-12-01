@@ -19,7 +19,12 @@ from .provider import Provider, ProviderAPIKey, ProviderConfig, ProviderStatus
 from .routing_metrics import MetricsHistory, RoutingMetrics
 from .scheduling import SchedulingStrategy
 from .session import Session
-from .user import UserCreateRequest, UserResponse, UserUpdateRequest
+from .user import (
+    UserCreateRequest,
+    UserResponse,
+    UserStatusUpdateRequest,
+    UserUpdateRequest,
+)
 
 __all__ = [
     "APIKeyCreateRequest",
@@ -41,5 +46,6 @@ __all__ = [
     "Session",
     "UserCreateRequest",
     "UserResponse",
+    "UserStatusUpdateRequest",
     "UserUpdateRequest",
 ]
