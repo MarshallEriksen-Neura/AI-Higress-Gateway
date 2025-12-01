@@ -2,6 +2,7 @@ import httpx
 import pytest
 
 from service.models import ProviderConfig, ProviderStatus
+from service.provider.key_pool import reset_key_pool
 from service.provider.health import HealthStatus, check_provider_health
 
 
@@ -13,6 +14,13 @@ def _make_provider() -> ProviderConfig:
         api_key="sk-test",  # pragma: allowlist secret
         models_path="/v1/models",
     )
+
+
+@pytest.fixture(autouse=True)
+def _reset_keys():
+    reset_key_pool()
+    yield
+    reset_key_pool()
 
 
 @pytest.mark.asyncio
@@ -63,4 +71,3 @@ async def test_check_provider_health_client_error_marks_degraded():
 
     assert status.status == ProviderStatus.DEGRADED
     assert status.error_message is not None
-

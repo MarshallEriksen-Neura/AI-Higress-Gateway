@@ -8,6 +8,7 @@ from service.provider.discovery import (
     ensure_provider_models_cached,
     fetch_models_from_provider,
 )
+from service.provider.key_pool import reset_key_pool
 
 
 class DummyRedis:
@@ -35,6 +36,13 @@ def _make_provider(**overrides: Any) -> ProviderConfig:
     }
     data.update(overrides)
     return ProviderConfig(**data)
+
+
+@pytest.fixture(autouse=True)
+def _reset_key_pool():
+    reset_key_pool()
+    yield
+    reset_key_pool()
 
 
 @pytest.mark.asyncio

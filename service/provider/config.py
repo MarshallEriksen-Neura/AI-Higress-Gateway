@@ -10,7 +10,8 @@ the convention documented in specs/001-model-routing/research.md:
     LLM_PROVIDER_openai_API_KEY=...
     ...
 
-Only providers with all required fields (NAME, BASE_URL, API_KEY) are
+Only providers with all required fields (NAME, BASE_URL, and at least one
+API key via API_KEY/API_KEYS/API_KEYS_JSON) are
 returned. Misconfigured providers are skipped with a warning so that a
 single bad configuration does not break the entire gateway.
 """
@@ -25,11 +26,11 @@ from typing import Any, Dict, List, Optional
 from pydantic import ValidationError
 
 from service.logging_config import logger
-from service.models import ProviderConfig
+from service.models import ProviderAPIKey, ProviderConfig
 from service.settings import settings
 
 
-REQUIRED_SUFFIXES = ("NAME", "BASE_URL", "API_KEY")
+REQUIRED_SUFFIXES = ("NAME", "BASE_URL")
 
 # Default retryable HTTP status codes for well-known providers, based on
 # their public error semantics (rate limit + transient server errors).
@@ -107,7 +108,10 @@ def _load_raw_provider_env(provider_id: str) -> Dict[str, str]:
     for suffix in [
         "NAME",
         "BASE_URL",
+        "TRANSPORT",
         "API_KEY",
+        "API_KEYS",
+        "API_KEYS_JSON",
         "MODELS_PATH",
         "MESSAGES_PATH",
         "WEIGHT",
@@ -284,8 +288,66 @@ def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderCon
         "id": provider_id,
         "name": raw["NAME"],
         "base_url": raw["BASE_URL"],
-        "api_key": raw["API_KEY"],
     }
+
+    transport = raw.get("TRANSPORT", "http").lower()
+    if transport not in ("http", "sdk"):
+        logger.warning(
+            "Provider %s: invalid TRANSPORT=%r, falling back to http",
+            provider_id,
+            raw.get("TRANSPORT"),
+        )
+        transport = "http"
+    data["transport"] = transport
+
+    api_keys: List[ProviderAPIKey] | None = None
+    if "API_KEYS_JSON" in raw:
+        try:
+            payload = json.loads(raw["API_KEYS_JSON"])
+            if isinstance(payload, list):
+                api_keys = []
+                for entry in payload:
+                    if isinstance(entry, dict):
+                        api_keys.append(ProviderAPIKey(**entry))
+                    elif isinstance(entry, str):
+                        api_keys.append(ProviderAPIKey(key=entry))
+                    else:
+                        logger.warning(
+                            "Provider %s: skipping invalid API_KEYS_JSON entry %r",
+                            provider_id,
+                            entry,
+                        )
+            else:
+                logger.warning(
+                    "Provider %s: API_KEYS_JSON must be a list of objects, got %r",
+                    provider_id,
+                    type(payload),
+                )
+        except (json.JSONDecodeError, ValidationError) as exc:
+            logger.warning(
+                "Provider %s: invalid API_KEYS_JSON payload: %s", provider_id, exc
+            )
+    elif "API_KEYS" in raw:
+        items = [item.strip() for item in raw["API_KEYS"].split(",") if item.strip()]
+        if items:
+            api_keys = [
+                ProviderAPIKey(key=value, label=f"key{idx + 1}")
+                for idx, value in enumerate(items)
+            ]
+
+    if api_keys:
+        data["api_keys"] = api_keys
+        # Also set the legacy single-key field for compatibility paths.
+        data["api_key"] = api_keys[0].key
+    elif "API_KEY" in raw:
+        data["api_key"] = raw["API_KEY"]
+    else:
+        logger.warning(
+            "Skipping provider %s because no API key was configured "
+            "(API_KEY / API_KEYS / API_KEYS_JSON)",
+            provider_id,
+        )
+        return None
 
     if "MODELS_PATH" in raw:
         data["models_path"] = raw["MODELS_PATH"]

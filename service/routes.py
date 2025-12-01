@@ -31,7 +31,15 @@ from service.models import (
     SchedulingStrategy,
     Session,
 )
+from service.provider import google_sdk
 from service.provider.config import get_provider_config, load_provider_configs
+from service.provider.key_pool import (
+    NoAvailableProviderKey,
+    SelectedProviderKey,
+    acquire_provider_key,
+    record_key_failure,
+    record_key_success,
+)
 from service.provider.discovery import ensure_provider_models_cached
 from service.routing.mapper import select_candidate_upstreams
 from service.routing.scheduler import CandidateScore, choose_upstream
@@ -70,22 +78,18 @@ def _apply_upstream_path_override(endpoint: str, override_path: Optional[str]) -
     return urlunsplit((parsed.scheme, parsed.netloc, normalized, "", ""))
 
 
-def _build_provider_headers(provider_id: str) -> Dict[str, str]:
+async def _build_provider_headers(
+    provider_cfg: ProviderConfig, redis
+) -> tuple[Dict[str, str], SelectedProviderKey]:
     """
     Build headers for calling a concrete provider upstream.
 
     This reuses the browser-mimic settings (User-Agent / Origin / Referer)
-    but replaces the Authorization header with the provider-specific API key.
+    but replaces the Authorization header with a selected provider-specific API key.
     """
-    cfg = get_provider_config(provider_id)
-    if cfg is None:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Provider '{provider_id}' is not configured",
-        )
-
+    key_selection = await acquire_provider_key(provider_cfg, redis)
     headers: Dict[str, str] = {
-        "Authorization": f"Bearer {cfg.api_key}",
+        "Authorization": f"Bearer {key_selection.key}",
         "Accept": "application/json",
     }
 
@@ -98,10 +102,10 @@ def _build_provider_headers(provider_id: str) -> Dict[str, str]:
             headers["Referer"] = settings.mask_referer
 
     # Provider-specific extra headers take precedence.
-    if cfg.custom_headers:
-        headers.update(cfg.custom_headers)
+    if provider_cfg.custom_headers:
+        headers.update(provider_cfg.custom_headers)
 
-    return headers
+    return headers, key_selection
 
 
 @dataclass
@@ -984,14 +988,18 @@ async def _build_dynamic_logical_model_for_group(
         if matched_full_id is None:
             continue
 
-        if api_style == "claude":
-            relative_path = getattr(cfg, "messages_path", None) or "/v1/message"
-        elif api_style == "responses":
-            relative_path = "/v1/responses"
+        is_sdk_transport = getattr(cfg, "transport", "http") == "sdk"
+        if is_sdk_transport:
+            endpoint = str(cfg.base_url).rstrip("/")
         else:
-            relative_path = "/v1/chat/completions"
+            if api_style == "claude":
+                relative_path = getattr(cfg, "messages_path", None) or "/v1/message"
+            elif api_style == "responses":
+                relative_path = "/v1/responses"
+            else:
+                relative_path = "/v1/chat/completions"
 
-        endpoint = f"{str(cfg.base_url).rstrip('/')}{relative_path}"
+            endpoint = f"{str(cfg.base_url).rstrip('/')}{relative_path}"
         base_weight = getattr(cfg, "weight", 1.0) or 1.0
 
         candidate_upstreams.append(
@@ -1799,13 +1807,70 @@ def create_app() -> FastAPI:
                     url = base_endpoint
                     provider_id = cand.upstream.provider_id
                     model_id = cand.upstream.model_id
-                    headers = _build_provider_headers(provider_id)
+                    key_selection: Optional[SelectedProviderKey] = None
                     provider_cfg = get_provider_config(provider_id)
                     if provider_cfg is None:
-                        raise HTTPException(
-                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail=f"Provider '{provider_id}' is not configured",
+                        last_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                        last_error_text = f"Provider '{provider_id}' is not configured"
+                        continue
+                    if getattr(provider_cfg, "transport", "http") == "sdk":
+                        try:
+                            key_selection = await acquire_provider_key(
+                                provider_cfg, redis
+                            )
+                        except NoAvailableProviderKey as exc:
+                            last_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                            last_error_text = str(exc)
+                            continue
+
+                        try:
+                            sdk_payload = await google_sdk.generate_content(
+                                api_key=key_selection.key,
+                                model_id=model_id,
+                                payload=payload,
+                                base_url=str(provider_cfg.base_url),
+                            )
+                        except google_sdk.GoogleSDKError as exc:
+                            last_status = None
+                            last_error_text = str(exc)
+                            record_key_failure(
+                                key_selection,
+                                retryable=True,
+                                status_code=None,
+                            )
+                            continue
+
+                        await _bind_session_for_upstream(provider_id, model_id)
+                        await save_context(
+                            redis, x_session_id, payload, json.dumps(sdk_payload)
                         )
+                        record_key_success(key_selection)
+                        converted_payload = sdk_payload
+                        if (
+                            api_style == "openai"
+                            and isinstance(sdk_payload, dict)
+                            and sdk_payload.get("candidates") is not None
+                        ):
+                            converted_payload = _build_openai_completion_from_gemini(
+                                sdk_payload, payload.get("model") or model_id
+                            )
+                        return JSONResponse(
+                            content=converted_payload,
+                            status_code=status.HTTP_200_OK,
+                        )
+                    try:
+                        headers, key_selection = await _build_provider_headers(
+                            provider_cfg, redis
+                        )
+                    except NoAvailableProviderKey as exc:
+                        logger.warning(
+                            "Provider %s has no available API keys: %s",
+                            provider_id,
+                            exc,
+                        )
+                        last_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                        last_error_text = str(exc)
+                        continue
                     fallback_path = fallback_path_override or "/v1/chat/completions"
                     fallback_url = (
                         _apply_upstream_path_override(base_endpoint, fallback_path)
@@ -1835,10 +1900,18 @@ def create_app() -> FastAPI:
                                 bind_session=_bind_session_for_upstream,
                             )
                             if outcome.response is not None:
+                                if key_selection:
+                                    record_key_success(key_selection)
                                 return outcome.response
                             last_status = outcome.status_code
                             last_error_text = outcome.error_text
                             if outcome.retryable:
+                                if key_selection:
+                                    record_key_failure(
+                                        key_selection,
+                                        retryable=True,
+                                        status_code=outcome.status_code,
+                                    )
                                 continue
                             detail = outcome.error_text or (
                                 f"Upstream error {outcome.status_code or '?'}"
@@ -1850,6 +1923,12 @@ def create_app() -> FastAPI:
                                 detail,
                             )
                             await save_context(redis, x_session_id, payload, detail)
+                            if key_selection:
+                                record_key_failure(
+                                    key_selection,
+                                    retryable=False,
+                                    status_code=outcome.status_code,
+                                )
                             raise HTTPException(
                                 status_code=status.HTTP_502_BAD_GATEWAY,
                                 detail=detail,
@@ -1872,6 +1951,10 @@ def create_app() -> FastAPI:
 
                         r = await client.post(url, headers=headers, json=upstream_payload)
                     except httpx.HTTPError as exc:
+                        if key_selection:
+                            record_key_failure(
+                                key_selection, retryable=True, status_code=None
+                            )
                         logger.warning(
                             "Upstream non-streaming request error for %s "
                             "(provider=%s, model=%s): %s; trying next candidate",
@@ -1914,10 +1997,18 @@ def create_app() -> FastAPI:
                             bind_session=_bind_session_for_upstream,
                         )
                         if outcome.response is not None:
+                            if key_selection:
+                                record_key_success(key_selection)
                             return outcome.response
                         last_status = outcome.status_code
                         last_error_text = outcome.error_text
                         if outcome.retryable:
+                            if key_selection:
+                                record_key_failure(
+                                    key_selection,
+                                    retryable=True,
+                                    status_code=outcome.status_code,
+                                )
                             continue
                         detail = outcome.error_text or (
                             f"Upstream error {outcome.status_code or '?'}"
@@ -1929,6 +2020,12 @@ def create_app() -> FastAPI:
                             detail,
                         )
                         await save_context(redis, x_session_id, payload, detail)
+                        if key_selection:
+                            record_key_failure(
+                                key_selection,
+                                retryable=False,
+                                status_code=outcome.status_code,
+                            )
                         raise HTTPException(
                             status_code=status.HTTP_502_BAD_GATEWAY,
                             detail=detail,
@@ -1937,6 +2034,12 @@ def create_app() -> FastAPI:
                     if status_code >= 400 and _is_retryable_upstream_status(
                         provider_id, status_code
                     ):
+                        if key_selection:
+                            record_key_failure(
+                                key_selection,
+                                retryable=True,
+                                status_code=status_code,
+                            )
                         logger.warning(
                             "Upstream non-streaming retryable error %s for %s "
                             "(provider=%s, model=%s); payload=%r; response=%s",
@@ -1958,6 +2061,12 @@ def create_app() -> FastAPI:
                     await save_context(redis, x_session_id, payload, text)
 
                     if status_code >= 400:
+                        if key_selection:
+                            record_key_failure(
+                                key_selection,
+                                retryable=False,
+                                status_code=status_code,
+                            )
                         logger.warning(
                             "Upstream non-streaming non-retryable error %s for %s "
                             "(provider=%s, model=%s); payload=%r; response=%s",
@@ -1973,6 +2082,8 @@ def create_app() -> FastAPI:
                             detail=f"Upstream error {status_code}: {text}",
                         )
 
+                    if key_selection:
+                        record_key_success(key_selection)
                     converted_payload: Any
                     try:
                         converted_payload = r.json()
@@ -2032,13 +2143,63 @@ def create_app() -> FastAPI:
                     url = base_endpoint
                     provider_id = cand.upstream.provider_id
                     model_id = cand.upstream.model_id
-                    headers = _build_provider_headers(provider_id)
+                    key_selection: Optional[SelectedProviderKey] = None
                     provider_cfg = get_provider_config(provider_id)
                     if provider_cfg is None:
-                        raise HTTPException(
-                            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                            detail=f"Provider '{provider_id}' is not configured",
+                        last_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                        last_error_text = f"Provider '{provider_id}' is not configured"
+                        continue
+                    if getattr(provider_cfg, "transport", "http") == "sdk":
+                        try:
+                            key_selection = await acquire_provider_key(
+                                provider_cfg, redis
+                            )
+                        except NoAvailableProviderKey as exc:
+                            last_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                            last_error_text = str(exc)
+                            continue
+
+                        adapter = GeminiToOpenAIStreamAdapter(
+                            payload.get("model") or model_id
                         )
+                        first_chunk_seen = False
+                        try:
+                            async for chunk_dict in google_sdk.stream_content(
+                                api_key=key_selection.key,
+                                model_id=model_id,
+                                payload=payload,
+                                base_url=str(provider_cfg.base_url),
+                            ):
+                                sse_chunk = (
+                                    f"data: {json.dumps(chunk_dict, ensure_ascii=False)}\n\n"
+                                ).encode("utf-8")
+                                converted_chunks = adapter.process_chunk(sse_chunk)
+                                for item in converted_chunks:
+                                    if not first_chunk_seen:
+                                        await _bind_session_for_upstream(
+                                            provider_id, model_id
+                                        )
+                                        first_chunk_seen = True
+                                    yield item
+                            for tail in adapter.finalize():
+                                yield tail
+                            record_key_success(key_selection)
+                            return
+                        except google_sdk.GoogleSDKError as exc:
+                            last_status = None
+                            last_error_text = str(exc)
+                            record_key_failure(
+                                key_selection, retryable=True, status_code=None
+                            )
+                            continue
+                    try:
+                        headers, key_selection = await _build_provider_headers(
+                            provider_cfg, redis
+                        )
+                    except NoAvailableProviderKey as exc:
+                        last_status = status.HTTP_503_SERVICE_UNAVAILABLE
+                        last_error_text = str(exc)
+                        continue
                     is_last = idx == len(ordered_candidates) - 1
                     fallback_path = fallback_path_override or "/v1/chat/completions"
                     fallback_url = (
@@ -2068,6 +2229,8 @@ def create_app() -> FastAPI:
                                 bind_session_cb=_bind_session_for_upstream,
                             ):
                                 yield chunk
+                            if key_selection:
+                                record_key_success(key_selection)
                             return
                     stream_adapter: Optional[GeminiToOpenAIStreamAdapter] = None
                     if api_style == "openai" and _GEMINI_MODEL_REGEX.search(
@@ -2129,6 +2292,8 @@ def create_app() -> FastAPI:
                         if stream_adapter:
                             for tail in stream_adapter.finalize():
                                 yield tail
+                        if key_selection:
+                            record_key_success(key_selection)
                         return
                     except UpstreamStreamError as err:
                         last_status = err.status_code
@@ -2156,6 +2321,8 @@ def create_app() -> FastAPI:
                                     bind_session_cb=_bind_session_for_upstream,
                                 ):
                                     yield chunk
+                                if key_selection:
+                                    record_key_success(key_selection)
                                 return
                             except ClaudeMessagesFallbackStreamError as fallback_err:
                                 last_status = fallback_err.status_code
@@ -2173,12 +2340,24 @@ def create_app() -> FastAPI:
                         )
 
                         if retryable and not is_last:
+                            if key_selection:
+                                record_key_failure(
+                                    key_selection,
+                                    retryable=True,
+                                    status_code=err.status_code,
+                                )
                             # Try next candidate without sending anything
                             # downstream yet.
                             continue
 
                         # Either not retryable or no more candidates: emit a
                         # final SSE-style error frame and stop.
+                        if key_selection:
+                            record_key_failure(
+                                key_selection,
+                                retryable=retryable,
+                                status_code=err.status_code,
+                            )
                         try:
                             payload_json = json.loads(err.text)
                         except json.JSONDecodeError:

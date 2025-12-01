@@ -94,13 +94,27 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 
    # OpenAI配置
    LLM_PROVIDER_openai_NAME=OpenAI
-   LLM_PROVIDER_openai_BASE_URL=https://api.openai.com/v1
+   LLM_PROVIDER_openai_BASE_URL=https://api.openai.com
+   # 单 key 写法：
    LLM_PROVIDER_openai_API_KEY=你的OpenAI密钥
+   # 可选：多 key 轮询（简写）
+   # LLM_PROVIDER_openai_API_KEYS=key-a,key-b
+   # 可选：多 key 轮询（带权重/限速）
+   # LLM_PROVIDER_openai_API_KEYS_JSON=[{"key":"key-a","weight":2},{"key":"key-b","max_qps":5}]
+   # 也支持字符串数组简写：
+   # LLM_PROVIDER_openai_API_KEYS_JSON=["key-a","key-b"]
 
    # Gemini配置
    LLM_PROVIDER_gemini_NAME=Gemini
-   LLM_PROVIDER_gemini_BASE_URL=https://generativelanguage.googleapis.com/v1
+   LLM_PROVIDER_gemini_BASE_URL=https://generativelanguage.googleapis.com
+   LLM_PROVIDER_gemini_MODELS_PATH=/v1beta/models
    LLM_PROVIDER_gemini_API_KEY=你的Gemini密钥
+
+   # Google 原生 SDK 直连（不会自动拼接 /v1/...）
+   LLM_PROVIDER_google_NAME=Google Native SDK
+   LLM_PROVIDER_google_BASE_URL=https://generativelanguage.googleapis.com
+   LLM_PROVIDER_google_TRANSPORT=sdk
+   LLM_PROVIDER_google_API_KEY=你的Gemini密钥
 
    # Claude配置
    LLM_PROVIDER_claude_NAME=Claude
@@ -208,7 +222,10 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 | `LLM_PROVIDERS`                 | 逗号分隔的提供商 ID 列表，例如 `openai,gemini,claude`               | `None`                    |
 | `LLM_PROVIDER_{id}_NAME`        | 提供商显示名称                                                       | 必填                      |
 | `LLM_PROVIDER_{id}_BASE_URL`    | 提供商 API 基础地址                                                 | 必填                      |
-| `LLM_PROVIDER_{id}_API_KEY`     | 访问该提供商的密钥或 token                                           | 必填                      |
+| `LLM_PROVIDER_{id}_TRANSPORT`   | `http`（默认）通过 HTTP 代理；`sdk` 直接调用官方 SDK（不会自动加 `/v1/...`，如 google-genai） | `http`                    |
+| `LLM_PROVIDER_{id}_API_KEY`     | 访问该提供商的密钥或 token（单 key 兼容字段）                       | 必填（未用多 key 时）     |
+| `LLM_PROVIDER_{id}_API_KEYS`    | 多 key 简写，逗号分隔，如 `k1,k2,k3`，默认等权轮询                   | 可选                      |
+| `LLM_PROVIDER_{id}_API_KEYS_JSON` | 多 key 详细配置，JSON 数组，每项可设置 `weight`、`max_qps`、`label` | 可选                      |
 | `LLM_PROVIDER_{id}_MODELS_PATH` | 模型列表路径，通常为 `/v1/models`                                   | `/v1/models`              |
 | `LLM_PROVIDER_{id}_MESSAGES_PATH` | Claude Messages 端点路径，留空表示不支持并直接回退到 `/v1/chat/completions` | `/v1/message`             |
 | `LLM_PROVIDER_{id}_WEIGHT`      | 路由基础权重（影响流量分配）                                         | `1.0`                     |

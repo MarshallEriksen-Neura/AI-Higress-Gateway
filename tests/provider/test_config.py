@@ -109,3 +109,56 @@ def test_provider_config_static_models_file(monkeypatch, tmp_path):
     assert cfg is not None
     assert cfg.static_models is not None
     assert cfg.static_models[0]["id"] == "manual-1"
+
+
+def test_provider_config_supports_comma_separated_keys(monkeypatch):
+    settings.llm_providers_raw = "multi"
+    _set_provider_env(
+        monkeypatch,
+        "multi",
+        NAME="Multi Provider",
+        BASE_URL="https://api.multi.local",
+        API_KEYS="key-a, key-b ,key-c",  # pragma: allowlist secret
+    )
+
+    cfg = get_provider_config("multi")
+    assert cfg is not None
+    keys = cfg.get_api_keys()
+    assert [k.key for k in keys] == ["key-a", "key-b", "key-c"]
+    # Legacy field is set for compatibility.
+    assert cfg.api_key == "key-a"  # pragma: allowlist secret
+
+
+def test_provider_config_supports_api_keys_json(monkeypatch):
+    settings.llm_providers_raw = "json"
+    _set_provider_env(
+        monkeypatch,
+        "json",
+        NAME="JSON Provider",
+        BASE_URL="https://api.json.local",
+        API_KEYS_JSON='[{"key":"k1","weight":2},{"key":"k2","max_qps":5,"label":"backup"}]',  # pragma: allowlist secret
+    )
+
+    cfg = get_provider_config("json")
+    assert cfg is not None
+    keys = cfg.get_api_keys()
+    assert len(keys) == 2
+    assert keys[0].weight == 2
+    assert keys[1].max_qps == 5
+    assert keys[1].label == "backup"
+
+
+def test_provider_config_supports_api_keys_json_string_list(monkeypatch):
+    settings.llm_providers_raw = "jsonlist"
+    _set_provider_env(
+        monkeypatch,
+        "jsonlist",
+        NAME="JSON List Provider",
+        BASE_URL="https://api.json.local",
+        API_KEYS_JSON='["k1","k2"]',  # pragma: allowlist secret
+    )
+
+    cfg = get_provider_config("jsonlist")
+    assert cfg is not None
+    keys = cfg.get_api_keys()
+    assert [k.key for k in keys] == ["k1", "k2"]

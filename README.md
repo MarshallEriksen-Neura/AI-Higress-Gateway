@@ -95,13 +95,27 @@ APIProxy provides a robust and flexible solution for managing AI model interacti
 
    # OpenAI configuration
    LLM_PROVIDER_openai_NAME=OpenAI
-   LLM_PROVIDER_openai_BASE_URL=https://api.openai.com/v1
+   LLM_PROVIDER_openai_BASE_URL=https://api.openai.com
+   # Single-key:
    LLM_PROVIDER_openai_API_KEY=your-openai-api-key
+   # Optional: multi-key (comma separated, equal weight)
+   # LLM_PROVIDER_openai_API_KEYS=key-a,key-b
+   # Optional: multi-key with weight/limits
+   # LLM_PROVIDER_openai_API_KEYS_JSON=[{"key":"key-a","weight":2},{"key":"key-b","max_qps":5}]
+   # Also supports JSON string array:
+   # LLM_PROVIDER_openai_API_KEYS_JSON=["key-a","key-b"]
 
    # Gemini configuration
    LLM_PROVIDER_gemini_NAME=Gemini
-   LLM_PROVIDER_gemini_BASE_URL=https://generativelanguage.googleapis.com/v1
+   LLM_PROVIDER_gemini_BASE_URL=https://generativelanguage.googleapis.com
+   LLM_PROVIDER_gemini_MODELS_PATH=/v1beta/models
    LLM_PROVIDER_gemini_API_KEY=your-gemini-api-key
+
+   # Google native SDK (no /v1 prefix auto-append)
+   LLM_PROVIDER_google_NAME=Google Native SDK
+   LLM_PROVIDER_google_BASE_URL=https://generativelanguage.googleapis.com
+   LLM_PROVIDER_google_TRANSPORT=sdk
+   LLM_PROVIDER_google_API_KEY=your-gemini-api-key
 
    # Claude configuration
    LLM_PROVIDER_claude_NAME=Claude
@@ -209,7 +223,10 @@ Common settings:
 | `LLM_PROVIDERS`                    | Comma-separated provider ids, e.g. `openai,gemini,claude`                                           | `None`                      |
 | `LLM_PROVIDER_{id}_NAME`           | Human-readable provider name                                                                        | required                    |
 | `LLM_PROVIDER_{id}_BASE_URL`       | Provider API base URL                                                                               | required                    |
-| `LLM_PROVIDER_{id}_API_KEY`        | API key / token for this provider                                                                   | required                    |
+| `LLM_PROVIDER_{id}_TRANSPORT`      | `http` (default) to proxy via HTTP; `sdk` to call provider-native SDK (e.g. google-genai) without adding `/v1/...` | `http`                      |
+| `LLM_PROVIDER_{id}_API_KEY`        | API key / token for this provider (single-key legacy field)                                         | required if not using multi-key |
+| `LLM_PROVIDER_{id}_API_KEYS`       | Comma-separated multi-key shorthand (equal weights), e.g. `k1,k2,k3`                                | optional                    |
+| `LLM_PROVIDER_{id}_API_KEYS_JSON`  | Multi-key JSON array with `key`, optional `weight`, `max_qps`, `label`                              | optional                    |
 | `LLM_PROVIDER_{id}_MODELS_PATH`    | Path for listing models (relative to `BASE_URL`)                                                    | `/v1/models`                |
 | `LLM_PROVIDER_{id}_MESSAGES_PATH`  | Preferred Claude Messages path; set empty to force `/v1/messages` requests to fallback to `/v1/chat/completions` | `/v1/message`               |
 | `LLM_PROVIDER_{id}_WEIGHT`         | Base routing weight used by the scheduler                                                           | `1.0`                       |

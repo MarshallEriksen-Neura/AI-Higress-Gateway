@@ -10,7 +10,7 @@ them in Redis using the key scheme defined in data-model.md:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import httpx
 
@@ -22,6 +22,13 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 from service.logging_config import logger
 from service.models import Model, ModelCapability, ProviderConfig
 from service.provider.config import get_provider_config
+from service.provider.key_pool import (
+    NoAvailableProviderKey,
+    acquire_provider_key,
+    record_key_failure,
+    record_key_success,
+)
+from service.provider.google_sdk import GoogleSDKError, list_models
 from service.storage.redis_service import get_provider_models_json, set_provider_models
 
 
@@ -130,14 +137,41 @@ def _fallback_to_static_models(
 
 
 async def fetch_models_from_provider(
-    client: httpx.AsyncClient, provider: ProviderConfig
+    client: httpx.AsyncClient,
+    provider: ProviderConfig,
+    redis: Optional[Redis] = None,
 ) -> List[Model]:
     """
     Call a provider's models endpoint and normalise the response.
     """
     payload: Any
+    key_selection = None
 
-    if provider.static_models is not None:
+    if provider.transport == "sdk":
+        try:
+            key_selection = await acquire_provider_key(provider, redis)
+        except NoAvailableProviderKey as exc:
+            raise httpx.HTTPError(str(exc))
+        try:
+            payload = await list_models(
+                api_key=key_selection.key, base_url=str(provider.base_url)
+            )
+        except GoogleSDKError as exc:
+            if key_selection:
+                record_key_failure(key_selection, retryable=True, status_code=None)
+            if provider.static_models is not None:
+                payload = _fallback_to_static_models(provider, exc)
+            else:
+                logger.error(
+                    "Provider %s: models endpoint failed and no static models configured (%s)",
+                    provider.id,
+                    exc,
+                )
+                return []
+        else:
+            if key_selection:
+                record_key_success(key_selection)
+    elif provider.static_models is not None:
         payload = provider.static_models
         logger.info(
             "Using %d static models for provider %s",
@@ -145,12 +179,17 @@ async def fetch_models_from_provider(
             provider.id,
         )
     else:
+        try:
+            key_selection = await acquire_provider_key(provider, redis)
+        except NoAvailableProviderKey as exc:
+            raise httpx.HTTPError(str(exc))
+
         base = str(provider.base_url).rstrip("/")
         path = provider.models_path or "/v1/models"
         url = f"{base}/{path.lstrip('/')}"
 
         headers: Dict[str, str] = {
-            "Authorization": f"Bearer {provider.api_key}",
+            "Authorization": f"Bearer {key_selection.key}",
             "Accept": "application/json",
         }
         if provider.custom_headers:
@@ -161,13 +200,32 @@ async def fetch_models_from_provider(
         try:
             resp = await client.get(url, headers=headers)
             resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if key_selection:
+                record_key_failure(
+                    key_selection,
+                    retryable=True,
+                    status_code=getattr(exc.response, "status_code", None),
+                )
+            payload = _fallback_to_static_models(provider, exc)
         except httpx.HTTPError as exc:
+            if key_selection:
+                record_key_failure(key_selection, retryable=True, status_code=None)
             payload = _fallback_to_static_models(provider, exc)
         else:
             try:
                 payload = resp.json()
             except ValueError as exc:
+                if key_selection:
+                    record_key_failure(
+                        key_selection,
+                        retryable=False,
+                        status_code=getattr(resp, "status_code", None),
+                    )
                 payload = _fallback_to_static_models(provider, exc)
+            else:
+                if key_selection:
+                    record_key_success(key_selection)
 
     raw_models: List[Dict[str, Any]] = []
     if isinstance(payload, dict) and "data" in payload and isinstance(
@@ -200,7 +258,7 @@ async def refresh_provider_models(
     Refresh a single provider's models in Redis.
     Returns the number of models stored.
     """
-    models = await fetch_models_from_provider(client, provider)
+    models = await fetch_models_from_provider(client, provider, redis)
     await set_provider_models(redis, provider.id, models, ttl_seconds=ttl_seconds)
     return len(models)
 

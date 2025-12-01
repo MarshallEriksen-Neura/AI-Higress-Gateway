@@ -81,6 +81,7 @@ async def get_provider_models(
 async def get_provider_health(
     provider_id: str,
     client: httpx.AsyncClient = Depends(get_http_client),
+    redis: Redis = Depends(get_redis),
 ) -> HealthStatus:
     """
     Perform a lightweight health check for the given provider.
@@ -88,7 +89,7 @@ async def get_provider_health(
     cfg = get_provider_config(provider_id)
     if cfg is None:
         raise not_found(f"Provider '{provider_id}' not found")
-    return await check_provider_health(client, cfg)
+    return await check_provider_health(client, cfg, redis)
 
 
 @router.get("/providers/{provider_id}/metrics", response_model=ProviderMetricsResponse)

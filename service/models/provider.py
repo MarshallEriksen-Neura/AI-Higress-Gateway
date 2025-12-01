@@ -1,5 +1,6 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -15,6 +16,28 @@ class ProviderStatus(str, Enum):
     DOWN = "down"
 
 
+class ProviderAPIKey(BaseModel):
+    """
+    A single API key entry for a provider, with optional weight and limits.
+    """
+
+    key: str = Field(..., description="API authentication key or token")
+    weight: float = Field(
+        default=1.0,
+        description="Relative routing weight when the provider has multiple keys",
+        gt=0,
+    )
+    max_qps: Optional[int] = Field(
+        default=None,
+        description="Optional per-key QPS limit; when reached this key is temporarily skipped",
+        gt=0,
+    )
+    label: Optional[str] = Field(
+        default=None,
+        description="Optional label for observability; key material is never logged",
+    )
+
+
 class ProviderConfig(BaseModel):
     """
     Static configuration for a model provider, usually loaded from env.
@@ -23,7 +46,13 @@ class ProviderConfig(BaseModel):
     id: str = Field(..., description="Provider unique identifier (short slug)")
     name: str = Field(..., description="Human readable provider name")
     base_url: HttpUrl = Field(..., description="API base URL")
-    api_key: str = Field(..., description="API authentication key or token")
+    api_key: Optional[str] = Field(
+        None, description="API authentication key or token (legacy single-key field)"
+    )
+    api_keys: Optional[List[ProviderAPIKey]] = Field(
+        default=None,
+        description="Weighted pool of API keys for this provider",
+    )
     models_path: str = Field(
         default="/v1/models", description="Path for listing models"
     )
@@ -67,6 +96,20 @@ class ProviderConfig(BaseModel):
             "model metadata shape (at minimum include an 'id')."
         ),
     )
+    transport: Literal["http", "sdk"] = Field(
+        default="http",
+        description="Transport type: default HTTP proxying or provider-native SDK",
+    )
+
+    def get_api_keys(self) -> List[ProviderAPIKey]:
+        """
+        Return configured API keys, falling back to the legacy single-key field.
+        """
+        if self.api_keys:
+            return list(self.api_keys)
+        if self.api_key:
+            return [ProviderAPIKey(key=self.api_key, label="default")]
+        return []
 
 
 class Provider(ProviderConfig):
@@ -85,4 +128,4 @@ class Provider(ProviderConfig):
     )
 
 
-__all__ = ["ProviderStatus", "ProviderConfig", "Provider"]
+__all__ = ["ProviderStatus", "ProviderAPIKey", "ProviderConfig", "Provider"]

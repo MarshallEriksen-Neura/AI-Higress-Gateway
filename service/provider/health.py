@@ -17,6 +17,16 @@ from pydantic import BaseModel, Field
 
 from service.logging_config import logger
 from service.models import ProviderConfig, ProviderStatus
+from service.provider.key_pool import (
+    NoAvailableProviderKey,
+    acquire_provider_key,
+    record_key_failure,
+    record_key_success,
+)
+try:
+    from redis.asyncio import Redis
+except ModuleNotFoundError:  # pragma: no cover - fallback when redis not installed
+    Redis = object  # type: ignore[misc,assignment]
 
 
 class HealthStatus(BaseModel):
@@ -39,17 +49,31 @@ class HealthStatus(BaseModel):
 
 
 async def check_provider_health(
-    client: httpx.AsyncClient, provider: ProviderConfig
+    client: httpx.AsyncClient,
+    provider: ProviderConfig,
+    redis: Optional[Redis] = None,
 ) -> HealthStatus:
     """
     Perform a lightweight health check by calling the provider's models endpoint.
     """
+    try:
+        selection = await acquire_provider_key(provider, redis)
+    except NoAvailableProviderKey as exc:
+        return HealthStatus(
+            provider_id=provider.id,
+            status=ProviderStatus.DOWN,
+            timestamp=time.time(),
+            response_time_ms=0.0,
+            error_message=str(exc),
+            last_successful_check=None,
+        )
+
     base = str(provider.base_url).rstrip("/")
     path = provider.models_path or "/v1/models"
     url = f"{base}/{path.lstrip('/')}"
 
     headers = {
-        "Authorization": f"Bearer {provider.api_key}",
+        "Authorization": f"Bearer {selection.key}",
         "Accept": "application/json",
     }
     if provider.custom_headers:
@@ -65,18 +89,27 @@ async def check_provider_health(
     try:
         resp = await client.get(url, headers=headers)
         duration_ms = (time.perf_counter() - start) * 1000.0
-        if resp.status_code >= 500:
+        status_code = resp.status_code
+        if status_code >= 500:
             status = ProviderStatus.DOWN
-            error_message = f"HTTP {resp.status_code}"
-        elif resp.status_code >= 400:
+            error_message = f"HTTP {status_code}"
+            record_key_failure(selection, retryable=True, status_code=status_code)
+        elif status_code >= 400:
             status = ProviderStatus.DEGRADED
-            error_message = f"HTTP {resp.status_code}"
+            error_message = f"HTTP {status_code}"
+            record_key_failure(
+                selection,
+                retryable=status_code >= 429,
+                status_code=status_code,
+            )
         else:
             last_success = time.time()
+            record_key_success(selection)
     except httpx.HTTPError as exc:
         duration_ms = (time.perf_counter() - start) * 1000.0
         status = ProviderStatus.DOWN
         error_message = str(exc)
+        record_key_failure(selection, retryable=True, status_code=None)
 
     return HealthStatus(
         provider_id=provider.id,
@@ -89,4 +122,3 @@ async def check_provider_health(
 
 
 __all__ = ["HealthStatus", "check_provider_health"]
-

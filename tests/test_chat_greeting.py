@@ -544,6 +544,70 @@ def _prepare_basic_app(monkeypatch):
     return app
 
 
+def _prepare_sdk_app(monkeypatch, model_id: str = "sdk-gemini"):
+    """
+    Prepare an app wired with a single SDK-transport provider.
+    """
+    monkeypatch.setattr(settings, "api_auth_token", "timeline", raising=False)
+    monkeypatch.setattr(settings, "mask_as_browser", False, raising=False)
+    monkeypatch.setattr(settings, "mask_user_agent", "pytest-client", raising=False)
+    monkeypatch.setattr(settings, "mask_origin", None, raising=False)
+    monkeypatch.setattr(settings, "mask_referer", None, raising=False)
+
+    cfg = ProviderConfig(
+        id="google-sdk",
+        name="Google SDK",
+        base_url="https://generativelanguage.googleapis.com",
+        api_key="sk-google",  # pragma: allowlist secret
+        transport="sdk",
+    )
+
+    def _load_provider_configs():
+        return [cfg]
+
+    def _get_provider_config(provider_id: str):
+        if provider_id == "google-sdk":
+            return cfg
+        return None
+
+    monkeypatch.setattr(
+        "service.provider.config.load_provider_configs", _load_provider_configs
+    )
+    monkeypatch.setattr(
+        "service.provider.config.get_provider_config", _get_provider_config
+    )
+
+    fake_redis._data.clear()
+    logical = LogicalModel(
+        logical_id=model_id,
+        display_name=model_id,
+        description=f"SDK logical model for {model_id}",
+        capabilities=[ModelCapability.CHAT],
+        upstreams=[
+            PhysicalModel(
+                provider_id="google-sdk",
+                model_id=model_id,
+                endpoint="https://google-sdk.local/v1/chat/completions",
+                base_weight=1.0,
+                region=None,
+                max_qps=50,
+                meta_hash=None,
+                updated_at=time.time(),
+            )
+        ],
+        enabled=True,
+        updated_at=time.time(),
+    )
+    key = LOGICAL_MODEL_KEY_TEMPLATE.format(logical_model=logical.logical_id)
+    fake_redis._data[key] = json.dumps(logical.model_dump(), ensure_ascii=False)
+
+    app = create_app()
+    app.dependency_overrides[get_redis] = override_get_redis
+    # HTTP client不会被 SDK 分支真正使用，但依然需要满足 FastAPI 依赖签名。
+    app.dependency_overrides[get_http_client] = override_get_http_client
+    return app
+
+
 def test_models_v1_alias(monkeypatch):
     """
     /v1/models 应该作为 /models 的别名返回相同结构。
@@ -1160,3 +1224,112 @@ def test_gemini_image_saved_to_file(monkeypatch, tmp_path):
         out_path = tmp_path / "test.png"
         out_path.write_bytes(image_bytes)
         assert out_path.exists()
+
+
+def test_sdk_transport_non_stream(monkeypatch):
+    """
+    SDK 厂商不应经过 HTTP 路径拼接，直接走 google-genai 分支。
+    """
+    app = _prepare_sdk_app(monkeypatch, model_id="gemini-sdk-model")
+
+    calls: Dict[str, int] = {}
+
+    async def _fake_generate_content(api_key, model_id, payload, base_url):
+        calls["generate"] = calls.get("generate", 0) + 1
+        assert api_key == "sk-google"  # pragma: allowlist secret
+        assert model_id == "gemini-sdk-model"
+        return {
+            "id": "sdk-response",
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": "SDK 返回"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 1,
+                "candidatesTokenCount": 1,
+                "totalTokenCount": 2,
+            },
+        }
+
+    async def _fake_stream_content(**kwargs):
+        calls["stream"] = calls.get("stream", 0) + 1
+        yield {}
+
+    monkeypatch.setattr(
+        "service.provider.google_sdk.generate_content", _fake_generate_content
+    )
+    monkeypatch.setattr(
+        "service.provider.google_sdk.stream_content", _fake_stream_content
+    )
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gemini-sdk-model",
+            "messages": [{"role": "user", "content": "你好，SDK"}],
+            "stream": False,
+        }
+        headers = {"Authorization": "Bearer dGltZWxpbmU="}
+
+        resp = client.post("/v1/chat/completions", json=payload, headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data.get("object") == "chat.completion"
+        assert data["choices"][0]["message"]["content"].startswith("SDK 返回")
+        assert calls.get("generate") == 1
+        assert calls.get("stream", 0) == 0
+
+
+def test_sdk_transport_streaming(monkeypatch):
+    """
+    SDK 流式路径应通过 google-genai 分支适配为 OpenAI SSE。
+    """
+    app = _prepare_sdk_app(monkeypatch, model_id="gemini-sdk-stream")
+
+    calls: Dict[str, int] = {}
+
+    async def _fake_generate_content(**kwargs):
+        calls["generate"] = calls.get("generate", 0) + 1
+        return {}
+
+    async def _fake_stream_content(api_key, model_id, payload, base_url):
+        calls["stream"] = calls.get("stream", 0) + 1
+        yield {
+            "candidates": [{"content": {"parts": [{"text": "SDK 流片段"}]}}],
+        }
+        yield {
+            "candidates": [
+                {
+                    "content": {"parts": [{"text": " 结束"}]},
+                    "finishReason": "STOP",
+                }
+            ],
+        }
+
+    monkeypatch.setattr(
+        "service.provider.google_sdk.generate_content", _fake_generate_content
+    )
+    monkeypatch.setattr(
+        "service.provider.google_sdk.stream_content", _fake_stream_content
+    )
+
+    with TestClient(app=app, base_url="http://test") as client:
+        payload = {
+            "model": "gemini-sdk-stream",
+            "messages": [{"role": "user", "content": "流式 SDK"}],
+            "stream": True,
+        }
+        headers = {
+            "Authorization": "Bearer dGltZWxpbmU=",
+            "Accept": "text/event-stream",
+        }
+
+        with client.stream(
+            "POST", "/v1/chat/completions", json=payload, headers=headers
+        ) as resp:
+            assert resp.status_code == 200
+            body = b"".join(resp.iter_bytes()).decode("utf-8")
+            assert "SDK 流片段" in body
+            assert "data: [DONE]" in body
+        assert calls.get("stream") == 1

@@ -8,7 +8,7 @@ provider discovery, logical-model mapping and routing components.
 
 from .logical_model import LogicalModel, PhysicalModel
 from .model import Model, ModelCapability
-from .provider import Provider, ProviderConfig, ProviderStatus
+from .provider import Provider, ProviderAPIKey, ProviderConfig, ProviderStatus
 from .routing_metrics import MetricsHistory, RoutingMetrics
 from .scheduling import SchedulingStrategy
 from .session import Session
@@ -20,6 +20,7 @@ __all__ = [
     "ModelCapability",
     "PhysicalModel",
     "Provider",
+    "ProviderAPIKey",
     "ProviderConfig",
     "ProviderStatus",
     "RoutingMetrics",
