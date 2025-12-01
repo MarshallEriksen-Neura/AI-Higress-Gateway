@@ -1,6 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -27,12 +26,12 @@ class ProviderAPIKey(BaseModel):
         description="Relative routing weight when the provider has multiple keys",
         gt=0,
     )
-    max_qps: Optional[int] = Field(
+    max_qps: int | None = Field(
         default=None,
         description="Optional per-key QPS limit; when reached this key is temporarily skipped",
         gt=0,
     )
-    label: Optional[str] = Field(
+    label: str | None = Field(
         default=None,
         description="Optional label for observability; key material is never logged",
     )
@@ -46,17 +45,17 @@ class ProviderConfig(BaseModel):
     id: str = Field(..., description="Provider unique identifier (short slug)")
     name: str = Field(..., description="Human readable provider name")
     base_url: HttpUrl = Field(..., description="API base URL")
-    api_key: Optional[str] = Field(
+    api_key: str | None = Field(
         None, description="API authentication key or token (legacy single-key field)"
     )
-    api_keys: Optional[List[ProviderAPIKey]] = Field(
+    api_keys: list[ProviderAPIKey] | None = Field(
         default=None,
         description="Weighted pool of API keys for this provider",
     )
     models_path: str = Field(
         default="/v1/models", description="Path for listing models"
     )
-    messages_path: Optional[str] = Field(
+    messages_path: str | None = Field(
         default="/v1/message",
         description=(
             "Preferred Claude Messages API path. Set to empty/None when the "
@@ -68,27 +67,27 @@ class ProviderConfig(BaseModel):
         description="Base routing weight used by the scheduler",
         gt=0,
     )
-    region: Optional[str] = Field(None, description="Optional region / label")
-    cost_input: Optional[float] = Field(
+    region: str | None = Field(None, description="Optional region / label")
+    cost_input: float | None = Field(
         None, description="Per-token input price", gt=0
     )
-    cost_output: Optional[float] = Field(
+    cost_output: float | None = Field(
         None, description="Per-token output price", gt=0
     )
-    max_qps: Optional[int] = Field(
+    max_qps: int | None = Field(
         None, description="Provider-level QPS limit", gt=0
     )
-    custom_headers: Optional[Dict[str, str]] = Field(
+    custom_headers: dict[str, str] | None = Field(
         None, description="Extra headers to send to this provider"
     )
-    retryable_status_codes: Optional[List[int]] = Field(
+    retryable_status_codes: list[int] | None = Field(
         default=None,
         description=(
             "HTTP status codes that should be treated as retryable for this "
             "provider (e.g. [429, 500, 502, 503, 504] for OpenAI/Gemini/Claude)."
         ),
     )
-    static_models: Optional[List[Dict[str, Any]]] = Field(
+    static_models: list[dict[str, Any]] | None = Field(
         default=None,
         description=(
             "Optional manual list of models used when the provider does not "
@@ -101,7 +100,7 @@ class ProviderConfig(BaseModel):
         description="Transport type: default HTTP proxying or provider-native SDK",
     )
 
-    def get_api_keys(self) -> List[ProviderAPIKey]:
+    def get_api_keys(self) -> list[ProviderAPIKey]:
         """
         Return configured API keys, falling back to the legacy single-key field.
         """
@@ -120,12 +119,12 @@ class Provider(ProviderConfig):
     status: ProviderStatus = Field(
         default=ProviderStatus.HEALTHY, description="Current provider health state"
     )
-    last_check: Optional[float] = Field(
+    last_check: float | None = Field(
         None, description="Last health-check timestamp (epoch seconds)"
     )
-    metadata: Optional[Dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         None, description="Additional runtime metadata from health checks, etc."
     )
 
 
-__all__ = ["ProviderStatus", "ProviderAPIKey", "ProviderConfig", "Provider"]
+__all__ = ["Provider", "ProviderAPIKey", "ProviderConfig", "ProviderStatus"]

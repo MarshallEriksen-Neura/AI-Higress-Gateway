@@ -8,8 +8,8 @@ provider models as described in specs/001-model-routing/research.md.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Optional, Sequence, Tuple
 
 from app.models import LogicalModel, Model, PhysicalModel
 
@@ -25,11 +25,11 @@ class ConsistencyIssue:
     message: str
 
 
-def build_provider_model_index(models: Iterable[Model]) -> Dict[Tuple[str, str], Model]:
+def build_provider_model_index(models: Iterable[Model]) -> dict[tuple[str, str], Model]:
     """
     Build a lookup index (provider_id, model_id) -> Model.
     """
-    index: Dict[Tuple[str, str], Model] = {}
+    index: dict[tuple[str, str], Model] = {}
     for m in models:
         index[(m.provider_id, m.model_id)] = m
     return index
@@ -37,8 +37,8 @@ def build_provider_model_index(models: Iterable[Model]) -> Dict[Tuple[str, str],
 
 def validate_logical_model_consistency(
     logical_model: LogicalModel,
-    provider_models: Dict[Tuple[str, str], Model],
-) -> List[ConsistencyIssue]:
+    provider_models: dict[tuple[str, str], Model],
+) -> list[ConsistencyIssue]:
     """
     Validate that all upstream physical models referenced by a LogicalModel
     are compatible and exist in the provider-model catalogue.
@@ -50,10 +50,10 @@ def validate_logical_model_consistency(
     - When meta_hash is missing or identical, but model families differ,
       we emit a warning (potentially different base model)
     """
-    issues: List[ConsistencyIssue] = []
+    issues: list[ConsistencyIssue] = []
 
     # 1) Existence check.
-    present_models: List[Model] = []
+    present_models: list[Model] = []
     for upstream in logical_model.upstreams:
         key = (upstream.provider_id, upstream.model_id)
         if key not in provider_models:
@@ -105,7 +105,7 @@ def validate_logical_model_consistency(
 
 def is_logical_model_consistent(
     logical_model: LogicalModel,
-    provider_models: Dict[Tuple[str, str], Model],
+    provider_models: dict[tuple[str, str], Model],
 ) -> bool:
     """
     Convenience wrapper that returns True when no *errors* are present.
@@ -118,9 +118,9 @@ def is_logical_model_consistent(
 def select_candidate_upstreams(
     logical_model: LogicalModel,
     *,
-    preferred_region: Optional[str] = None,
-    exclude_providers: Optional[Sequence[str]] = None,
-) -> List[PhysicalModel]:
+    preferred_region: str | None = None,
+    exclude_providers: Sequence[str] | None = None,
+) -> list[PhysicalModel]:
     """
     Return candidate upstreams for a logical model, filtered by optional
     constraints such as preferred region or excluded provider ids.
@@ -151,8 +151,8 @@ def select_candidate_upstreams(
 __all__ = [
     "ConsistencyIssue",
     "build_provider_model_index",
-    "validate_logical_model_consistency",
     "is_logical_model_consistent",
     "select_candidate_upstreams",
+    "validate_logical_model_consistency",
 ]
 

@@ -6,14 +6,15 @@ SDK 厂商分发与探测。
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, AsyncIterator, Awaitable, Callable, Optional, Tuple
+from typing import Any
 from urllib.parse import urlparse
 
 from app.models import ProviderConfig
 from app.provider import claude_sdk, google_sdk, openai_sdk
 
-SDKErrorTypes = Tuple[type[BaseException], ...]
+SDKErrorTypes = tuple[type[BaseException], ...]
 
 
 @dataclass(frozen=True)
@@ -34,14 +35,14 @@ def _normalized_host(base_url: Any) -> str:
     return host.lower()
 
 
-def normalize_base_url(value: Any) -> Optional[str]:
+def normalize_base_url(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value)
     return text.rstrip("/")
 
 
-def detect_sdk_vendor(provider: ProviderConfig) -> Optional[str]:
+def detect_sdk_vendor(provider: ProviderConfig) -> str | None:
     """
     根据 provider id 与 base_url 主机名推断使用哪个官方 SDK。
     """
@@ -64,7 +65,7 @@ def detect_sdk_vendor(provider: ProviderConfig) -> Optional[str]:
     return None
 
 
-def get_sdk_driver(provider: ProviderConfig) -> Optional[SDKDriver]:
+def get_sdk_driver(provider: ProviderConfig) -> SDKDriver | None:
     vendor = detect_sdk_vendor(provider)
     if vendor == "google":
         return SDKDriver(

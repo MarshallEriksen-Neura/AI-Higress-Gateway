@@ -30,7 +30,7 @@ def request_and_print(full_url: str) -> None:
     try:
         with httpx.Client(timeout=10.0) as client:
             resp = client.get(full_url)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"请求失败: {exc}")
         sys.exit(1)
 
@@ -39,7 +39,7 @@ def request_and_print(full_url: str) -> None:
     # 尝试解析 JSON，否则直接打印文本
     try:
         data = resp.json()
-    except Exception:  # noqa: BLE001
+    except Exception:
         print("返回内容（非 JSON）：")
         print(resp.text)
         return

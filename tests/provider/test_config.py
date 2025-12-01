@@ -1,7 +1,5 @@
 import os
 
-from typing import List
-
 import pytest
 
 from app.provider.config import get_provider_config, load_provider_configs
@@ -49,7 +47,7 @@ def test_load_provider_configs_skips_incomplete(monkeypatch):
     )
 
     providers = load_provider_configs()
-    ids: List[str] = [p.id for p in providers]
+    ids: list[str] = [p.id for p in providers]
 
     assert ids == ["openai"]
     cfg = providers[0]

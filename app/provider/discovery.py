@@ -10,7 +10,7 @@ them in Redis using the key scheme defined in data-model.md:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -32,12 +32,12 @@ from app.provider.sdk_selector import get_sdk_driver, normalize_base_url
 from app.storage.redis_service import get_provider_models_json, set_provider_models
 
 
-def _infer_capabilities(raw_model: Dict[str, Any]) -> List[ModelCapability]:
+def _infer_capabilities(raw_model: dict[str, Any]) -> list[ModelCapability]:
     """
     Best-effort capability inference from upstream metadata.
     Falls back to CHAT if nothing explicit is present.
     """
-    caps: List[ModelCapability] = []
+    caps: list[ModelCapability] = []
     raw_caps = raw_model.get("capabilities") or raw_model.get("capability") or []
 
     if isinstance(raw_caps, list):
@@ -61,7 +61,7 @@ def _infer_capabilities(raw_model: Dict[str, Any]) -> List[ModelCapability]:
 
 
 def _normalise_single_model(
-    provider: ProviderConfig, raw_model: Dict[str, Any]
+    provider: ProviderConfig, raw_model: dict[str, Any]
 ) -> Model | None:
     """
     Convert a provider-specific model entry into our standard Model.
@@ -109,7 +109,7 @@ def _normalise_single_model(
 
 def _fallback_to_static_models(
     provider: ProviderConfig, error: Exception
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Try to use statically configured models when remote discovery fails.
     """
@@ -139,8 +139,8 @@ def _fallback_to_static_models(
 async def fetch_models_from_provider(
     client: httpx.AsyncClient,
     provider: ProviderConfig,
-    redis: Optional[Redis] = None,
-) -> List[Model]:
+    redis: Redis | None = None,
+) -> list[Model]:
     """
     Call a provider's models endpoint and normalise the response.
     """
@@ -202,7 +202,7 @@ async def fetch_models_from_provider(
         path = provider.models_path or "/v1/models"
         url = f"{base}/{path.lstrip('/')}"
 
-        headers: Dict[str, str] = {
+        headers: dict[str, str] = {
             "Authorization": f"Bearer {key_selection.key}",
             "Accept": "application/json",
         }
@@ -245,7 +245,7 @@ async def fetch_models_from_provider(
                 if key_selection:
                     record_key_success(key_selection, redis=redis)
 
-    raw_models: List[Dict[str, Any]] = []
+    raw_models: list[dict[str, Any]] = []
     if isinstance(payload, dict) and "data" in payload and isinstance(
         payload["data"], list
     ):
@@ -253,7 +253,7 @@ async def fetch_models_from_provider(
     elif isinstance(payload, list):
         raw_models = [m for m in payload if isinstance(m, dict)]
 
-    models: List[Model] = []
+    models: list[Model] = []
     for raw in raw_models:
         model = _normalise_single_model(provider, raw)
         if model is not None:
@@ -287,7 +287,7 @@ async def ensure_provider_models_cached(
     provider: ProviderConfig,
     *,
     ttl_seconds: int = 300,
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """
     Ensure that a provider's models list exists in Redis and return it
     as a JSON-serialisable list (dicts).
@@ -304,13 +304,13 @@ async def ensure_provider_models_cached(
 
 
 async def refresh_all_providers_models(
-    client: httpx.AsyncClient, redis: Redis, providers: List[ProviderConfig]
-) -> Dict[str, int]:
+    client: httpx.AsyncClient, redis: Redis, providers: list[ProviderConfig]
+) -> dict[str, int]:
     """
     Refresh models for all configured providers.
     Returns a mapping provider_id -> number of models discovered.
     """
-    result: Dict[str, int] = {}
+    result: dict[str, int] = {}
     for provider in providers:
         try:
             count = await refresh_provider_models(client, redis, provider)
@@ -324,8 +324,8 @@ async def refresh_all_providers_models(
 
 
 __all__ = [
-    "fetch_models_from_provider",
-    "refresh_provider_models",
     "ensure_provider_models_cached",
+    "fetch_models_from_provider",
     "refresh_all_providers_models",
+    "refresh_provider_models",
 ]

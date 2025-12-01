@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any
 
 try:
     from redis.asyncio import Redis
@@ -8,8 +8,8 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 
 async def save_context(
     redis: Redis,
-    session_id: Optional[str],
-    payload: Dict[str, Any],
+    session_id: str | None,
+    payload: dict[str, Any],
     response_text: str,
 ) -> None:
     """

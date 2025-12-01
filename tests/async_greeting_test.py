@@ -1,9 +1,8 @@
 import asyncio
 import json
-from typing import Any, Dict
+from typing import Any
 
 import httpx
-
 
 API_BASE_URL = "http://127.0.0.1:8000"
 API_KEY = "dGltZWxpbmU="  # base64("timeline")
@@ -11,14 +10,14 @@ API_KEY = "dGltZWxpbmU="  # base64("timeline")
 
 async def call_chat_completion(
     *, message: str, stream: bool = False
-) -> Dict[str, Any] | None:
+) -> dict[str, Any] | None:
     """
     使用 async + httpx.AsyncClient 方式，向网关发起一个问候请求。
     当 stream=False 时直接返回 JSON；当 stream=True 时打印流式输出。
     """
     url = f"{API_BASE_URL.rstrip('/')}/v1/chat/completions"
 
-    payload: Dict[str, Any] = {
+    payload: dict[str, Any] = {
         "model": "test-model",  # 根据你的实际可用模型修改
         "messages": [
             {"role": "user", "content": message},

@@ -1,7 +1,6 @@
 from app.logging_config import setup_logging
 from app.routes import create_app
 
-
 # Configure logging once for the whole process.
 setup_logging()
 

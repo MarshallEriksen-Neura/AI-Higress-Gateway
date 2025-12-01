@@ -1,4 +1,3 @@
-from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -16,9 +15,9 @@ class PhysicalModel(BaseModel):
     base_weight: float = Field(
         ..., description="Base routing weight for this upstream", gt=0
     )
-    region: Optional[str] = Field(None, description="Optional region tag")
-    max_qps: Optional[int] = Field(None, description="Maximum QPS for this model")
-    meta_hash: Optional[str] = Field(
+    region: str | None = Field(None, description="Optional region tag")
+    max_qps: int | None = Field(None, description="Maximum QPS for this model")
+    meta_hash: str | None = Field(
         None, description="Metadata hash to track upstream version"
     )
     updated_at: float = Field(..., description="Last update timestamp (epoch seconds)")
@@ -32,10 +31,10 @@ class LogicalModel(BaseModel):
     logical_id: str = Field(..., description="Logical model id (e.g. gpt-4)")
     display_name: str = Field(..., description="Human readable name")
     description: str = Field(..., description="Logical model description")
-    capabilities: List[ModelCapability] = Field(
+    capabilities: list[ModelCapability] = Field(
         ..., description="Capabilities exposed by this logical model"
     )
-    upstreams: List[PhysicalModel] = Field(
+    upstreams: list[PhysicalModel] = Field(
         ..., description="List of mapped physical upstream models"
     )
     enabled: bool = Field(
@@ -45,5 +44,5 @@ class LogicalModel(BaseModel):
     updated_at: float = Field(..., description="Last update timestamp (epoch seconds)")
 
 
-__all__ = ["PhysicalModel", "LogicalModel"]
+__all__ = ["LogicalModel", "PhysicalModel"]
 

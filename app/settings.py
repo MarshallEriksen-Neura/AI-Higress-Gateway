@@ -1,4 +1,3 @@
-from typing import Dict, List, Optional
 
 from pydantic import Field
 
@@ -51,12 +50,12 @@ class Settings(BaseSettings):
         "Chrome/120.0.0.0 Safari/537.36",
         alias="MASK_USER_AGENT",
     )
-    mask_origin: Optional[str] = Field(None, alias="MASK_ORIGIN")
-    mask_referer: Optional[str] = Field(None, alias="MASK_REFERER")
+    mask_origin: str | None = Field(None, alias="MASK_ORIGIN")
+    mask_referer: str | None = Field(None, alias="MASK_REFERER")
 
     # Multi-provider configuration (001-model-routing).
     # Raw provider id list; concrete provider configs are derived from this.
-    llm_providers_raw: Optional[str] = Field(
+    llm_providers_raw: str | None = Field(
         default=None,
         alias="LLM_PROVIDERS",
         description="Comma-separated provider ids, e.g. 'openai,azure,local'",
@@ -69,7 +68,7 @@ class Settings(BaseSettings):
         alias="LOG_LEVEL",
         description="Application log level: DEBUG, INFO, WARNING, ERROR, CRITICAL",
     )
-    log_timezone: Optional[str] = Field(
+    log_timezone: str | None = Field(
         default=None,
         alias="LOG_TIMEZONE",
         description="Timezone name for log timestamps, e.g. 'Asia/Shanghai'. Defaults to system local time.",
@@ -89,7 +88,7 @@ class Settings(BaseSettings):
         description="Secret key used to derive hashed identifiers for API keys; please override in production",
     )
 
-    def get_llm_provider_ids(self) -> List[str]:
+    def get_llm_provider_ids(self) -> list[str]:
         """
         Return configured provider ids from LLM_PROVIDERS.
         Whitespace is stripped and empty entries are ignored.
@@ -106,7 +105,7 @@ class Settings(BaseSettings):
 settings = Settings()  # Reads from environment if available
 
 
-def build_upstream_headers() -> Dict[str, str]:
+def build_upstream_headers() -> dict[str, str]:
     """
     Build headers for calling upstream, optionally mimicking a browser page.
 
@@ -115,7 +114,7 @@ def build_upstream_headers() -> Dict[str, str]:
     multi-provider routing layer constructs provider-specific headers
     separately based on ProviderConfig.
     """
-    headers: Dict[str, str] = {
+    headers: dict[str, str] = {
         "Accept": "application/json",
     }
 

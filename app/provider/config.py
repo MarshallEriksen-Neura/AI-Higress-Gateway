@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import ValidationError
 
@@ -29,12 +29,11 @@ from app.logging_config import logger
 from app.models import ProviderAPIKey, ProviderConfig
 from app.settings import settings
 
-
 REQUIRED_SUFFIXES = ("NAME", "BASE_URL")
 
 # Default retryable HTTP status codes for well-known providers, based on
 # their public error semantics (rate limit + transient server errors).
-_DEFAULT_RETRYABLE_STATUS_CODES_BY_PROVIDER_ID: Dict[str, List[int]] = {
+_DEFAULT_RETRYABLE_STATUS_CODES_BY_PROVIDER_ID: dict[str, list[int]] = {
     # OpenAI Chat Completions / Models:
     # - 429: rate limit / quota
     # - 500/502/503/504: transient server-side errors
@@ -51,10 +50,10 @@ def _env_key(provider_id: str, suffix: str) -> str:
     return f"LLM_PROVIDER_{provider_id}_{suffix}"
 
 
-_DOTENV_CACHE: Optional[Dict[str, str]] = None
+_DOTENV_CACHE: dict[str, str] | None = None
 
 
-def _load_env_from_dotenv() -> Dict[str, str]:
+def _load_env_from_dotenv() -> dict[str, str]:
     """
     Lightweight .env parser used as a fallback when provider-specific
     environment variables are not present in os.environ.
@@ -68,10 +67,10 @@ def _load_env_from_dotenv() -> Dict[str, str]:
         return _DOTENV_CACHE
 
     env_path = os.getenv("APIPROXY_ENV_FILE", ".env")
-    data: Dict[str, str] = {}
+    data: dict[str, str] = {}
 
     try:
-        with open(env_path, "r", encoding="utf-8") as f:
+        with open(env_path, encoding="utf-8") as f:
             for line in f:
                 stripped = line.strip()
                 if not stripped or stripped.startswith("#"):
@@ -99,12 +98,12 @@ def _load_env_from_dotenv() -> Dict[str, str]:
     return data
 
 
-def _load_raw_provider_env(provider_id: str) -> Dict[str, str]:
+def _load_raw_provider_env(provider_id: str) -> dict[str, str]:
     """
     Load raw environment variables for a given provider id.
     Keys are suffixes (NAME, BASE_URL, ...) rather than full env keys.
     """
-    raw: Dict[str, str] = {}
+    raw: dict[str, str] = {}
     for suffix in [
         "NAME",
         "BASE_URL",
@@ -135,14 +134,14 @@ def _load_raw_provider_env(provider_id: str) -> Dict[str, str]:
     return raw
 
 
-def _parse_status_code_list(value: str) -> List[int]:
+def _parse_status_code_list(value: str) -> list[int]:
     """
     Parse a comma-separated list of HTTP status codes or ranges into integers.
 
     Examples:
         "429,500,502-504" -> [429, 500, 502, 503, 504]
     """
-    result: List[int] = []
+    result: list[int] = []
     for part in value.split(","):
         part = part.strip()
         if not part:
@@ -177,7 +176,7 @@ def _parse_status_code_list(value: str) -> List[int]:
     return result
 
 
-def _default_retryable_status_codes(provider_id: str) -> List[int] | None:
+def _default_retryable_status_codes(provider_id: str) -> list[int] | None:
     """
     Return built-in retryable status codes for well-known providers
     (openai / gemini / claude) when RETRYABLE_STATUS_CODES is not set.
@@ -188,7 +187,7 @@ def _default_retryable_status_codes(provider_id: str) -> List[int] | None:
 
 def _coerce_static_models(
     provider_id: str, payload: Any
-) -> List[Dict[str, Any]] | None:
+) -> list[dict[str, Any]] | None:
     """
     Ensure that a static models payload is a list of dicts, tolerating
     a single dict or a list of strings as shorthand.
@@ -196,7 +195,7 @@ def _coerce_static_models(
     if payload is None:
         return None
 
-    entries: List[Any]
+    entries: list[Any]
     if isinstance(payload, list):
         entries = payload
     elif isinstance(payload, dict):
@@ -209,7 +208,7 @@ def _coerce_static_models(
         )
         return None
 
-    result: List[Dict[str, Any]] = []
+    result: list[dict[str, Any]] = []
     for item in entries:
         if isinstance(item, dict):
             # Accept either "id" or "model_id" while normalising.
@@ -230,7 +229,7 @@ def _coerce_static_models(
 
 def _load_static_models_from_json(
     provider_id: str, value: str
-) -> List[Dict[str, Any]] | None:
+) -> list[dict[str, Any]] | None:
     try:
         payload = json.loads(value)
     except json.JSONDecodeError as exc:
@@ -245,7 +244,7 @@ def _load_static_models_from_json(
 
 def _load_static_models_from_file(
     provider_id: str, file_path: str
-) -> List[Dict[str, Any]] | None:
+) -> list[dict[str, Any]] | None:
     path = Path(file_path).expanduser()
     if not path.is_absolute():
         path = Path.cwd() / path
@@ -269,7 +268,7 @@ def _load_static_models_from_file(
     return _load_static_models_from_json(provider_id, text)
 
 
-def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderConfig | None:
+def _parse_provider_config(provider_id: str, raw: dict[str, str]) -> ProviderConfig | None:
     """
     Convert raw env values into a ProviderConfig instance.
     Returns None if required fields are missing or validation fails.
@@ -284,7 +283,7 @@ def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderCon
         )
         return None
 
-    data: Dict[str, object] = {
+    data: dict[str, object] = {
         "id": provider_id,
         "name": raw["NAME"],
         "base_url": raw["BASE_URL"],
@@ -300,7 +299,7 @@ def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderCon
         transport = "http"
     data["transport"] = transport
 
-    api_keys: List[ProviderAPIKey] | None = None
+    api_keys: list[ProviderAPIKey] | None = None
     if "API_KEYS_JSON" in raw:
         try:
             payload = json.loads(raw["API_KEYS_JSON"])
@@ -405,7 +404,7 @@ def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderCon
     if retryable_status_codes:
         data["retryable_status_codes"] = retryable_status_codes
 
-    static_models: List[Dict[str, Any]] | None = None
+    static_models: list[dict[str, Any]] | None = None
     if "STATIC_MODELS_JSON" in raw:
         static_models = _load_static_models_from_json(
             provider_id, raw["STATIC_MODELS_JSON"]
@@ -428,12 +427,12 @@ def _parse_provider_config(provider_id: str, raw: Dict[str, str]) -> ProviderCon
         return None
 
 
-def load_provider_configs() -> List[ProviderConfig]:
+def load_provider_configs() -> list[ProviderConfig]:
     """
     Load all configured providers from environment, skipping invalid ones.
     """
     ids = settings.get_llm_provider_ids()
-    providers: List[ProviderConfig] = []
+    providers: list[ProviderConfig] = []
     for provider_id in ids:
         raw = _load_raw_provider_env(provider_id)
         if not raw:
@@ -458,4 +457,4 @@ def get_provider_config(provider_id: str) -> ProviderConfig | None:
     return None
 
 
-__all__ = ["load_provider_configs", "get_provider_config"]
+__all__ = ["get_provider_config", "load_provider_configs"]

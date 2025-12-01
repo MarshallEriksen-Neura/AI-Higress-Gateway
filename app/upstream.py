@@ -1,5 +1,6 @@
 import json
-from typing import Any, AsyncIterator, Dict, Optional
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 
@@ -7,7 +8,7 @@ from .context_store import save_context
 from .logging_config import logger
 
 
-def detect_request_format(payload: Dict[str, Any]) -> str:
+def detect_request_format(payload: dict[str, Any]) -> str:
     """
     Try to detect whether the incoming payload is OpenAI-style or Claude-style.
 
@@ -39,7 +40,7 @@ class UpstreamStreamError(Exception):
     def __init__(
         self,
         *,
-        status_code: Optional[int],
+        status_code: int | None,
         message: str,
         text: str,
     ) -> None:
@@ -53,10 +54,10 @@ async def stream_upstream(
     client: httpx.AsyncClient,
     method: str,
     url: str,
-    headers: Dict[str, str],
-    json_body: Dict[str, Any],
+    headers: dict[str, str],
+    json_body: dict[str, Any],
     redis,
-    session_id: Optional[str],
+    session_id: str | None,
 ) -> AsyncIterator[bytes]:
     """
     Stream data from upstream and forward chunks immediately to the caller.
@@ -153,7 +154,7 @@ async def stream_upstream(
                 }
                 error_chunk = (
                     f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-                ).encode("utf-8")
+                ).encode()
                 buffer.extend(error_chunk)
                 yield error_chunk
     finally:
@@ -170,4 +171,4 @@ async def stream_upstream(
             )
 
 
-__all__ = ["detect_request_format", "stream_upstream", "UpstreamStreamError"]
+__all__ = ["UpstreamStreamError", "detect_request_format", "stream_upstream"]

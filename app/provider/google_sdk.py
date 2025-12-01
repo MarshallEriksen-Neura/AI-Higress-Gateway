@@ -11,8 +11,9 @@ from __future__ import annotations
 import base64
 import json
 import threading
+from collections.abc import AsyncIterator, Iterable
 from queue import SimpleQueue
-from typing import Any, AsyncIterator, Dict, Iterable, List, Optional
+from typing import Any
 
 import anyio
 
@@ -21,7 +22,7 @@ class GoogleSDKError(Exception):
     """Raised when the google-genai SDK is unavailable or returns an error."""
 
 
-def _create_client(api_key: str, base_url: Optional[str]):
+def _create_client(api_key: str, base_url: str | None):
     try:
         from google import genai  # type: ignore
     except ImportError as exc:  # pragma: no cover - import guard
@@ -36,7 +37,7 @@ def _create_client(api_key: str, base_url: Optional[str]):
         raise GoogleSDKError(f"初始化 google-genai 失败: {exc}") from exc
 
 
-def _data_url_to_inline_data(url: str) -> Optional[Dict[str, str]]:
+def _data_url_to_inline_data(url: str) -> dict[str, str] | None:
     """
     Convert a data: URI into inlineData payload accepted by Gemini.
     """
@@ -54,16 +55,16 @@ def _data_url_to_inline_data(url: str) -> Optional[Dict[str, str]]:
     return {"mimeType": mime_type, "data": base64.b64encode(decoded).decode("utf-8")}
 
 
-def _messages_to_contents(messages: Iterable[Any]) -> List[Dict[str, Any]]:
+def _messages_to_contents(messages: Iterable[Any]) -> list[dict[str, Any]]:
     """
     Convert OpenAI-style messages into Gemini contents shape.
     """
-    contents: List[Dict[str, Any]] = []
+    contents: list[dict[str, Any]] = []
     for msg in messages:
         if not isinstance(msg, dict):
             continue
         role = msg.get("role") or "user"
-        parts: List[Dict[str, Any]] = []
+        parts: list[dict[str, Any]] = []
         content = msg.get("content")
         if isinstance(content, str):
             parts.append({"text": content})
@@ -93,7 +94,7 @@ def _messages_to_contents(messages: Iterable[Any]) -> List[Dict[str, Any]]:
     return contents
 
 
-def _response_to_dict(obj: Any) -> Dict[str, Any]:
+def _response_to_dict(obj: Any) -> dict[str, Any]:
     if obj is None:
         return {}
     if isinstance(obj, dict):
@@ -121,8 +122,8 @@ def _response_to_dict(obj: Any) -> Dict[str, Any]:
 async def list_models(
     *,
     api_key: str,
-    base_url: Optional[str],
-) -> List[Dict[str, Any]]:
+    base_url: str | None,
+) -> list[dict[str, Any]]:
     """
     Discover models via SDK. Falls back to empty list on errors.
     """
@@ -143,9 +144,9 @@ async def generate_content(
     *,
     api_key: str,
     model_id: str,
-    payload: Dict[str, Any],
-    base_url: Optional[str],
-) -> Dict[str, Any]:
+    payload: dict[str, Any],
+    base_url: str | None,
+) -> dict[str, Any]:
     """
     Non-streaming generate_content 调用。
     """
@@ -170,9 +171,9 @@ async def stream_content(
     *,
     api_key: str,
     model_id: str,
-    payload: Dict[str, Any],
-    base_url: Optional[str],
-) -> AsyncIterator[Dict[str, Any]]:
+    payload: dict[str, Any],
+    base_url: str | None,
+) -> AsyncIterator[dict[str, Any]]:
     """
     Streaming generate_content 调用。使用后台线程消费同步 SDK，
     通过队列把分块传回异步上下文。

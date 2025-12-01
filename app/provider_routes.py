@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Query
@@ -19,7 +19,6 @@ from app.provider.discovery import ensure_provider_models_cached
 from app.provider.health import HealthStatus, check_provider_health
 from app.storage.redis_service import get_routing_metrics
 
-
 router = APIRouter(
     tags=["providers"],
     dependencies=[Depends(require_api_key)],
@@ -27,17 +26,17 @@ router = APIRouter(
 
 
 class ProvidersResponse(BaseModel):
-    providers: List[ProviderConfig] = Field(default_factory=list)
+    providers: list[ProviderConfig] = Field(default_factory=list)
     total: int
 
 
 class ProviderModelsResponse(BaseModel):
-    models: List[Dict[str, Any]] = Field(default_factory=list)
+    models: list[dict[str, Any]] = Field(default_factory=list)
     total: int
 
 
 class ProviderMetricsResponse(BaseModel):
-    metrics: List[RoutingMetrics] = Field(default_factory=list)
+    metrics: list[RoutingMetrics] = Field(default_factory=list)
 
 
 @router.get("/providers", response_model=ProvidersResponse)
@@ -95,7 +94,7 @@ async def get_provider_health(
 @router.get("/providers/{provider_id}/metrics", response_model=ProviderMetricsResponse)
 async def get_provider_metrics(
     provider_id: str,
-    logical_model: Optional[str] = Query(
+    logical_model: str | None = Query(
         default=None,
         description="Optional logical model filter",
     ),
@@ -112,7 +111,7 @@ async def get_provider_metrics(
     if cfg is None:
         raise not_found(f"Provider '{provider_id}' not found")
 
-    metrics_list: List[RoutingMetrics] = []
+    metrics_list: list[RoutingMetrics] = []
     if logical_model:
         metrics = await get_routing_metrics(redis, logical_model, provider_id)
         if metrics is not None:

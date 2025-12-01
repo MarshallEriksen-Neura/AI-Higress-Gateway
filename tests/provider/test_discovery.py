@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any
 
 import httpx
 import pytest
@@ -17,7 +17,7 @@ class DummyRedis:
     """
 
     def __init__(self) -> None:
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
 
     async def get(self, key: str):
         return self._data.get(key)
@@ -27,7 +27,7 @@ class DummyRedis:
 
 
 def _make_provider(**overrides: Any) -> ProviderConfig:
-    data: Dict[str, Any] = {
+    data: dict[str, Any] = {
         "id": "mock",
         "name": "Mock Provider",
         "base_url": "https://api.mock.local",
@@ -63,7 +63,7 @@ async def test_fetch_models_from_provider_normalises_payload():
     transport = httpx.MockTransport(handler)
 
     async with httpx.AsyncClient(transport=transport) as client:
-        models: List[Model] = await fetch_models_from_provider(client, provider)
+        models: list[Model] = await fetch_models_from_provider(client, provider)
 
     assert len(models) == 2
     assert models[0].model_id == "m1"
@@ -87,7 +87,7 @@ async def test_fetch_models_from_provider_uses_static_models():
     transport = httpx.MockTransport(handler)
 
     async with httpx.AsyncClient(transport=transport) as client:
-        models: List[Model] = await fetch_models_from_provider(client, provider)
+        models: list[Model] = await fetch_models_from_provider(client, provider)
 
     assert [m.model_id for m in models] == ["manual-1", "manual-2"]
     assert [m.context_length for m in models] == [1024, 2048]
@@ -119,7 +119,7 @@ async def test_fetch_models_from_provider_falls_back_to_env_static_on_invalid_js
     transport = httpx.MockTransport(handler)
 
     async with httpx.AsyncClient(transport=transport) as client:
-        models: List[Model] = await fetch_models_from_provider(client, provider)
+        models: list[Model] = await fetch_models_from_provider(client, provider)
 
     assert [m.model_id for m in models] == ["env-manual-1"]
     assert [m.context_length for m in models] == [1234]

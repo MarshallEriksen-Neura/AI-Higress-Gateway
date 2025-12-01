@@ -18,7 +18,39 @@ dependencies = [
     "django>=5.2.8",
     "sqlalchemy>=2.0.44",
     "alembic>=1.17.2",
+    "ruff>=0.14.7",
 ]
 
 [project.scripts]
 apiproxy = "main:run"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E4",
+    "E7",
+    "E9",
+    "F",
+    "W",
+    "B",
+    "I",
+    "N",
+    "UP",
+    "ASYNC",
+    "S",
+    "RUF",
+]
+ignore = ["E203"]
+fixable = ["ALL"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+skip-magic-trailing-comma = false

@@ -8,7 +8,7 @@ does not have to deal with raw Redis keys directly.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from redis.asyncio import Redis
@@ -30,7 +30,7 @@ METRICS_HISTORY_KEY_TEMPLATE = (
 
 async def get_provider_models_json(
     redis: Redis, provider_id: str
-) -> Optional[List[Dict[str, Any]]]:
+) -> list[dict[str, Any]] | None:
     """
     Return the raw JSON list of models for a provider, or None.
     """
@@ -47,7 +47,7 @@ async def get_provider_models_json(
 async def set_provider_models(
     redis: Redis,
     provider_id: str,
-    models: List[Any],
+    models: list[Any],
     *,
     ttl_seconds: int,
 ) -> None:
@@ -56,7 +56,7 @@ async def set_provider_models(
     `models` should be JSON-serialisable (dicts or Pydantic models).
     """
     key = PROVIDER_MODELS_KEY_TEMPLATE.format(provider_id=provider_id)
-    serialisable: List[Any] = []
+    serialisable: list[Any] = []
     for m in models:
         if hasattr(m, "model_dump"):
             serialisable.append(m.model_dump())
@@ -65,7 +65,7 @@ async def set_provider_models(
     await redis_set_json(redis, key, serialisable, ttl_seconds=ttl_seconds)
 
 
-async def get_logical_model(redis: Redis, logical_model_id: str) -> Optional[LogicalModel]:
+async def get_logical_model(redis: Redis, logical_model_id: str) -> LogicalModel | None:
     key = LOGICAL_MODEL_KEY_TEMPLATE.format(logical_model=logical_model_id)
     data = await redis_get_json(redis, key)
     if not data:
@@ -80,7 +80,7 @@ async def set_logical_model(
     await redis_set_json(redis, key, logical_model.model_dump(), ttl_seconds=None)
 
 
-async def list_logical_models(redis: Redis) -> List[LogicalModel]:
+async def list_logical_models(redis: Redis) -> list[LogicalModel]:
     """
     List all logical models stored under llm:logical:*.
     This uses a simple KEYS-based scan for now; it can be refined to SCAN
@@ -88,7 +88,7 @@ async def list_logical_models(redis: Redis) -> List[LogicalModel]:
     """
     pattern = LOGICAL_MODEL_KEY_TEMPLATE.format(logical_model="*")
     keys = await redis.keys(pattern)  # type: ignore[attr-defined]
-    models: List[LogicalModel] = []
+    models: list[LogicalModel] = []
     for key in keys:
         data = await redis_get_json(redis, key)
         if not data:
@@ -103,7 +103,7 @@ async def list_logical_models(redis: Redis) -> List[LogicalModel]:
 
 async def get_routing_metrics(
     redis: Redis, logical_model_id: str, provider_id: str
-) -> Optional[RoutingMetrics]:
+) -> RoutingMetrics | None:
     key = METRICS_KEY_TEMPLATE.format(
         logical_model=logical_model_id, provider_id=provider_id
     )
@@ -133,7 +133,7 @@ async def append_metrics_history(
     await redis_set_json(redis, key, sample.model_dump(), ttl_seconds=ttl_seconds)
 
 
-async def get_session(redis: Redis, conversation_id: str) -> Optional[Session]:
+async def get_session(redis: Redis, conversation_id: str) -> Session | None:
     key = SESSION_KEY_TEMPLATE.format(conversation_id=conversation_id)
     data = await redis_get_json(redis, key)
     if not data:
@@ -149,18 +149,18 @@ async def set_session(
 
 
 __all__ = [
-    "PROVIDER_MODELS_KEY_TEMPLATE",
     "LOGICAL_MODEL_KEY_TEMPLATE",
-    "METRICS_KEY_TEMPLATE",
-    "SESSION_KEY_TEMPLATE",
     "METRICS_HISTORY_KEY_TEMPLATE",
-    "get_provider_models_json",
-    "set_provider_models",
-    "get_logical_model",
-    "set_logical_model",
-    "get_routing_metrics",
-    "set_routing_metrics",
+    "METRICS_KEY_TEMPLATE",
+    "PROVIDER_MODELS_KEY_TEMPLATE",
+    "SESSION_KEY_TEMPLATE",
     "append_metrics_history",
+    "get_logical_model",
+    "get_provider_models_json",
+    "get_routing_metrics",
     "get_session",
+    "set_logical_model",
+    "set_provider_models",
+    "set_routing_metrics",
     "set_session",
 ]

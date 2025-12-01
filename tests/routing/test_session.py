@@ -1,9 +1,7 @@
-import asyncio
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
-from app.models import Session
 from app.routing.session_manager import (
     bind_session,
     delete_session,
@@ -14,7 +12,7 @@ from app.routing.session_manager import (
 
 class DummyRedis:
     def __init__(self) -> None:
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
 
     async def get(self, key: str):
         return self._data.get(key)

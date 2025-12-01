@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import AsyncIterator
 from queue import SimpleQueue
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
 import anyio
 
@@ -18,14 +19,14 @@ class ClaudeSDKError(Exception):
     """Raised when the anthropic SDK is unavailable or returns an error."""
 
 
-def _create_client(api_key: str, base_url: Optional[str]):
+def _create_client(api_key: str, base_url: str | None):
     try:
         from anthropic import Anthropic  # type: ignore
     except ImportError as exc:  # pragma: no cover - import guard
         raise ClaudeSDKError("anthropic 未安装，请执行: pip install anthropic") from exc
 
     try:
-        kwargs: Dict[str, Any] = {"api_key": api_key}
+        kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = str(base_url)
         return Anthropic(**kwargs)
@@ -33,7 +34,7 @@ def _create_client(api_key: str, base_url: Optional[str]):
         raise ClaudeSDKError(f"初始化 anthropic SDK 失败: {exc}") from exc
 
 
-def _response_to_dict(obj: Any) -> Dict[str, Any]:
+def _response_to_dict(obj: Any) -> dict[str, Any]:
     if obj is None:
         return {}
     if isinstance(obj, dict):
@@ -51,7 +52,7 @@ def _response_to_dict(obj: Any) -> Dict[str, Any]:
         return {"text": str(obj)}
 
 
-def _normalize_payload(payload: Dict[str, Any], model_id: str) -> Dict[str, Any]:
+def _normalize_payload(payload: dict[str, Any], model_id: str) -> dict[str, Any]:
     upstream_payload = dict(payload)
     upstream_payload["model"] = model_id
     upstream_payload.pop("stream", None)
@@ -65,8 +66,8 @@ def _normalize_payload(payload: Dict[str, Any], model_id: str) -> Dict[str, Any]
 async def list_models(
     *,
     api_key: str,
-    base_url: Optional[str],
-) -> List[Dict[str, Any]]:
+    base_url: str | None,
+) -> list[dict[str, Any]]:
     """
     Discover Anthropic 模型列表。
     """
@@ -81,8 +82,8 @@ async def list_models(
         raise ClaudeSDKError(f"anthropic 列表接口失败: {exc}") from exc
 
     # Page 对象通常带 data 字段，先尝试结构化读取。
-    if hasattr(resp, "data") and isinstance(getattr(resp, "data"), list):
-        return [_response_to_dict(item) for item in getattr(resp, "data") if item is not None]
+    if hasattr(resp, "data") and isinstance(resp.data, list):
+        return [_response_to_dict(item) for item in resp.data if item is not None]
 
     payload = _response_to_dict(resp)
     if isinstance(payload, dict) and isinstance(payload.get("data"), list):
@@ -96,9 +97,9 @@ async def generate_content(
     *,
     api_key: str,
     model_id: str,
-    payload: Dict[str, Any],
-    base_url: Optional[str],
-) -> Dict[str, Any]:
+    payload: dict[str, Any],
+    base_url: str | None,
+) -> dict[str, Any]:
     """
     非流式 messages.create 调用。
     """
@@ -120,9 +121,9 @@ async def stream_content(
     *,
     api_key: str,
     model_id: str,
-    payload: Dict[str, Any],
-    base_url: Optional[str],
-) -> AsyncIterator[Dict[str, Any]]:
+    payload: dict[str, Any],
+    base_url: str | None,
+) -> AsyncIterator[dict[str, Any]]:
     """
     流式 messages.stream 调用。使用后台线程消费同步 SDK，并将事件转为 dict。
     """

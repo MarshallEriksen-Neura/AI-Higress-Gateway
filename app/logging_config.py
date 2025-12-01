@@ -5,7 +5,6 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .settings import settings
 
-
 _LOGGING_CONFIGURED = False
 
 
@@ -28,7 +27,7 @@ class LocalTimezoneFormatter(logging.Formatter):
             except ZoneInfoNotFoundError:
                 pass
         # Fallback to system local timezone
-        return datetime.datetime.now().astimezone().tzinfo or datetime.timezone.utc
+        return datetime.datetime.now().astimezone().tzinfo or datetime.UTC
 
     def formatTime(self, record: logging.LogRecord, datefmt: str | None = None) -> str:
         dt = datetime.datetime.fromtimestamp(record.created, tz=self._tzinfo)

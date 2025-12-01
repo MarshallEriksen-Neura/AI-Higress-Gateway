@@ -10,12 +10,11 @@ import hmac
 import random
 import time
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from redis.asyncio import Redis
 
 from app.logging_config import logger
-from app.models import ProviderAPIKey, ProviderConfig
+from app.models import ProviderConfig
 from app.settings import settings
 
 
@@ -24,7 +23,7 @@ class ProviderKeyState:
     key: str
     label: str
     weight: float
-    max_qps: Optional[int]
+    max_qps: int | None
     fail_count: int = 0
     backoff_until: float = 0.0
     last_used_at: float = 0.0
@@ -44,8 +43,8 @@ class NoAvailableProviderKey(Exception):
     """
 
 
-_KEY_STATES: Dict[str, Dict[str, ProviderKeyState]] = {}
-_LOCKS: Dict[str, asyncio.Lock] = {}
+_KEY_STATES: dict[str, dict[str, ProviderKeyState]] = {}
+_LOCKS: dict[str, asyncio.Lock] = {}
 _PREFERENCE_BASE = 1.0
 _PREFERENCE_MIN = 0.1
 _PREFERENCE_MAX = 10.0
@@ -63,7 +62,7 @@ def _get_lock(provider_id: str) -> asyncio.Lock:
     return _LOCKS[provider_id]
 
 
-def _mask_label(raw_key: str, explicit: Optional[str], idx: int) -> str:
+def _mask_label(raw_key: str, explicit: str | None, idx: int) -> str:
     if explicit:
         return explicit
     tail = raw_key[-4:] if raw_key else "xxxx"
@@ -76,11 +75,11 @@ def _preference_redis_key(provider_id: str) -> str:
 
 def _hash_provider_key(provider_id: str, raw_key: str) -> str:
     secret = settings.secret_key.encode("utf-8")
-    msg = f"{provider_id}:{raw_key}".encode("utf-8")
+    msg = f"{provider_id}:{raw_key}".encode()
     return hmac.new(secret, msg, hashlib.sha256).hexdigest()
 
 
-def _ensure_states(provider: ProviderConfig) -> List[ProviderKeyState]:
+def _ensure_states(provider: ProviderConfig) -> list[ProviderKeyState]:
     """
     Initialise per-provider key state from ProviderConfig.
     """
@@ -114,7 +113,7 @@ def _ensure_states(provider: ProviderConfig) -> List[ProviderKeyState]:
     return list(pool.values())
 
 
-async def _reserve_qps(redis: Optional[Redis], provider_id: str, state: ProviderKeyState) -> bool:
+async def _reserve_qps(redis: Redis | None, provider_id: str, state: ProviderKeyState) -> bool:
     if redis is None or state.max_qps is None:
         return True
     bucket = f"provider:{provider_id}:key:{state.label}:qps:{int(time.time())}"
@@ -128,8 +127,8 @@ async def _reserve_qps(redis: Optional[Redis], provider_id: str, state: Provider
 
 
 async def _load_preference_scores(
-    redis: Optional[Redis], provider_id: str, states: List[ProviderKeyState]
-) -> Dict[str, float]:
+    redis: Redis | None, provider_id: str, states: list[ProviderKeyState]
+) -> dict[str, float]:
     """
     Fetch or initialise preference scores for candidate keys.
     Redis 中仅存储 HMAC 哈希，不存明文。
@@ -138,7 +137,7 @@ async def _load_preference_scores(
         return {}
 
     zset_key = _preference_redis_key(provider_id)
-    scores: Dict[str, float] = {}
+    scores: dict[str, float] = {}
     for state in states:
         member = _hash_provider_key(provider_id, state.key)
         try:
@@ -155,7 +154,7 @@ async def _load_preference_scores(
 
 
 async def _adjust_preference_score(
-    redis: Optional[Redis], selection: "SelectedProviderKey", delta: float
+    redis: Redis | None, selection: SelectedProviderKey, delta: float
 ) -> None:
     """
     调整 Redis 中的优选分，使用哈希存储，不写入明文。
@@ -179,7 +178,7 @@ async def _adjust_preference_score(
 
 
 async def acquire_provider_key(
-    provider: ProviderConfig, redis: Optional[Redis] = None
+    provider: ProviderConfig, redis: Redis | None = None
 ) -> SelectedProviderKey:
     """
     Choose an available key for a provider using weighted random selection.
@@ -212,7 +211,7 @@ async def acquire_provider_key(
         idx = 0
         while idx < len(scored_candidates):
             current_score = scored_candidates[idx][0]
-            same_score_states: List[ProviderKeyState] = []
+            same_score_states: list[ProviderKeyState] = []
             while (
                 idx < len(scored_candidates)
                 and scored_candidates[idx][0]
@@ -241,7 +240,7 @@ async def acquire_provider_key(
 
 
 def record_key_success(
-    selection: SelectedProviderKey, *, redis: Optional[Redis] = None
+    selection: SelectedProviderKey, *, redis: Redis | None = None
 ) -> None:
     selection.state.fail_count = 0
     selection.state.backoff_until = 0.0
@@ -255,8 +254,8 @@ def record_key_failure(
     selection: SelectedProviderKey,
     *,
     retryable: bool = True,
-    status_code: Optional[int] = None,
-    redis: Optional[Redis] = None,
+    status_code: int | None = None,
+    redis: Redis | None = None,
 ) -> None:
     """
     Increase backoff for a key after an upstream failure.
@@ -283,7 +282,7 @@ def record_key_failure(
         )
 
 
-def reset_key_pool(provider_id: Optional[str] = None) -> None:
+def reset_key_pool(provider_id: str | None = None) -> None:
     """
     Clear cached key state (useful in tests).
     """
@@ -296,8 +295,8 @@ def reset_key_pool(provider_id: Optional[str] = None) -> None:
 
 
 __all__ = [
-    "SelectedProviderKey",
     "NoAvailableProviderKey",
+    "SelectedProviderKey",
     "acquire_provider_key",
     "record_key_failure",
     "record_key_success",

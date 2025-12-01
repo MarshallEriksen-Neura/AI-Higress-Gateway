@@ -3,10 +3,9 @@ import json
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import httpx
-import pytest
 from fastapi.testclient import TestClient
 
 # Ensure project root is on sys.path so that `import app` works
@@ -15,9 +14,9 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.deps import get_http_client, get_redis  # noqa: E402
-from app.settings import settings  # noqa: E402
 from app.models import LogicalModel, ModelCapability, PhysicalModel, ProviderConfig  # noqa: E402
 from app.routes import create_app  # noqa: E402
+from app.settings import settings  # noqa: E402
 from app.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE  # noqa: E402
 
 
@@ -28,7 +27,7 @@ class FakeRedis:
     """
 
     def __init__(self) -> None:
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
 
     async def get(self, key: str):
         return self._data.get(key)
@@ -1260,7 +1259,7 @@ def test_sdk_transport_non_stream(monkeypatch):
     """
     app = _prepare_sdk_app(monkeypatch, model_id="gemini-sdk-model")
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_generate_content(api_key, model_id, payload, base_url):
         calls["generate"] = calls.get("generate", 0) + 1
@@ -1315,7 +1314,7 @@ def test_sdk_transport_streaming(monkeypatch):
     """
     app = _prepare_sdk_app(monkeypatch, model_id="gemini-sdk-stream")
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_generate_content(**kwargs):
         calls["generate"] = calls.get("generate", 0) + 1
@@ -1373,7 +1372,7 @@ def test_openai_sdk_transport_non_stream(monkeypatch):
         api_key="sk-openai",  # pragma: allowlist secret
     )
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_generate_content(api_key, model_id, payload, base_url):
         calls["generate"] = calls.get("generate", 0) + 1
@@ -1431,7 +1430,7 @@ def test_openai_sdk_transport_streaming(monkeypatch):
         api_key="sk-openai",  # pragma: allowlist secret
     )
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_generate_content(**kwargs):
         calls["generate"] = calls.get("generate", 0) + 1
@@ -1495,7 +1494,7 @@ def test_openai_sdk_models_list(monkeypatch):
         api_key="sk-openai",  # pragma: allowlist secret
     )
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_list_models(api_key, base_url):
         calls["list"] = calls.get("list", 0) + 1
@@ -1526,7 +1525,7 @@ def test_claude_sdk_transport_non_stream(monkeypatch):
         api_key="sk-claude",  # pragma: allowlist secret
     )
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_generate_content(api_key, model_id, payload, base_url):
         calls["generate"] = calls.get("generate", 0) + 1
@@ -1579,7 +1578,7 @@ def test_claude_sdk_transport_streaming(monkeypatch):
         api_key="sk-claude",  # pragma: allowlist secret
     )
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_generate_content(**kwargs):
         calls["generate"] = calls.get("generate", 0) + 1
@@ -1635,7 +1634,7 @@ def test_claude_sdk_models_list(monkeypatch):
         api_key="sk-claude",  # pragma: allowlist secret
     )
 
-    calls: Dict[str, int] = {}
+    calls: dict[str, int] = {}
 
     async def _fake_list_models(api_key, base_url):
         calls["list"] = calls.get("list", 0) + 1

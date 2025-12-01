@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import time
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
 
-import httpx
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
@@ -14,8 +13,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 
 from app.auth import require_api_key
 from app.deps import get_redis
-from app.errors import bad_request, not_found, service_unavailable
-from app.logging_config import logger
+from app.errors import not_found, service_unavailable
 from app.models import (
     LogicalModel,
     PhysicalModel,
@@ -25,10 +23,9 @@ from app.models import (
 )
 from app.routing.mapper import select_candidate_upstreams
 from app.routing.provider_weight import load_dynamic_weights
-from app.routing.scheduler import CandidateScore, choose_upstream
+from app.routing.scheduler import choose_upstream
 from app.routing.session_manager import bind_session, get_session
 from app.storage.redis_service import get_logical_model, get_routing_metrics
-
 
 router = APIRouter(
     tags=["routing"],
@@ -38,18 +35,18 @@ router = APIRouter(
 
 class RoutingRequest(BaseModel):
     logical_model: str = Field(..., description="Logical model id")
-    conversation_id: Optional[str] = Field(
+    conversation_id: str | None = Field(
         default=None, description="Conversation id for stickiness"
     )
-    user_id: Optional[str] = Field(default=None, description="User id (unused for now)")
-    preferred_region: Optional[str] = Field(
+    user_id: str | None = Field(default=None, description="User id (unused for now)")
+    preferred_region: str | None = Field(
         default=None, description="Preferred region for upstream selection"
     )
-    strategy: Optional[str] = Field(
+    strategy: str | None = Field(
         default=None,
         description="Strategy name (latency_first/cost_first/reliability_first/balanced)",
     )
-    exclude_providers: Optional[List[str]] = Field(
+    exclude_providers: list[str] | None = Field(
         default=None, description="Optional list of provider ids to exclude"
     )
 
@@ -57,7 +54,7 @@ class RoutingRequest(BaseModel):
 class CandidateInfo(BaseModel):
     upstream: PhysicalModel
     score: float
-    metrics: Optional[RoutingMetrics] = None
+    metrics: RoutingMetrics | None = None
 
 
 class RoutingDecision(BaseModel):
@@ -65,12 +62,12 @@ class RoutingDecision(BaseModel):
     selected_upstream: PhysicalModel
     decision_time: float
     reasoning: str
-    alternative_upstreams: Optional[List[PhysicalModel]] = None
-    strategy_used: Optional[str] = None
-    all_candidates: Optional[List[CandidateInfo]] = None
+    alternative_upstreams: list[PhysicalModel] | None = None
+    strategy_used: str | None = None
+    all_candidates: list[CandidateInfo] | None = None
 
 
-def _strategy_from_name(name: Optional[str]) -> SchedulingStrategy:
+def _strategy_from_name(name: str | None) -> SchedulingStrategy:
     """
     Map a simple strategy name to a SchedulingStrategy instance.
     For now, all strategies share the same weights; this can be tuned later.
@@ -99,11 +96,11 @@ def _strategy_from_name(name: Optional[str]) -> SchedulingStrategy:
 
 async def _load_metrics_for_candidates(
     redis: Redis, logical_model_id: str, upstreams: Sequence[PhysicalModel]
-) -> Dict[str, RoutingMetrics]:
+) -> dict[str, RoutingMetrics]:
     """
     Load RoutingMetrics for each provider used by the candidate upstreams.
     """
-    seen_providers: Dict[str, RoutingMetrics] = {}
+    seen_providers: dict[str, RoutingMetrics] = {}
     for up in upstreams:
         if up.provider_id in seen_providers:
             continue
@@ -123,7 +120,7 @@ async def decide_route(
     """
     start_ts = time.perf_counter()
 
-    logical: Optional[LogicalModel] = await get_logical_model(
+    logical: LogicalModel | None = await get_logical_model(
         redis, body.logical_model
     )
     if logical is None:
@@ -147,7 +144,7 @@ async def decide_route(
     strategy = _strategy_from_name(body.strategy)
 
     # Optional session stickiness.
-    session: Optional[Session] = None
+    session: Session | None = None
     if body.conversation_id:
         session = await get_session(redis, body.conversation_id)
 

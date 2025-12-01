@@ -1,4 +1,3 @@
-from typing import List
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -14,7 +13,6 @@ from app.errors import not_found
 from app.models import LogicalModel, PhysicalModel
 from app.storage.redis_service import get_logical_model, list_logical_models
 
-
 router = APIRouter(
     tags=["logical-models"],
     dependencies=[Depends(require_api_key)],
@@ -22,12 +20,12 @@ router = APIRouter(
 
 
 class LogicalModelsResponse(BaseModel):
-    models: List[LogicalModel] = Field(default_factory=list)
+    models: list[LogicalModel] = Field(default_factory=list)
     total: int
 
 
 class LogicalModelUpstreamsResponse(BaseModel):
-    upstreams: List[PhysicalModel] = Field(default_factory=list)
+    upstreams: list[PhysicalModel] = Field(default_factory=list)
 
 
 @router.get("/logical-models", response_model=LogicalModelsResponse)

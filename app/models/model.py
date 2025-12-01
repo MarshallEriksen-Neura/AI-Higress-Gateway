@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -29,19 +29,19 @@ class Model(BaseModel):
     context_length: int = Field(
         ..., description="Maximum context length in tokens", gt=0
     )
-    capabilities: List[ModelCapability] = Field(
+    capabilities: list[ModelCapability] = Field(
         ..., description="List of supported capabilities"
     )
-    pricing: Optional[Dict[str, float]] = Field(
+    pricing: dict[str, float] | None = Field(
         None, description="Optional pricing information"
     )
-    metadata: Optional[Dict[str, Any]] = Field(
+    metadata: dict[str, Any] | None = Field(
         None, description="Original upstream metadata payload"
     )
-    meta_hash: Optional[str] = Field(
+    meta_hash: str | None = Field(
         None, description="Hash of model metadata for change detection"
     )
 
 
-__all__ = ["ModelCapability", "Model"]
+__all__ = ["Model", "ModelCapability"]
 

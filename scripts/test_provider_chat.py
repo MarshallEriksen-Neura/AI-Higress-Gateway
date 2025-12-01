@@ -6,7 +6,7 @@ from __future__ import annotations
 import asyncio
 import json
 from getpass import getpass
-from typing import Any, Dict
+from typing import Any
 
 import httpx
 
@@ -23,7 +23,7 @@ def _prompt(label: str, *, secret: bool = False, default: str | None = None) -> 
     return text
 
 
-def _build_payload(model: str, message: str, stream: bool) -> Dict[str, Any]:
+def _build_payload(model: str, message: str, stream: bool) -> dict[str, Any]:
     return {
         "model": model,
         "messages": [{"role": "user", "content": message}],
@@ -32,7 +32,7 @@ def _build_payload(model: str, message: str, stream: bool) -> Dict[str, Any]:
 
 
 async def _send_request(
-    base_url: str, api_key: str, payload: Dict[str, Any], stream: bool
+    base_url: str, api_key: str, payload: dict[str, Any], stream: bool
 ) -> None:
     url = f"{base_url.rstrip('/')}/v1/chat/completions"
     headers = {

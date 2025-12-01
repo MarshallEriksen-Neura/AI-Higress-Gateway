@@ -14,7 +14,7 @@ import argparse
 import asyncio
 import base64
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -31,14 +31,14 @@ def _build_auth_header(token_plain: str) -> str:
     return f"Bearer {encoded}"
 
 
-async def inspect_redis_models(redis_url: str) -> List[str]:
+async def inspect_redis_models(redis_url: str) -> list[str]:
     if Redis is None:
         print("redis 库不可用，跳过 Redis 检查。")
         return []
 
     redis = Redis.from_url(redis_url, encoding="utf-8", decode_responses=True)
     try:
-        keys: List[str] = await redis.keys("llm:vendor:*:models")
+        keys: list[str] = await redis.keys("llm:vendor:*:models")
         if not keys:
             print("Redis 中未找到 llm:vendor:*:models 缓存。")
             return []
@@ -56,7 +56,7 @@ async def inspect_redis_models(redis_url: str) -> List[str]:
         await redis.close()
 
 
-async def call_models(api_base: str, auth_header: str) -> Dict[str, Any]:
+async def call_models(api_base: str, auth_header: str) -> dict[str, Any]:
     url = f"{api_base.rstrip('/')}/models"
     async with httpx.AsyncClient(timeout=15.0) as client:
         resp = await client.get(url, headers={"Authorization": auth_header})

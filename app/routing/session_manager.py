@@ -9,7 +9,6 @@ conversation sessions.
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 from app.models import Session
 from app.redis_client import redis_delete
@@ -22,7 +21,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
     Redis = object  # type: ignore[misc,assignment]
 
 
-async def get_session(redis: Redis, conversation_id: str) -> Optional[Session]:
+async def get_session(redis: Redis, conversation_id: str) -> Session | None:
     """
     Load a session from Redis if present.
     """
@@ -36,7 +35,7 @@ async def bind_session(
     logical_model: str,
     provider_id: str,
     model_id: str,
-    ts: Optional[float] = None,
+    ts: float | None = None,
 ) -> Session:
     """
     Create or replace a session binding for a conversation.
@@ -65,7 +64,7 @@ async def bind_session(
 
 async def touch_session(
     redis: Redis, conversation_id: str, *, increment_messages: int = 1
-) -> Optional[Session]:
+) -> Session | None:
     """
     Update last_accessed and message_count for an existing session.
     Returns the updated session, or None if no session exists.
@@ -94,5 +93,5 @@ async def delete_session(redis: Redis, conversation_id: str) -> bool:
     return True
 
 
-__all__ = ["get_session", "bind_session", "touch_session", "delete_session"]
+__all__ = ["bind_session", "delete_session", "get_session", "touch_session"]
 

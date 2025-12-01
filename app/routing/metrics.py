@@ -9,7 +9,7 @@ needed by the scheduler and tests.
 
 from __future__ import annotations
 
-from typing import Iterable, List, Tuple
+from collections.abc import Iterable
 
 from app.models import MetricsHistory, ProviderStatus, RoutingMetrics
 
@@ -24,7 +24,7 @@ def aggregate_metrics(
     - `samples` already represent roughly a 1-minute window.
     - success_qps_1m is approximated as success_count / 60.0.
     """
-    samples_list: List[MetricsHistory] = list(samples)
+    samples_list: list[MetricsHistory] = list(samples)
     if not samples_list:
         raise ValueError("Cannot aggregate empty metrics history")
 

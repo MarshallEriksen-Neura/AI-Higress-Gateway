@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import AsyncIterator
 from queue import SimpleQueue
-from typing import Any, AsyncIterator, Dict, List, Optional
+from typing import Any
 
 import anyio
 
@@ -18,14 +19,14 @@ class OpenAISDKError(Exception):
     """Raised when the openai SDK is unavailable or returns an error."""
 
 
-def _create_client(api_key: str, base_url: Optional[str]):
+def _create_client(api_key: str, base_url: str | None):
     try:
         from openai import OpenAI  # type: ignore
     except ImportError as exc:  # pragma: no cover - import guard
         raise OpenAISDKError("openai 未安装，请执行: pip install openai") from exc
 
     try:
-        kwargs: Dict[str, Any] = {"api_key": api_key}
+        kwargs: dict[str, Any] = {"api_key": api_key}
         if base_url:
             kwargs["base_url"] = str(base_url)
         return OpenAI(**kwargs)
@@ -33,7 +34,7 @@ def _create_client(api_key: str, base_url: Optional[str]):
         raise OpenAISDKError(f"初始化 openai SDK 失败: {exc}") from exc
 
 
-def _response_to_dict(obj: Any) -> Dict[str, Any]:
+def _response_to_dict(obj: Any) -> dict[str, Any]:
     if obj is None:
         return {}
     if isinstance(obj, dict):
@@ -60,8 +61,8 @@ def _response_to_dict(obj: Any) -> Dict[str, Any]:
 async def list_models(
     *,
     api_key: str,
-    base_url: Optional[str],
-) -> List[Dict[str, Any]]:
+    base_url: str | None,
+) -> list[dict[str, Any]]:
     """
     列出 OpenAI 模型列表，失败时抛出 OpenAISDKError。
     """
@@ -87,9 +88,9 @@ async def generate_content(
     *,
     api_key: str,
     model_id: str,
-    payload: Dict[str, Any],
-    base_url: Optional[str],
-) -> Dict[str, Any]:
+    payload: dict[str, Any],
+    base_url: str | None,
+) -> dict[str, Any]:
     """
     非流式 chat.completions 调用。
     """
@@ -113,9 +114,9 @@ async def stream_content(
     *,
     api_key: str,
     model_id: str,
-    payload: Dict[str, Any],
-    base_url: Optional[str],
-) -> AsyncIterator[Dict[str, Any]]:
+    payload: dict[str, Any],
+    base_url: str | None,
+) -> AsyncIterator[dict[str, Any]]:
     """
     流式 chat.completions 调用。通过后台线程消费同步 SDK，
     并将分片以 dict 形式传回异步上下文。

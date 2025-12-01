@@ -1,11 +1,10 @@
-from typing import List
 
 from app.models import MetricsHistory, ProviderStatus
 from app.routing.metrics import aggregate_metrics
 
 
 def test_aggregate_metrics_basic():
-    samples: List[MetricsHistory] = [
+    samples: list[MetricsHistory] = [
         MetricsHistory(
             provider_id="openai",
             logical_model="gpt-4",

@@ -1,4 +1,3 @@
-from typing import Dict, List
 
 from app.models import LogicalModel, ModelCapability, PhysicalModel, RoutingMetrics, SchedulingStrategy, Session
 from app.routing.scheduler import CandidateScore, choose_upstream, score_upstreams
@@ -43,7 +42,7 @@ def _logical_and_upstreams():
 def test_score_upstreams_prefers_lower_latency():
     logical, upstreams = _logical_and_upstreams()
     strategy = SchedulingStrategy(name="balanced", description="test")
-    metrics_by_provider: Dict[str, RoutingMetrics] = {
+    metrics_by_provider: dict[str, RoutingMetrics] = {
         "fast": RoutingMetrics(
             logical_model="gpt-4",
             provider_id="fast",
@@ -68,7 +67,7 @@ def test_score_upstreams_prefers_lower_latency():
         ),
     }
 
-    scored: List[CandidateScore] = score_upstreams(
+    scored: list[CandidateScore] = score_upstreams(
         logical, upstreams, metrics_by_provider, strategy
     )
     assert scored
@@ -78,7 +77,7 @@ def test_score_upstreams_prefers_lower_latency():
 def test_choose_upstream_prefers_session_when_sticky():
     logical, upstreams = _logical_and_upstreams()
     strategy = SchedulingStrategy(name="balanced", description="test", enable_stickiness=True)
-    metrics_by_provider: Dict[str, RoutingMetrics] = {}
+    metrics_by_provider: dict[str, RoutingMetrics] = {}
 
     # No metrics; choose_upstream falls back to base_weight (tie is fine).
     session = Session(

@@ -39,5 +39,5 @@ class MetricsHistory(BaseModel):
     success: bool = Field(..., description="Whether the call succeeded")
 
 
-__all__ = ["RoutingMetrics", "MetricsHistory"]
+__all__ = ["MetricsHistory", "RoutingMetrics"]
 

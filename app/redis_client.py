@@ -10,7 +10,7 @@ provider components do not duplicate this logic.
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 try:
     from redis.asyncio import Redis
@@ -19,7 +19,7 @@ except ModuleNotFoundError:  # pragma: no cover - allows running without redis i
 
 from .settings import settings
 
-_redis_client: Optional[Redis] = None
+_redis_client: Redis | None = None
 
 
 def get_redis_client() -> Redis:
@@ -36,7 +36,7 @@ def get_redis_client() -> Redis:
     return _redis_client
 
 
-async def redis_get_json(redis: Redis, key: str) -> Optional[Any]:
+async def redis_get_json(redis: Redis, key: str) -> Any | None:
     """
     Convenience wrapper that loads a JSON value from Redis.
     Returns None on missing key or malformed payload.
@@ -70,4 +70,4 @@ async def redis_delete(redis: Redis, key: str) -> None:
     await redis.delete(key)
 
 
-__all__ = ["get_redis_client", "redis_get_json", "redis_set_json", "redis_delete"]
+__all__ = ["get_redis_client", "redis_delete", "redis_get_json", "redis_set_json"]

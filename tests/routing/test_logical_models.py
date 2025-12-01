@@ -1,10 +1,9 @@
 import json
-from typing import Any, Dict, List
+from typing import Any
 
 from fastapi.testclient import TestClient
 
 from app.deps import get_redis
-from app.logical_model_routes import router as logical_model_router
 from app.models import LogicalModel, ModelCapability, PhysicalModel
 from app.routes import create_app
 from app.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE
@@ -17,7 +16,7 @@ class DummyRedis:
     """
 
     def __init__(self) -> None:
-        self._data: Dict[str, Any] = {}
+        self._data: dict[str, Any] = {}
 
     async def get(self, key: str):
         return self._data.get(key)
@@ -45,7 +44,7 @@ def _store_logical_model(logical: LogicalModel) -> None:
     fake_redis._data[key] = json.dumps(logical.model_dump(), ensure_ascii=False)
 
 
-def _make_sample_models() -> List[LogicalModel]:
+def _make_sample_models() -> list[LogicalModel]:
     logical1 = LogicalModel(
         logical_id="gpt-4",
         display_name="GPT-4",

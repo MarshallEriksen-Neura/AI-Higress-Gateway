@@ -8,9 +8,9 @@ talk to Redis directly.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import random
-from typing import Dict, List, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from app.models import (
     LogicalModel,
@@ -24,7 +24,7 @@ from app.models import (
 @dataclass
 class CandidateScore:
     upstream: PhysicalModel
-    metrics: Optional[RoutingMetrics]
+    metrics: RoutingMetrics | None
     score: float
 
 
@@ -38,7 +38,7 @@ def _normalise_latency(ms: float) -> float:
     return min(1.0, ms / cap)
 
 
-def _status_penalty(metrics: Optional[RoutingMetrics]) -> float:
+def _status_penalty(metrics: RoutingMetrics | None) -> float:
     if metrics is None:
         return 0.0
     if metrics.status.value == "down":
@@ -51,14 +51,14 @@ def _status_penalty(metrics: Optional[RoutingMetrics]) -> float:
 def score_upstreams(
     logical_model: LogicalModel,
     upstreams: Sequence[PhysicalModel],
-    metrics_by_provider: Dict[str, RoutingMetrics],
+    metrics_by_provider: dict[str, RoutingMetrics],
     strategy: SchedulingStrategy,
-    dynamic_weights: Optional[Dict[str, float]] = None,
-) -> List[CandidateScore]:
+    dynamic_weights: dict[str, float] | None = None,
+) -> list[CandidateScore]:
     """
     Compute scores for upstream candidates.
     """
-    results: List[CandidateScore] = []
+    results: list[CandidateScore] = []
     for up in upstreams:
         metrics = metrics_by_provider.get(up.provider_id)
 
@@ -110,7 +110,7 @@ def _weighted_choice(candidates: Sequence[CandidateScore]) -> CandidateScore:
         raise RuntimeError("Cannot choose from empty candidates")
 
     # Use max(score, 0.0) so that very low scores do not invert weights.
-    weights: List[float] = [max(c.score, 0.0) for c in candidates]
+    weights: list[float] = [max(c.score, 0.0) for c in candidates]
     total = sum(weights)
 
     if total <= 0.0:
@@ -131,11 +131,11 @@ def _weighted_choice(candidates: Sequence[CandidateScore]) -> CandidateScore:
 def choose_upstream(
     logical_model: LogicalModel,
     upstreams: Sequence[PhysicalModel],
-    metrics_by_provider: Dict[str, RoutingMetrics],
+    metrics_by_provider: dict[str, RoutingMetrics],
     strategy: SchedulingStrategy,
-    session: Optional[Session] = None,
-    dynamic_weights: Optional[Dict[str, float]] = None,
-) -> Tuple[CandidateScore, List[CandidateScore]]:
+    session: Session | None = None,
+    dynamic_weights: dict[str, float] | None = None,
+) -> tuple[CandidateScore, list[CandidateScore]]:
     """
     Choose a single upstream using scoring and optional session stickiness.
     Returns (selected, all_scored_candidates).
@@ -162,4 +162,4 @@ def choose_upstream(
     return selected, scored
 
 
-__all__ = ["CandidateScore", "score_upstreams", "choose_upstream"]
+__all__ = ["CandidateScore", "choose_upstream", "score_upstreams"]

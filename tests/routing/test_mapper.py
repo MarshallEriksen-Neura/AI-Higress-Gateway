@@ -1,4 +1,3 @@
-from typing import Dict, List, Tuple
 
 from app.models import LogicalModel, Model, ModelCapability, PhysicalModel
 from app.routing.mapper import (
@@ -10,8 +9,8 @@ from app.routing.mapper import (
 )
 
 
-def _make_models() -> Dict[Tuple[str, str], Model]:
-    models: List[Model] = [
+def _make_models() -> dict[tuple[str, str], Model]:
+    models: list[Model] = [
         Model(
             model_id="gpt-4",
             provider_id="openai",
@@ -43,7 +42,7 @@ def _make_models() -> Dict[Tuple[str, str], Model]:
     return build_provider_model_index(models)
 
 
-def _make_logical_model(upstreams: List[PhysicalModel]) -> LogicalModel:
+def _make_logical_model(upstreams: list[PhysicalModel]) -> LogicalModel:
     return LogicalModel(
         logical_id="gpt-4",
         display_name="GPT-4",
@@ -82,7 +81,7 @@ def test_validate_logical_model_consistency_ok():
         ]
     )
 
-    issues: List[ConsistencyIssue] = validate_logical_model_consistency(
+    issues: list[ConsistencyIssue] = validate_logical_model_consistency(
         logical, index
     )
     assert issues == []

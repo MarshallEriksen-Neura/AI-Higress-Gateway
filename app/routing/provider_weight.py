@@ -5,7 +5,7 @@ Dynamic provider weight adjustments for routing调度。
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, List, Optional, Sequence
+from collections.abc import Sequence
 
 from redis.asyncio import Redis
 
@@ -41,10 +41,10 @@ def _clamp_weight(value: float, base_weight: float) -> float:
 
 
 async def load_dynamic_weights(
-    redis: Optional[Redis],
+    redis: Redis | None,
     logical_model_id: str,
     upstreams: Sequence[PhysicalModel],
-) -> Dict[str, float]:
+) -> dict[str, float]:
     """
     读取（或初始化）各厂商的动态权重。
     返回 provider_id -> effective_weight 的映射；若 Redis 不可用则返回空映射。
@@ -52,12 +52,12 @@ async def load_dynamic_weights(
     if redis is None or not upstreams:
         return {}
 
-    base_map: Dict[str, float] = {}
+    base_map: dict[str, float] = {}
     for up in upstreams:
         # 相同 provider 多个上游取第一个配置值。
         base_map.setdefault(up.provider_id, up.base_weight)
 
-    provider_ids: List[str] = list(base_map.keys())
+    provider_ids: list[str] = list(base_map.keys())
     key = _redis_key(logical_model_id)
 
     try:
@@ -68,7 +68,7 @@ async def load_dynamic_weights(
         logger.debug("load_dynamic_weights skipped: %s", exc)
         return {}
 
-    weights: Dict[str, float] = {}
+    weights: dict[str, float] = {}
     for pid, raw in zip(provider_ids, scores):
         base_weight = base_map[pid]
         if raw is None:
@@ -84,7 +84,7 @@ async def load_dynamic_weights(
 
 
 async def adjust_provider_weight(
-    redis: Optional[Redis],
+    redis: Redis | None,
     logical_model_id: str,
     provider_id: str,
     *,
@@ -115,7 +115,7 @@ async def adjust_provider_weight(
 
 
 def record_provider_success(
-    redis: Optional[Redis],
+    redis: Redis | None,
     logical_model_id: str,
     provider_id: str,
     base_weight: float,
@@ -138,7 +138,7 @@ def record_provider_success(
 
 
 def record_provider_failure(
-    redis: Optional[Redis],
+    redis: Redis | None,
     logical_model_id: str,
     provider_id: str,
     base_weight: float,

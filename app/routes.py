@@ -1,27 +1,17 @@
-from typing import Any, AsyncIterator, Dict, List, Optional
-
 import json
 import re
 import time
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+
 import httpx
 from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from .auth import require_api_key
-from .context_store import save_context
-from .deps import get_http_client, get_redis
-from .logging_config import logger
-from .model_cache import get_models_from_cache, set_models_cache
-from .provider_routes import router as provider_router
-from .logical_model_routes import router as logical_model_router
-from .routing_routes import router as routing_router
-from .session_routes import router as session_router
-from .settings import build_upstream_headers, settings
-from .upstream import UpstreamStreamError, detect_request_format, stream_upstream
 from app.models import (
     LogicalModel,
     ModelCapability,
@@ -32,6 +22,7 @@ from app.models import (
     Session,
 )
 from app.provider.config import get_provider_config, load_provider_configs
+from app.provider.discovery import ensure_provider_models_cached
 from app.provider.key_pool import (
     NoAvailableProviderKey,
     SelectedProviderKey,
@@ -40,16 +31,27 @@ from app.provider.key_pool import (
     record_key_success,
 )
 from app.provider.sdk_selector import get_sdk_driver, normalize_base_url
-from app.provider.discovery import ensure_provider_models_cached
 from app.routing.mapper import select_candidate_upstreams
-from app.routing.scheduler import CandidateScore, choose_upstream
 from app.routing.provider_weight import (
     load_dynamic_weights,
     record_provider_failure,
     record_provider_success,
 )
+from app.routing.scheduler import CandidateScore, choose_upstream
 from app.routing.session_manager import bind_session, get_session
 from app.storage.redis_service import get_logical_model, get_routing_metrics
+
+from .auth import require_api_key
+from .context_store import save_context
+from .deps import get_http_client, get_redis
+from .logging_config import logger
+from .logical_model_routes import router as logical_model_router
+from .model_cache import get_models_from_cache, set_models_cache
+from .provider_routes import router as provider_router
+from .routing_routes import router as routing_router
+from .session_routes import router as session_router
+from .settings import settings
+from .upstream import UpstreamStreamError, detect_request_format, stream_upstream
 
 
 class HealthResponse(BaseModel):
@@ -58,9 +60,9 @@ class HealthResponse(BaseModel):
 
 class ModelInfo(BaseModel):
     id: str
-    object: Optional[str] = None
-    created: Optional[int] = None
-    owned_by: Optional[str] = None
+    object: str | None = None
+    created: int | None = None
+    owned_by: str | None = None
 
 
 class ModelsResponse(BaseModel):
@@ -68,7 +70,7 @@ class ModelsResponse(BaseModel):
     data: list[ModelInfo] = Field(default_factory=list)
 
 
-def _apply_upstream_path_override(endpoint: str, override_path: Optional[str]) -> str:
+def _apply_upstream_path_override(endpoint: str, override_path: str | None) -> str:
     """
     Replace the path portion of an upstream endpoint when an override is required.
     """
@@ -85,7 +87,7 @@ def _apply_upstream_path_override(endpoint: str, override_path: Optional[str]) -
 
 async def _build_provider_headers(
     provider_cfg: ProviderConfig, redis
-) -> tuple[Dict[str, str], SelectedProviderKey]:
+) -> tuple[dict[str, str], SelectedProviderKey]:
     """
     Build headers for calling a concrete provider upstream.
 
@@ -93,7 +95,7 @@ async def _build_provider_headers(
     but replaces the Authorization header with a selected provider-specific API key.
     """
     key_selection = await acquire_provider_key(provider_cfg, redis)
-    headers: Dict[str, str] = {
+    headers: dict[str, str] = {
         "Authorization": f"Bearer {key_selection.key}",
         "Accept": "application/json",
     }
@@ -115,17 +117,17 @@ async def _build_provider_headers(
 
 @dataclass
 class ClaudeFallbackOutcome:
-    response: Optional[Any] = None
+    response: Any | None = None
     retryable: bool = False
-    status_code: Optional[int] = None
-    error_text: Optional[str] = None
+    status_code: int | None = None
+    error_text: str | None = None
 
 
 class ClaudeMessagesFallbackStreamError(Exception):
     def __init__(
         self,
         *,
-        status_code: Optional[int],
+        status_code: int | None,
         text: str,
         retryable: bool,
     ) -> None:
@@ -135,7 +137,7 @@ class ClaudeMessagesFallbackStreamError(Exception):
         self.retryable = retryable
 
 
-def _build_chat_completions_fallback_url(endpoint: str) -> Optional[str]:
+def _build_chat_completions_fallback_url(endpoint: str) -> str | None:
     if not endpoint:
         return None
     return _apply_upstream_path_override(endpoint, "/v1/chat/completions")
@@ -167,11 +169,11 @@ def _claude_content_blocks_to_text(content: Any) -> str:
 
 
 def _claude_messages_to_openai_chat_payload(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     *,
-    upstream_model_id: Optional[str],
-) -> Dict[str, Any]:
-    messages: list[Dict[str, Any]] = []
+    upstream_model_id: str | None,
+) -> dict[str, Any]:
+    messages: list[dict[str, Any]] = []
     system_prompt = payload.get("system")
     if isinstance(system_prompt, str) and system_prompt.strip():
         messages.append({"role": "system", "content": system_prompt})
@@ -190,7 +192,7 @@ def _claude_messages_to_openai_chat_payload(
     if not messages:
         messages.append({"role": "user", "content": ""})
 
-    converted: Dict[str, Any] = {
+    converted: dict[str, Any] = {
         "model": upstream_model_id or payload.get("model"),
         "messages": messages,
     }
@@ -218,11 +220,11 @@ def _claude_messages_to_openai_chat_payload(
     return converted
 
 
-def _openai_content_to_claude_segments(content: Any) -> list[Dict[str, Any]]:
+def _openai_content_to_claude_segments(content: Any) -> list[dict[str, Any]]:
     if isinstance(content, str):
         return [{"type": "text", "text": content}]
     if isinstance(content, list):
-        segments: list[Dict[str, Any]] = []
+        segments: list[dict[str, Any]] = []
         for item in content:
             if not isinstance(item, dict):
                 continue
@@ -233,7 +235,7 @@ def _openai_content_to_claude_segments(content: Any) -> list[Dict[str, Any]]:
     return []
 
 
-def _openai_usage_to_claude_usage(usage: Any) -> Optional[Dict[str, Any]]:
+def _openai_usage_to_claude_usage(usage: Any) -> dict[str, Any] | None:
     if not isinstance(usage, dict):
         return usage if usage is None else None
     return {
@@ -243,7 +245,7 @@ def _openai_usage_to_claude_usage(usage: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def _map_openai_finish_reason(finish_reason: Optional[str]) -> Optional[str]:
+def _map_openai_finish_reason(finish_reason: str | None) -> str | None:
     if finish_reason is None:
         return None
     mapping = {"stop": "end_turn", "length": "max_tokens"}
@@ -251,14 +253,14 @@ def _map_openai_finish_reason(finish_reason: Optional[str]) -> Optional[str]:
 
 
 def _openai_chat_to_claude_response(
-    openai_payload: Dict[str, Any],
+    openai_payload: dict[str, Any],
     *,
-    request_model: Optional[str],
-) -> Dict[str, Any]:
+    request_model: str | None,
+) -> dict[str, Any]:
     response_id = openai_payload.get("id") or f"msg_{uuid.uuid4().hex}"
     created = openai_payload.get("created") or int(time.time())
     choices = openai_payload.get("choices")
-    first_choice: Dict[str, Any] = {}
+    first_choice: dict[str, Any] = {}
     if isinstance(choices, list) and choices:
         candidate = choices[0]
         if isinstance(candidate, dict):
@@ -288,9 +290,9 @@ def _openai_chat_to_claude_response(
 def _should_attempt_claude_messages_fallback(
     *,
     api_style: str,
-    upstream_path_override: Optional[str],
-    status_code: Optional[int],
-    response_text: Optional[str],
+    upstream_path_override: str | None,
+    status_code: int | None,
+    response_text: str | None,
 ) -> bool:
     if api_style != "claude":
         return False
@@ -309,20 +311,18 @@ def _should_attempt_claude_messages_fallback(
 
 
 class OpenAIToClaudeStreamAdapter:
-    def __init__(self, model: Optional[str]) -> None:
+    def __init__(self, model: str | None) -> None:
         self.model = model
         self.message_id = f"msg_{uuid.uuid4().hex}"
         self.content_block_id = f"{self.message_id}-cb-0"
         self.buffer = ""
         self.started = False
-        self.stop_reason: Optional[str] = None
-        self.usage: Optional[Dict[str, Any]] = None
+        self.stop_reason: str | None = None
+        self.usage: dict[str, Any] | None = None
         self.aggregate_text: str = ""
 
-    def _encode_event(self, event: str, payload: Dict[str, Any]) -> bytes:
-        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode(
-            "utf-8"
-        )
+    def _encode_event(self, event: str, payload: dict[str, Any]) -> bytes:
+        return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
     def _emit_start_events(self) -> list[bytes]:
         self.started = True
@@ -458,13 +458,13 @@ class OpenAIToClaudeStreamAdapter:
 async def _send_claude_fallback_non_stream(
     *,
     client: httpx.AsyncClient,
-    headers: Dict[str, str],
+    headers: dict[str, str],
     provider_id: str,
     model_id: str,
-    payload: Dict[str, Any],
-    fallback_url: Optional[str],
+    payload: dict[str, Any],
+    fallback_url: str | None,
     redis,
-    x_session_id: Optional[str],
+    x_session_id: str | None,
     bind_session,
 ) -> ClaudeFallbackOutcome:
     if not fallback_url:
@@ -525,13 +525,13 @@ async def _send_claude_fallback_non_stream(
 async def _claude_streaming_fallback_iterator(
     *,
     client: httpx.AsyncClient,
-    headers: Dict[str, str],
+    headers: dict[str, str],
     provider_id: str,
     model_id: str,
-    fallback_url: Optional[str],
-    payload: Dict[str, Any],
+    fallback_url: str | None,
+    payload: dict[str, Any],
     redis,
-    session_id: Optional[str],
+    session_id: str | None,
     bind_session_cb,
 ) -> AsyncIterator[bytes]:
     if not fallback_url:
@@ -575,7 +575,7 @@ async def _claude_streaming_fallback_iterator(
         yield tail
 
 
-def _inline_data_to_data_url(inline: Any) -> Optional[str]:
+def _inline_data_to_data_url(inline: Any) -> str | None:
     if not isinstance(inline, dict):
         return None
     data = inline.get("data")
@@ -585,8 +585,8 @@ def _inline_data_to_data_url(inline: Any) -> Optional[str]:
     return None
 
 
-def _convert_gemini_content_to_segments(content: Any) -> list[Dict[str, Any]]:
-    segments: list[Dict[str, Any]] = []
+def _convert_gemini_content_to_segments(content: Any) -> list[dict[str, Any]]:
+    segments: list[dict[str, Any]] = []
 
     def _walk(item: Any) -> None:
         if isinstance(item, dict):
@@ -610,7 +610,7 @@ def _convert_gemini_content_to_segments(content: Any) -> list[Dict[str, Any]]:
     return segments
 
 
-def _segments_to_plain_text(segments: list[Dict[str, Any]]) -> str:
+def _segments_to_plain_text(segments: list[dict[str, Any]]) -> str:
     texts: list[str] = []
     for seg in segments:
         if seg.get("type") == "text":
@@ -620,7 +620,7 @@ def _segments_to_plain_text(segments: list[Dict[str, Any]]) -> str:
     return "".join(texts)
 
 
-def _convert_gemini_usage_to_openai(source: Dict[str, Any]) -> Dict[str, Any]:
+def _convert_gemini_usage_to_openai(source: dict[str, Any]) -> dict[str, Any]:
     usage = source.get("usageMetadata") or {}
     if not isinstance(usage, dict):
         return {}
@@ -634,15 +634,15 @@ def _convert_gemini_usage_to_openai(source: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _build_openai_completion_from_gemini(
-    payload: Dict[str, Any],
-    model: Optional[str],
-) -> Dict[str, Any]:
+    payload: dict[str, Any],
+    model: str | None,
+) -> dict[str, Any]:
     response_id = payload.get("id") or _ensure_response_id(None)
     created_ts = int(time.time())
     create_time = payload.get("createTime") or payload.get("created")
     if isinstance(create_time, (int, float)):
         created_ts = int(create_time)
-    choices: list[Dict[str, Any]] = []
+    choices: list[dict[str, Any]] = []
     candidates = payload.get("candidates") or []
     if isinstance(candidates, list):
         for idx, cand in enumerate(candidates):
@@ -677,26 +677,26 @@ def _build_openai_completion_from_gemini(
 
 
 class GeminiToOpenAIStreamAdapter:
-    def __init__(self, model: Optional[str]) -> None:
+    def __init__(self, model: str | None) -> None:
         self.model = model
         self.response_id = _ensure_response_id(None)
         self.created = int(time.time())
         self.buffer = ""
         self.done = False
-        self.index_to_text: Dict[int, str] = {}
+        self.index_to_text: dict[int, str] = {}
 
     def _build_chunk_payload(
         self,
         *,
         index: int,
-        text_delta: Optional[str] = None,
-        finish_reason: Optional[str] = None,
-        segments: Optional[list[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        choice: Dict[str, Any] = {
+        text_delta: str | None = None,
+        finish_reason: str | None = None,
+        segments: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        choice: dict[str, Any] = {
             "index": index,
         }
-        new_delta: Dict[str, Any] = {}
+        new_delta: dict[str, Any] = {}
         if segments is not None:
             new_delta["content"] = segments
         elif text_delta:
@@ -785,11 +785,11 @@ async def _load_metrics_for_candidates(
     redis,
     logical_model_id: str,
     upstreams: list[PhysicalModel],
-) -> Dict[str, RoutingMetrics]:
+) -> dict[str, RoutingMetrics]:
     """
     Load RoutingMetrics for each provider used by the candidate upstreams.
     """
-    seen_providers: Dict[str, RoutingMetrics] = {}
+    seen_providers: dict[str, RoutingMetrics] = {}
     for up in upstreams:
         if up.provider_id in seen_providers:
             continue
@@ -828,7 +828,7 @@ async def _get_or_fetch_models(
             continue
 
         for m in items:
-            model_id: Optional[str] = None
+            model_id: str | None = None
             if isinstance(m, dict):
                 # Prefer explicit id, fall back to model_id.
                 mid = m.get("id") or m.get("model_id")
@@ -870,7 +870,7 @@ def _build_ordered_candidates(
 
 def _is_retryable_upstream_status(
     provider_id: str,
-    status_code: Optional[int],
+    status_code: int | None,
 ) -> bool:
     """
     Decide whether an upstream HTTP status code is worth retrying on a
@@ -898,7 +898,7 @@ def _is_retryable_upstream_status(
 _GEMINI_MODEL_REGEX = re.compile("gemini", re.IGNORECASE)
 
 
-def _strip_model_group_prefix(model_value: Any) -> Optional[str]:
+def _strip_model_group_prefix(model_value: Any) -> str | None:
     """
     Some upstreams or client SDKs use grouped model ids like
     "provider-2/gemini-3-pro-preview". For routing / logical-model
@@ -918,9 +918,9 @@ async def _build_dynamic_logical_model_for_group(
     client: httpx.AsyncClient,
     redis,
     requested_model: Any,
-    lookup_model_id: Optional[str],
+    lookup_model_id: str | None,
     api_style: str,
-) -> Optional[LogicalModel]:
+) -> LogicalModel | None:
     """
     Build a transient LogicalModel for cases where no static logical
     model is configured for the requested id.
@@ -964,10 +964,10 @@ async def _build_dynamic_logical_model_for_group(
             )
             continue
 
-        matched_full_id: Optional[str] = None
+        matched_full_id: str | None = None
 
         for item in items:
-            mid: Optional[str] = None
+            mid: str | None = None
             if isinstance(item, dict):
                 mid_val = item.get("id") or item.get("model_id")
                 if isinstance(mid_val, str):
@@ -1034,7 +1034,7 @@ async def _build_dynamic_logical_model_for_group(
     )
 
 
-def _normalize_gemini_input_to_messages(input_value: Any) -> list[Dict[str, str]]:
+def _normalize_gemini_input_to_messages(input_value: Any) -> list[dict[str, str]]:
     """
     Convert a Gemini-style `input` list into OpenAI-style `messages`.
     This is a best-effort adapter so that clients that speak Gemini
@@ -1044,7 +1044,7 @@ def _normalize_gemini_input_to_messages(input_value: Any) -> list[Dict[str, str]
     if not isinstance(input_value, list):
         return []
 
-    messages: list[Dict[str, str]] = []
+    messages: list[dict[str, str]] = []
 
     for item in input_value:
         if not isinstance(item, dict):
@@ -1079,7 +1079,7 @@ def _normalize_gemini_input_to_messages(input_value: Any) -> list[Dict[str, str]
     return messages
 
 
-def _normalize_payload_by_model(payload: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_payload_by_model(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Inspect payload.model + structure, and normalize provider-specific
     formats (e.g. Gemini) into the OpenAI-style shape expected by the
@@ -1110,7 +1110,7 @@ def _normalize_payload_by_model(payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _flatten_responses_content(content: Any) -> Optional[str]:
+def _flatten_responses_content(content: Any) -> str | None:
     """
     Best-effort extraction of plain text from OpenAI Responses-style content
     blocks. These blocks may be strings or a list of dict segments
@@ -1140,13 +1140,13 @@ def _flatten_responses_content(content: Any) -> Optional[str]:
 
 
 def _convert_responses_messages(
-    input_value: Any, instructions: Optional[str]
-) -> list[Dict[str, str]]:
+    input_value: Any, instructions: str | None
+) -> list[dict[str, str]]:
     """
     Convert Responses API `input` + optional `instructions` into
     OpenAI-style chat messages.
     """
-    messages: list[Dict[str, str]] = []
+    messages: list[dict[str, str]] = []
 
     if isinstance(instructions, str) and instructions.strip():
         messages.append({"role": "system", "content": instructions.strip()})
@@ -1167,7 +1167,7 @@ def _convert_responses_messages(
     return messages
 
 
-def _adapt_responses_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
+def _adapt_responses_payload(raw_payload: dict[str, Any]) -> dict[str, Any]:
     """
     Adapt a Responses API payload into the chat-completions-friendly shape.
     This primarily maps `instructions` + `input` into `messages`.
@@ -1194,14 +1194,14 @@ def _adapt_responses_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _ensure_response_id(response_id: Optional[str]) -> str:
+def _ensure_response_id(response_id: str | None) -> str:
     return response_id or f"resp-{int(time.time() * 1000)}"
 
 
 def _build_output_blocks_from_text_map(
     response_id: str,
-    index_to_text: Dict[int, str],
-) -> list[Dict[str, Any]]:
+    index_to_text: dict[int, str],
+) -> list[dict[str, Any]]:
     if not index_to_text:
         return [
             {
@@ -1212,7 +1212,7 @@ def _build_output_blocks_from_text_map(
             }
         ]
 
-    blocks: list[Dict[str, Any]] = []
+    blocks: list[dict[str, Any]] = []
     for idx in sorted(index_to_text):
         text = index_to_text[idx]
         blocks.append(
@@ -1226,8 +1226,8 @@ def _build_output_blocks_from_text_map(
     return blocks
 
 
-def _text_map_from_choices(choices: Any) -> Dict[int, str]:
-    text_map: Dict[int, str] = {}
+def _text_map_from_choices(choices: Any) -> dict[int, str]:
+    text_map: dict[int, str] = {}
     if not isinstance(choices, list):
         return text_map
     for idx, choice in enumerate(choices):
@@ -1240,7 +1240,7 @@ def _text_map_from_choices(choices: Any) -> Dict[int, str]:
     return text_map
 
 
-def _chat_to_responses_payload(chat_payload: Dict[str, Any]) -> Dict[str, Any]:
+def _chat_to_responses_payload(chat_payload: dict[str, Any]) -> dict[str, Any]:
     """
     Convert a chat-completions JSON payload into Responses API shape.
     """
@@ -1263,17 +1263,17 @@ def _chat_to_responses_payload(chat_payload: Dict[str, Any]) -> Dict[str, Any]:
     return payload
 
 
-def _encode_sse_payload(payload: Dict[str, Any]) -> bytes:
-    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode("utf-8")
+def _encode_sse_payload(payload: dict[str, Any]) -> bytes:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
 
 
 def _build_completed_event_payload(
-    response_id: Optional[str],
-    model: Optional[str],
-    created: Optional[int],
-    index_to_text: Dict[int, str],
-    usage: Optional[Dict[str, Any]],
-) -> Dict[str, Any]:
+    response_id: str | None,
+    model: str | None,
+    created: int | None,
+    index_to_text: dict[int, str],
+    usage: dict[str, Any] | None,
+) -> dict[str, Any]:
     rid = _ensure_response_id(response_id)
     created_ts = created or int(time.time())
     outputs = _build_output_blocks_from_text_map(rid, index_to_text)
@@ -1299,10 +1299,10 @@ def _build_completed_event_payload(
 
 
 def _build_created_event_payload(
-    response_id: Optional[str],
-    model: Optional[str],
-    created: Optional[int],
-) -> Dict[str, Any]:
+    response_id: str | None,
+    model: str | None,
+    created: int | None,
+) -> dict[str, Any]:
     rid = _ensure_response_id(response_id)
     created_ts = created or int(time.time())
     response_body = {
@@ -1322,9 +1322,9 @@ def _build_created_event_payload(
 
 
 def _build_output_done_event_payload(
-    response_id: Optional[str],
+    response_id: str | None,
     output_index: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     rid = _ensure_response_id(response_id)
     return {
         "id": rid,
@@ -1341,11 +1341,11 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
 
     async def _iterator() -> AsyncIterator[bytes]:
         buffer = ""
-        index_to_text: Dict[int, str] = {}
-        response_id: Optional[str] = None
-        model: Optional[str] = None
-        created: Optional[int] = None
-        usage: Optional[Dict[str, Any]] = None
+        index_to_text: dict[int, str] = {}
+        response_id: str | None = None
+        model: str | None = None
+        created: int | None = None
+        usage: dict[str, Any] | None = None
         created_emitted = False
         completed_emitted = False
         done_indices: set[int] = set()
@@ -1356,7 +1356,7 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
             response_id = rid
             return rid
 
-        def _maybe_emit_created_event() -> Optional[bytes]:
+        def _maybe_emit_created_event() -> bytes | None:
             nonlocal created_emitted
             if created_emitted:
                 return None
@@ -1369,7 +1369,7 @@ def _wrap_chat_stream_response(chat_response: StreamingResponse) -> StreamingRes
             created_emitted = True
             return _encode_sse_payload(created_payload)
 
-        def _emit_output_done(idx: int) -> Optional[bytes]:
+        def _emit_output_done(idx: int) -> bytes | None:
             if idx in done_indices:
                 return None
             rid = _get_or_create_response_id()
@@ -1595,8 +1595,8 @@ def create_app() -> FastAPI:
         request: Request,
         client: httpx.AsyncClient = Depends(get_http_client),
         redis=Depends(get_redis),
-        x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
-        raw_body: Dict[str, Any] = Body(...),
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        raw_body: dict[str, Any] = Body(...),
     ):
         """
         Gateway endpoint that accepts both OpenAI-style and Claude-style payloads.
@@ -1661,7 +1661,7 @@ def create_app() -> FastAPI:
         # Try multi-provider logical-model routing first. When a LogicalModel
         # named `lookup_model_id` exists in Redis, we use the routing
         # scheduler to pick a concrete upstream provider+model.
-        logical_model: Optional[LogicalModel] = None
+        logical_model: LogicalModel | None = None
         if isinstance(lookup_model_id, str):
             try:
                 logical_model = await get_logical_model(redis, lookup_model_id)
@@ -1734,15 +1734,15 @@ def create_app() -> FastAPI:
                 )
 
             # 2) Optional session stickiness using X-Session-Id as conversation id.
-            session_obj: Optional[Session] = None
+            session_obj: Session | None = None
             if x_session_id:
                 session_obj = await get_session(redis, x_session_id)
 
             # 3) Load routing metrics and choose an upstream via the scheduler.
-            base_weights: Dict[str, float] = {
+            base_weights: dict[str, float] = {
                 up.provider_id: up.base_weight for up in candidates
             }
-            metrics_by_provider: Dict[str, RoutingMetrics] = (
+            metrics_by_provider: dict[str, RoutingMetrics] = (
                 await _load_metrics_for_candidates(
                     redis,
                     logical_model.logical_id,
@@ -1831,15 +1831,15 @@ def create_app() -> FastAPI:
             if not stream:
                 # Non-streaming mode: try candidates in order, falling back
                 # to the next provider when we see a retryable upstream error.
-                last_status: Optional[int] = None
-                last_error_text: Optional[str] = None
+                last_status: int | None = None
+                last_error_text: str | None = None
 
                 for cand in ordered_candidates:
                     base_endpoint = cand.upstream.endpoint
                     url = base_endpoint
                     provider_id = cand.upstream.provider_id
                     model_id = cand.upstream.model_id
-                    key_selection: Optional[SelectedProviderKey] = None
+                    key_selection: SelectedProviderKey | None = None
                     provider_cfg = get_provider_config(provider_id)
                     if provider_cfg is None:
                         last_status = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -1923,7 +1923,7 @@ def create_app() -> FastAPI:
                         else None
                     )
 
-                    preferred_messages_path: Optional[str] = None
+                    preferred_messages_path: str | None = None
                     if api_style == "claude":
                         preferred_messages_path = messages_path_override
                         if preferred_messages_path is None:
@@ -2195,15 +2195,15 @@ def create_app() -> FastAPI:
 
             # Streaming mode via candidate providers.
             async def routed_iterator() -> AsyncIterator[bytes]:
-                last_status: Optional[int] = None
-                last_error_text: Optional[str] = None
+                last_status: int | None = None
+                last_error_text: str | None = None
 
                 for idx, cand in enumerate(ordered_candidates):
                     base_endpoint = cand.upstream.endpoint
                     url = base_endpoint
                     provider_id = cand.upstream.provider_id
                     model_id = cand.upstream.model_id
-                    key_selection: Optional[SelectedProviderKey] = None
+                    key_selection: SelectedProviderKey | None = None
                     provider_cfg = get_provider_config(provider_id)
                     if provider_cfg is None:
                         last_status = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -2293,7 +2293,7 @@ def create_app() -> FastAPI:
                         if fallback_path
                         else None
                     )
-                    preferred_messages_path: Optional[str] = None
+                    preferred_messages_path: str | None = None
                     if api_style == "claude":
                         preferred_messages_path = messages_path_override
                         if preferred_messages_path is None:
@@ -2319,7 +2319,7 @@ def create_app() -> FastAPI:
                                 record_key_success(key_selection, redis=redis)
                             _mark_provider_success(provider_id)
                             return
-                    stream_adapter: Optional[GeminiToOpenAIStreamAdapter] = None
+                    stream_adapter: GeminiToOpenAIStreamAdapter | None = None
                     if api_style == "openai" and _GEMINI_MODEL_REGEX.search(
                         model_id or ""
                     ):
@@ -2464,7 +2464,7 @@ def create_app() -> FastAPI:
 
                         error_chunk = (
                             f"data: {json.dumps(payload_json, ensure_ascii=False)}\n\n"
-                        ).encode("utf-8")
+                        ).encode()
 
                         # Save error into context for debugging.
                         await save_context(
@@ -2488,7 +2488,7 @@ def create_app() -> FastAPI:
                 }
                 error_chunk = (
                     f"data: {json.dumps(generic_payload, ensure_ascii=False)}\n\n"
-                ).encode("utf-8")
+                ).encode()
 
                 await save_context(
                     redis,
@@ -2511,8 +2511,8 @@ def create_app() -> FastAPI:
         request: Request,
         client: httpx.AsyncClient = Depends(get_http_client),
         redis=Depends(get_redis),
-        x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
-        raw_body: Dict[str, Any] = Body(...),
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        raw_body: dict[str, Any] = Body(...),
     ):
         """
         OpenAI Responses API 兼容端点，默认以 Responses 形态透传到上游。
@@ -2564,8 +2564,8 @@ def create_app() -> FastAPI:
         request: Request,
         client: httpx.AsyncClient = Depends(get_http_client),
         redis=Depends(get_redis),
-        x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
-        raw_body: Dict[str, Any] = Body(...),
+        x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
+        raw_body: dict[str, Any] = Body(...),
     ):
         """
         Claude/Anthropic Messages API 兼容端点，向上游的 /v1/message 转发。

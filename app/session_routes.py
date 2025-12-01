@@ -14,7 +14,6 @@ from app.errors import not_found
 from app.models import Session
 from app.routing.session_manager import delete_session, get_session
 
-
 router = APIRouter(
     tags=["sessions"],
     dependencies=[Depends(require_api_key)],

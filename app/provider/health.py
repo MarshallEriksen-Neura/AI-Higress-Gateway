@@ -10,7 +10,6 @@ latency.
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 import httpx
 from pydantic import BaseModel, Field
@@ -23,6 +22,7 @@ from app.provider.key_pool import (
     record_key_failure,
     record_key_success,
 )
+
 try:
     from redis.asyncio import Redis
 except ModuleNotFoundError:  # pragma: no cover - fallback when redis not installed
@@ -37,13 +37,13 @@ class HealthStatus(BaseModel):
     provider_id: str = Field(..., description="Provider id")
     status: ProviderStatus = Field(..., description="Health status")
     timestamp: float = Field(..., description="Check timestamp (epoch seconds)")
-    response_time_ms: Optional[float] = Field(
+    response_time_ms: float | None = Field(
         None, description="Response time in milliseconds"
     )
-    error_message: Optional[str] = Field(
+    error_message: str | None = Field(
         None, description="Error message if check failed"
     )
-    last_successful_check: Optional[float] = Field(
+    last_successful_check: float | None = Field(
         None, description="Timestamp of last successful check"
     )
 
@@ -51,7 +51,7 @@ class HealthStatus(BaseModel):
 async def check_provider_health(
     client: httpx.AsyncClient,
     provider: ProviderConfig,
-    redis: Optional[Redis] = None,
+    redis: Redis | None = None,
 ) -> HealthStatus:
     """
     Perform a lightweight health check by calling the provider's models endpoint.
@@ -83,8 +83,8 @@ async def check_provider_health(
 
     start = time.perf_counter()
     status = ProviderStatus.HEALTHY
-    error_message: Optional[str] = None
-    last_success: Optional[float] = None
+    error_message: str | None = None
+    last_success: float | None = None
 
     try:
         resp = await client.get(url, headers=headers)
