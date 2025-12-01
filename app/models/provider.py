@@ -1,130 +1,48 @@
-from enum import Enum
-from typing import Any, Literal
+from __future__ import annotations
 
-from pydantic import BaseModel, Field, HttpUrl
+from sqlalchemy import Column, DateTime, Float, Integer, String, text
+from sqlalchemy.orm import Mapped, relationship
 
+from app.db.types import JSONBCompat
 
-class ProviderStatus(str, Enum):
-    """
-    Runtime health state for a provider.
-    Mirrors the enum defined in specs/001-model-routing/data-model.md.
-    """
-
-    HEALTHY = "healthy"
-    DEGRADED = "degraded"
-    DOWN = "down"
+from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
 
-class ProviderAPIKey(BaseModel):
-    """
-    A single API key entry for a provider, with optional weight and limits.
-    """
+class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Database model storing provider metadata and configuration."""
 
-    key: str = Field(..., description="API authentication key or token")
-    weight: float = Field(
-        default=1.0,
-        description="Relative routing weight when the provider has multiple keys",
-        gt=0,
-    )
-    max_qps: int | None = Field(
-        default=None,
-        description="Optional per-key QPS limit; when reached this key is temporarily skipped",
-        gt=0,
-    )
-    label: str | None = Field(
-        default=None,
-        description="Optional label for observability; key material is never logged",
-    )
+    __tablename__ = "providers"
 
+    provider_id: Mapped[str] = Column(String(50), unique=True, nullable=False, index=True)
+    name: Mapped[str] = Column(String(100), nullable=False)
+    base_url: Mapped[str] = Column(String(255), nullable=False)
+    transport: Mapped[str] = Column(String(16), nullable=False, server_default=text("'http'"))
+    weight: Mapped[float] = Column(Float, nullable=False, server_default=text("1.0"))
+    region: Mapped[str | None] = Column(String(50), nullable=True)
+    cost_input: Mapped[float | None] = Column(Float, nullable=True)
+    cost_output: Mapped[float | None] = Column(Float, nullable=True)
+    max_qps: Mapped[int | None] = Column(Integer, nullable=True)
+    retryable_status_codes = Column(JSONBCompat(), nullable=True)
+    custom_headers = Column(JSONBCompat(), nullable=True)
+    models_path: Mapped[str] = Column(String(100), nullable=False, server_default=text("'/v1/models'"))
+    messages_path: Mapped[str | None] = Column(String(100), nullable=True)
+    static_models = Column(JSONBCompat(), nullable=True)
+    status: Mapped[str] = Column(String(16), nullable=False, server_default=text("'healthy'"))
+    last_check = Column(DateTime(timezone=True), nullable=True)
+    metadata_json = Column("metadata", JSONBCompat(), nullable=True)
 
-class ProviderConfig(BaseModel):
-    """
-    Static configuration for a model provider, usually loaded from env.
-    """
-
-    id: str = Field(..., description="Provider unique identifier (short slug)")
-    name: str = Field(..., description="Human readable provider name")
-    base_url: HttpUrl = Field(..., description="API base URL")
-    api_key: str | None = Field(
-        None, description="API authentication key or token (legacy single-key field)"
+    api_keys: Mapped[list["ProviderAPIKey"]] = relationship(
+        "ProviderAPIKey",
+        back_populates="provider",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
-    api_keys: list[ProviderAPIKey] | None = Field(
-        default=None,
-        description="Weighted pool of API keys for this provider",
-    )
-    models_path: str = Field(
-        default="/v1/models", description="Path for listing models"
-    )
-    messages_path: str | None = Field(
-        default="/v1/message",
-        description=(
-            "Preferred Claude Messages API path. Set to empty/None when the "
-            "provider only supports chat completions and requires fallback."
-        ),
-    )
-    weight: float = Field(
-        default=1.0,
-        description="Base routing weight used by the scheduler",
-        gt=0,
-    )
-    region: str | None = Field(None, description="Optional region / label")
-    cost_input: float | None = Field(
-        None, description="Per-token input price", gt=0
-    )
-    cost_output: float | None = Field(
-        None, description="Per-token output price", gt=0
-    )
-    max_qps: int | None = Field(
-        None, description="Provider-level QPS limit", gt=0
-    )
-    custom_headers: dict[str, str] | None = Field(
-        None, description="Extra headers to send to this provider"
-    )
-    retryable_status_codes: list[int] | None = Field(
-        default=None,
-        description=(
-            "HTTP status codes that should be treated as retryable for this "
-            "provider (e.g. [429, 500, 502, 503, 504] for OpenAI/Gemini/Claude)."
-        ),
-    )
-    static_models: list[dict[str, Any]] | None = Field(
-        default=None,
-        description=(
-            "Optional manual list of models used when the provider does not "
-            "offer a /models endpoint. Each entry should match the upstream "
-            "model metadata shape (at minimum include an 'id')."
-        ),
-    )
-    transport: Literal["http", "sdk"] = Field(
-        default="http",
-        description="Transport type: default HTTP proxying or provider-native SDK",
-    )
-
-    def get_api_keys(self) -> list[ProviderAPIKey]:
-        """
-        Return configured API keys, falling back to the legacy single-key field.
-        """
-        if self.api_keys:
-            return list(self.api_keys)
-        if self.api_key:
-            return [ProviderAPIKey(key=self.api_key, label="default")]
-        return []
-
-
-class Provider(ProviderConfig):
-    """
-    Full provider information including runtime status metadata.
-    """
-
-    status: ProviderStatus = Field(
-        default=ProviderStatus.HEALTHY, description="Current provider health state"
-    )
-    last_check: float | None = Field(
-        None, description="Last health-check timestamp (epoch seconds)"
-    )
-    metadata: dict[str, Any] | None = Field(
-        None, description="Additional runtime metadata from health checks, etc."
+    models: Mapped[list["ProviderModel"]] = relationship(
+        "ProviderModel",
+        back_populates="provider",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
 
-__all__ = ["Provider", "ProviderAPIKey", "ProviderConfig", "ProviderStatus"]
+__all__ = ["Provider"]

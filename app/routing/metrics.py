@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from app.models import MetricsHistory, ProviderStatus, RoutingMetrics
+from app.schemas import MetricsHistory, ProviderStatus, RoutingMetrics
 
 
 def aggregate_metrics(

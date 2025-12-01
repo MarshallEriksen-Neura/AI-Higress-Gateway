@@ -1,6 +1,7 @@
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
 import httpx
+from sqlalchemy.orm import Session
 
 try:
     # Prefer the real Redis type when the dependency is installed.
@@ -8,6 +9,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - safety fallback for minimal envs
     Redis = object  # type: ignore[misc,assignment]
 
+from .db import get_db_session
 from .redis_client import get_redis_client
 from .settings import settings
 
@@ -32,3 +34,10 @@ async def get_http_client() -> AsyncIterator[httpx.AsyncClient]:
     """
     async with httpx.AsyncClient(timeout=settings.upstream_timeout) as client:
         yield client
+
+
+def get_db() -> Iterator[Session]:
+    """
+    Provide a synchronous SQLAlchemy session.
+    """
+    yield from get_db_session()

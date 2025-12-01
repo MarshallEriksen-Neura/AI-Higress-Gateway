@@ -14,7 +14,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 from app.auth import require_api_key
 from app.deps import get_redis
 from app.errors import not_found, service_unavailable
-from app.models import (
+from app.schemas import (
     LogicalModel,
     PhysicalModel,
     RoutingMetrics,

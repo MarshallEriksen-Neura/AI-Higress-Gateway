@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from redis.asyncio import Redis
 
 from app.logging_config import logger
-from app.models import ProviderConfig
+from app.schemas import ProviderConfig
 from app.settings import settings
 
 

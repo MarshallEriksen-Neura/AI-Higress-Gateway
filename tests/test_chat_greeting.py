@@ -14,10 +14,11 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app.deps import get_http_client, get_redis  # noqa: E402
-from app.models import LogicalModel, ModelCapability, PhysicalModel, ProviderConfig  # noqa: E402
+from app.schemas import LogicalModel, ModelCapability, PhysicalModel, ProviderConfig  # noqa: E402
 from app.routes import create_app  # noqa: E402
 from app.settings import settings  # noqa: E402
 from app.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE  # noqa: E402
+from tests.utils import install_inmemory_db  # noqa: E402
 
 
 class FakeRedis:
@@ -61,6 +62,9 @@ class FakeRedis:
         else:
             slice_end = end + 1
         return lst[start:slice_end]
+
+    async def delete(self, key: str):
+        self._data.pop(key, None)
 
 
 fake_redis = FakeRedis()
@@ -500,7 +504,6 @@ def _seed_logical_model() -> None:
 
 
 def _prepare_basic_app(monkeypatch):
-    monkeypatch.setattr(settings, "api_auth_token", "timeline", raising=False)
     monkeypatch.setattr(settings, "mask_as_browser", False, raising=False)
     monkeypatch.setattr(settings, "mask_user_agent", "pytest-client", raising=False)
     monkeypatch.setattr(settings, "mask_origin", None, raising=False)
@@ -538,6 +541,8 @@ def _prepare_basic_app(monkeypatch):
     _seed_logical_model()
 
     app = create_app()
+    install_inmemory_db(app)
+    install_inmemory_db(app)
 
     # Override Redis and HTTP client dependencies.
     app.dependency_overrides[get_redis] = override_get_redis
@@ -558,7 +563,6 @@ def _prepare_sdk_app(
     """
     Prepare an app wired with a single SDK-transport provider.
     """
-    monkeypatch.setattr(settings, "api_auth_token", "timeline", raising=False)
     monkeypatch.setattr(settings, "mask_as_browser", False, raising=False)
     monkeypatch.setattr(settings, "mask_user_agent", "pytest-client", raising=False)
     monkeypatch.setattr(settings, "mask_origin", None, raising=False)
@@ -615,6 +619,8 @@ def _prepare_sdk_app(
     fake_redis._data[key] = json.dumps(logical.model_dump(), ensure_ascii=False)
 
     app = create_app()
+    install_inmemory_db(app)
+    install_inmemory_db(app)
     app.dependency_overrides[get_redis] = override_get_redis
     # HTTP client不会被 SDK 分支真正使用，但依然需要满足 FastAPI 依赖签名。
     app.dependency_overrides[get_http_client] = override_get_http_client
@@ -991,6 +997,7 @@ def test_chat_failover_non_stream(monkeypatch):
     _seed_failover_logical_model()
 
     app = create_app()
+    install_inmemory_db(app)
     app.dependency_overrides[get_redis] = override_get_redis
     app.dependency_overrides[get_http_client] = _override_get_http_client_failover
 
@@ -1070,6 +1077,7 @@ def test_chat_failover_streaming(monkeypatch):
     _seed_failover_logical_model()
 
     app = create_app()
+    install_inmemory_db(app)
     app.dependency_overrides[get_redis] = override_get_redis
     app.dependency_overrides[get_http_client] = _override_get_http_client_failover
 

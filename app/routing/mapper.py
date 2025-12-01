@@ -11,7 +11,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
-from app.models import LogicalModel, Model, PhysicalModel
+from app.schemas import LogicalModel, Model, PhysicalModel
 
 
 @dataclass

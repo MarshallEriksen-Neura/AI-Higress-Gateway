@@ -80,52 +80,47 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
    cp .env.example .env
    ```
 
-3. 编辑 `.env` 配置文件：
+3. 在数据库中写入提供商/模型配置：
 
-   ```env
-   # Redis地址（使用docker-compose启动时可用默认值）
-   REDIS_URL=redis://redis:6379/0
+   现在所有提供商与模型元数据都保存在 PostgreSQL 的 `providers`、`provider_api_keys`、`provider_models` 表中。执行 Alembic 迁移后，可通过管理 API（开发中）或一段简短脚本初始化数据。下面示例创建一个 OpenAI 提供商及其 API Key：
 
-   # ⚠️ 重要：设置你的认证token
-   APIPROXY_AUTH_TOKEN=timeline
+   ```bash
+   uv run python - <<'PY'
+from uuid import uuid4
 
-   # 添加你想用的AI服务提供商
-   LLM_PROVIDERS=openai,gemini,claude
+from app.db.session import SessionLocal
+from app.models import Provider, ProviderAPIKey
+from app.services.encryption import encrypt_secret
 
-   # OpenAI配置
-   LLM_PROVIDER_openai_NAME=OpenAI
-   LLM_PROVIDER_openai_BASE_URL=https://api.openai.com
-   # 单 key 写法：
-   LLM_PROVIDER_openai_API_KEY=你的OpenAI密钥
-   # 可选：多 key 轮询（简写）
-   # LLM_PROVIDER_openai_API_KEYS=key-a,key-b
-   # 可选：多 key 轮询（带权重/限速）
-   # LLM_PROVIDER_openai_API_KEYS_JSON=[{"key":"key-a","weight":2},{"key":"key-b","max_qps":5}]
-   # 也支持字符串数组简写：
-   # LLM_PROVIDER_openai_API_KEYS_JSON=["key-a","key-b"]
-
-   # Gemini配置
-   LLM_PROVIDER_gemini_NAME=Gemini
-   LLM_PROVIDER_gemini_BASE_URL=https://generativelanguage.googleapis.com
-   LLM_PROVIDER_gemini_MODELS_PATH=/v1beta/models
-   LLM_PROVIDER_gemini_API_KEY=你的Gemini密钥
-
-   # Google 原生 SDK 直连（不会自动拼接 /v1/...）
-   LLM_PROVIDER_google_NAME=Google Native SDK
-   LLM_PROVIDER_google_BASE_URL=https://generativelanguage.googleapis.com
-   LLM_PROVIDER_google_TRANSPORT=sdk
-   LLM_PROVIDER_google_API_KEY=你的Gemini密钥
-
-   # Claude配置
-   LLM_PROVIDER_claude_NAME=Claude
-   LLM_PROVIDER_claude_BASE_URL=https://api.anthropic.com
-   LLM_PROVIDER_claude_TRANSPORT=sdk
-   LLM_PROVIDER_claude_API_KEY=你的Claude密钥
+session = SessionLocal()
+provider = Provider(
+    id=uuid4(),
+    provider_id="openai",
+    name="OpenAI",
+    base_url="https://api.openai.com",
+    transport="http",
+    models_path="/v1/models",
+    messages_path="/v1/messages",
+    weight=1.0,
+)
+session.add(provider)
+session.flush()
+session.add(
+    ProviderAPIKey(
+        provider_uuid=provider.id,
+        encrypted_key=encrypt_secret("sk-你的OpenAI密钥"),  # 整个过程不会落盘明文
+        label="default",
+        max_qps=50,
+    )
+)
+session.commit()
+session.close()
+PY
    ```
 
-   当 `TRANSPORT=sdk` 时，网关会自动识别厂商（openai / google-genai / anthropic），直接调用官方 SDK，而不会自动拼接 `/v1/...` 路径。
+   其他厂商、静态模型、权重/QPS 等都通过更新数据库记录完成，不再依赖 `LLM_PROVIDER_*` 环境变量。
 
-   生成并填入 `SECRET_KEY`（用于对敏感标识做 HMAC / 加密，不会存明文）：
+   生成并填入 `SECRET_KEY`（用于派生 Fernet/HMAC 密钥，加密后的密钥才会写入数据库）：
 
    ```bash
    bash scripts/generate_secret_key.sh
@@ -133,18 +128,9 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 
    将输出的随机字符串填入 `.env` 中的 `SECRET_KEY`。
 
-4. 🔑 生成API密钥（非常重要！）：
+4. 🔑 初始化用户与密钥（非常重要！）：
 
-   ```bash
-   uv run scripts/encode_token.py timeline
-   ```
-
-   会输出类似这样的内容：
-   ```
-   dGltZWxpbmU=  # 这就是你的加密token
-   ```
-
-   **保存这个加密后的token** - 调用API时需要用到！
+   通过 `/users` 以及 `/users/{user_id}/api-keys` 管理接口创建用户并生成密钥。API 只会返回一次明文密钥，请立刻保存，并在调用网关时携带 `Authorization: Bearer <base64(token)>`（可用 `uv run scripts/encode_token.py <token>` 重新编码）。首个管理员账户/密钥可由运维流程（SQL、管理后台等）提前注入。
 
 5. 启动服务：
 
@@ -196,11 +182,10 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
    cp .env.example .env
    ```
 
-   - 将 `REDIS_URL` 指向本地 Redis；
-   - 配置 `APIPROXY_AUTH_TOKEN` 作为外部调用本网关的 API token（可用 `uv run scripts/encode_token.py <token>` 生成 Base64；客户端需要携带其 Base64 编码）；
-   - 配置 `SECRET_KEY` 作为敏感标识加密/哈希用的密钥，可运行 `bash scripts/generate_secret_key.sh` 获取随机值；
-   - 配置 `LLM_PROVIDERS` 与 `LLM_PROVIDER_{id}_*`；
-   - 如需自定义重试状态码，设置 `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES`。
+   - 将 `REDIS_URL`、`DATABASE_URL` 指向本地服务；
+   - 配置 `SECRET_KEY`（`bash scripts/generate_secret_key.sh`）以便派生 Fernet/HMAC 密钥；
+   - 通过 `/users` 与 `/users/{user_id}/api-keys`（或其他运维流程）创建管理员账号和密钥，并在请求里携带 `Authorization: Bearer <base64(token)>`；
+   - 直接在数据库中新增/修改 `providers`、`provider_api_keys`、`provider_models` 行，以设置权重、SDK 连接方式、重试状态码等信息。
 
 3. 启动开发服务器：
 
@@ -216,52 +201,35 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 
 ## 配置说明
 
-应用通过环境变量配置，通常从 `.env` 文件加载。完整配置示例见 `.env.example` 和 `docs/configuration.md`。
+基础设施仍通过 `.env` 控制，但提供商/模型的核心配置改为存储在数据库中。详见 `docs/configuration.md`。
 
 常用环境变量：
 
-| 变量名                          | 说明                                                                 | 默认值                    |
-| ------------------------------- | -------------------------------------------------------------------- | ------------------------- |
-| `REDIS_URL`                     | Redis 连接字符串                                                     | `redis://redis:6379/0`    |
-| `APIPROXY_AUTH_TOKEN`           | 网关对外认证 token（可用 `uv run scripts/encode_token.py <token>` 生成 Base64），客户端需在 Authorization 头中携带其 Base64 编码 | `timeline`                |
-| `MODELS_CACHE_TTL`              | 模型列表缓存过期时间（秒）                                           | `300`                     |
-| `MASK_AS_BROWSER`               | 是否伪装为浏览器（附加 UA/Origin/Referer 等头）                      | `True`                    |
-| `MASK_USER_AGENT`               | 伪装为浏览器时使用的 User-Agent                                     | 见 `.env.example`         |
-| `MASK_ORIGIN`                   | 可选，伪装为浏览器时附加的 Origin                                   | `None`                    |
-| `MASK_REFERER`                  | 可选，伪装为浏览器时附加的 Referer                                  | `None`                    |
-| `LOG_LEVEL`                     | 网关日志级别（`DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`）          | `INFO`                    |
-| `LOG_TIMEZONE`                  | 日志时间戳使用的时区（如 `Asia/Shanghai`，缺省为系统本地时区）      | 系统本地时区              |
-| `LLM_PROVIDERS`                 | 逗号分隔的提供商 ID 列表，例如 `openai,gemini,claude`               | `None`                    |
-| `LLM_PROVIDER_{id}_NAME`        | 提供商显示名称                                                       | 必填                      |
-| `LLM_PROVIDER_{id}_BASE_URL`    | 提供商 API 基础地址                                                 | 必填                      |
-| `LLM_PROVIDER_{id}_TRANSPORT`   | `http`（默认）通过 HTTP 代理；`sdk` 直接调用官方 SDK（不会自动加 `/v1/...`，目前支持 google-genai / openai / anthropic） | `http`                    |
-| `LLM_PROVIDER_{id}_API_KEY`     | 访问该提供商的密钥或 token（单 key 兼容字段）                       | 必填（未用多 key 时）     |
-| `LLM_PROVIDER_{id}_API_KEYS`    | 多 key 简写，逗号分隔，如 `k1,k2,k3`，默认等权轮询                   | 可选                      |
-| `LLM_PROVIDER_{id}_API_KEYS_JSON` | 多 key 详细配置，JSON 数组，每项可设置 `weight`、`max_qps`、`label` | 可选                      |
-| `LLM_PROVIDER_{id}_MODELS_PATH` | 模型列表路径，通常为 `/v1/models`                                   | `/v1/models`              |
-| `LLM_PROVIDER_{id}_MESSAGES_PATH` | Claude Messages 端点路径，留空表示不支持并直接回退到 `/v1/chat/completions` | `/v1/message`             |
-| `LLM_PROVIDER_{id}_WEIGHT`      | 路由基础权重（影响流量分配）                                         | `1.0`                     |
-| `LLM_PROVIDER_{id}_REGION`      | 区域标签，如 `global`、`us-east`                                    | `None`                    |
-| `LLM_PROVIDER_{id}_MAX_QPS`     | 提供商允许的最大 QPS                                                | `None`                    |
-| `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES` | 可重试的 HTTP 状态码列表或区间，例如 `429,500,502-504`。如不配置，则对 `openai` / `gemini` / `claude/anthropic` 使用默认的 `[429,500,502,503,504]` | `None`（按内置默认或通用规则） |
+| 变量名           | 说明                                                                  | 默认值                                                |
+| ---------------- | --------------------------------------------------------------------- | ----------------------------------------------------- |
+| `DATABASE_URL`   | 主库 SQLAlchemy 连接串                                                | `postgresql+psycopg://postgres:postgres@localhost:5432/apiproxy` |
+| `REDIS_URL`      | Redis 连接字符串                                                      | `redis://redis:6379/0`                                |
+| `SECRET_KEY`     | 用于派生 Fernet/HMAC 密钥的随机串（使用 `bash scripts/generate_secret_key.sh` 生成） | `please-change-me`                                    |
+| `MODELS_CACHE_TTL` | 模型列表缓存过期时间（秒）                                          | `300`                                                 |
+| `MASK_AS_BROWSER` | 是否伪装为浏览器                                                     | `True`                                                |
+| `MASK_USER_AGENT` | 伪装为浏览器时使用的 User-Agent                                      | 见 `.env.example`                                     |
+| `MASK_ORIGIN`    | 可选，伪装为浏览器时附加的 Origin                                    | `None`                                                |
+| `MASK_REFERER`   | 可选，伪装为浏览器时附加的 Referer                                   | `None`                                                |
+| `LOG_LEVEL`      | 网关日志级别                                                         | `INFO`                                                |
+| `LOG_TIMEZONE`   | 日志时间戳使用的时区（如 `Asia/Shanghai`，缺省为系统本地时区）       | 系统本地时区                                          |
 
-> 如果某个提供商没有原生的 `/v1/message(s)` 接口，可将 `LLM_PROVIDER_{id}_MESSAGES_PATH`
-> 置空。网关会在收到 `/v1/messages` 请求时自动转换为 `/v1/chat/completions`，并把上游
-> OpenAI 风格响应再转换回 Claude 格式。
+### 数据库与迁移
 
-> 注意：`LLM_PROVIDERS` 中的 id 必须和下面变量中的 `{id}` 一一对应。  
-> 例如：
-> ```env
-> LLM_PROVIDERS=a4f
-> LLM_PROVIDER_a4f_NAME=a4f
-> LLM_PROVIDER_a4f_BASE_URL=https://api.a4f.co
-> ```
-> 如果写成：
-> ```env
-> LLM_PROVIDERS=a4f
-> LLM_PROVIDER_openai_NAME=a4f
-> ```
-> 那么 `a4f` 这个 provider 会被视为「缺少配置」而被跳过，最终 `/models` 可能返回空列表。
+- 所有 Pydantic schema 已迁移到 `app/schemas`，`app/models` 现在专门存放 SQLAlchemy ORM（目前包含 `User`、`Identity`、`Permission` 三张表）。
+- 在 `.env` 中配置 `DATABASE_URL` 指向 Postgres（仓库附带的 `docker-compose.yml` 已提供一套默认的 Postgres 服务与环境变量）。
+- 使用 Alembic 管理数据库迁移：
+
+  ```bash
+  # 先激活虚拟环境并安装依赖
+  alembic upgrade head
+  ```
+
+  该命令会执行 `alembic/versions/0001_create_auth_tables.py`，创建初始的「用户 / 身份 / 权限」三张表。后续若新增数据表，也按相同流程新增 revision。
 
 ---
 

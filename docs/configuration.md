@@ -1,250 +1,178 @@
 多提供商网关配置指南
 ====================
 
-本文档说明如何通过环境变量配置 APIProxy，使其以「多提供商 + 逻辑模型 + 智能路由」模式工作。
-
-所有配置都来自 `.env` 文件（或 Docker Compose 的 `env_file`），模板见仓库根目录的 `.env.example`。
-
-> 鉴权提示：在 `.env` 中设置 `APIPROXY_AUTH_TOKEN`，客户端需要在请求头里发送它的 Base64 编码：
-> `Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>`。可以运行
-> `uv run scripts/encode_token.py <token>` 来快速生成编码结果。
+APIProxy 的基础依赖（Redis、Postgres、日志级别等）仍通过环境变量配置，但提供商与模型信息已经迁移到数据库中统一管理。本指南介绍如何在数据库中落盘配置、加密 API Key，以及如何验证配置是否生效。
 
 
 1. 基本步骤
 -----------
 
-1. 复制模板：
+1. 复制 `.env` 模板并根据部署环境调整基础配置（`REDIS_URL`、`DATABASE_URL`、`LOG_LEVEL` 等）：
 
    ```bash
    cp .env.example .env
    ```
 
-2. 根据部署方式修改 Redis 地址：
+2. 生成 `SECRET_KEY`，供 Fernet/HMAC 使用（所有敏感信息都依赖该密钥加密）：
 
-   - Docker Compose 默认：
-
-     ```env
-     REDIS_URL=redis://redis:6379/0
-     ```
-
-   - 本地开发（本机跑 Redis）：
-
-     ```env
-     REDIS_URL=redis://localhost:6379/0
-     ```
-
-3. 在 `.env` 中配置多提供商信息（详见下文），然后：
-
-   - Docker：
-     ```bash
-     docker-compose up -d
-     ```
-   - 本地：
-     ```bash
-     uv run uvicorn main:app --reload
-     # 或
-     uv run apiproxy
-     ```
-
-
-2. 多提供商环境变量约定
-----------------------
-
-多提供商配置完全通过环境变量进行，约定如下：
-
-```env
-# 所有提供商 ID，逗号分隔
-LLM_PROVIDERS=openai,azure,local
-
-# OpenAI 提供商
-LLM_PROVIDER_openai_NAME=OpenAI
-LLM_PROVIDER_openai_BASE_URL=https://api.openai.com
-LLM_PROVIDER_openai_API_KEY=sk-your-openai-api-key
-LLM_PROVIDER_openai_MODELS_PATH=/v1/models
-LLM_PROVIDER_openai_WEIGHT=3
-LLM_PROVIDER_openai_REGION=global
-LLM_PROVIDER_openai_COST_INPUT=0.003
-LLM_PROVIDER_openai_COST_OUTPUT=0.006
-LLM_PROVIDER_openai_MAX_QPS=50
-
-# Azure OpenAI 提供商
-LLM_PROVIDER_azure_NAME=Azure OpenAI
-LLM_PROVIDER_azure_BASE_URL=https://your-resource.openai.azure.com
-LLM_PROVIDER_azure_API_KEY=your-azure-api-key
-LLM_PROVIDER_azure_MODELS_PATH=/openai/models
-LLM_PROVIDER_azure_WEIGHT=2
-LLM_PROVIDER_azure_REGION=us-east
-LLM_PROVIDER_azure_COST_INPUT=0.0025
-LLM_PROVIDER_azure_COST_OUTPUT=0.005
-LLM_PROVIDER_azure_MAX_QPS=100
-
-# 本地模型（可选）
-LLM_PROVIDER_local_NAME=Local Model
-LLM_PROVIDER_local_BASE_URL=http://localhost:8080
-LLM_PROVIDER_local_API_KEY=not-required
-LLM_PROVIDER_local_MODELS_PATH=/v1/models
-LLM_PROVIDER_local_WEIGHT=1
-LLM_PROVIDER_local_REGION=local
-```
-
-约定说明：
-
-- `LLM_PROVIDERS`：给出所有提供商的「ID」，例如 `openai,azure,local`。
-- **重要：`LLM_PROVIDERS` 中的每个 id，必须和下面环境变量前缀中的 `{id}` 一一对应。**  
-  例如：
-
-  ```env
-  LLM_PROVIDERS=a4f
-
-  # 对应的配置前缀必须是 LLM_PROVIDER_a4f_*
-  LLM_PROVIDER_a4f_NAME=a4f
-  LLM_PROVIDER_a4f_BASE_URL=https://api.a4f.co
-  LLM_PROVIDER_a4f_API_KEY=xxx
-  ```
-
-  如果写成：
-
-  ```env
-  LLM_PROVIDERS=a4f
-  LLM_PROVIDER_openai_NAME=a4f
-  ```
-
-  则 `a4f` 这个 provider 会被视为「缺少配置」而被静默跳过，最终网关认为没有任何 provider。
-
-- 对于每个 `{id}`，使用前缀 `LLM_PROVIDER_{id}_` 配置该提供商：
-  - 必填：
-    - `LLM_PROVIDER_{id}_NAME`：显示名称；
-    - `LLM_PROVIDER_{id}_BASE_URL`：API 基础地址，例如 `https://api.openai.com`；
-    - `LLM_PROVIDER_{id}_API_KEY`：访问该提供商所需的密钥或 token。
-  - 可选：
-    - `LLM_PROVIDER_{id}_MODELS_PATH`：模型列表路径，默认 `/v1/models`；
-    - `LLM_PROVIDER_{id}_WEIGHT`：基础权重（影响路由倾向，默认 1.0）；
-    - `LLM_PROVIDER_{id}_REGION`：区域标签（如 `global`、`us-east` 等），可用于按区域就近路由；
-    - `LLM_PROVIDER_{id}_COST_INPUT` / `COST_OUTPUT`：用于成本敏感调度策略；
-    - `LLM_PROVIDER_{id}_MAX_QPS`：该提供商允许的最大 QPS。
-
-配置完成后，网关会在启动时自动：
-
-1. 从 `LLM_PROVIDERS` + `LLM_PROVIDER_*` 中解析可用提供商（缺少必填字段的会被跳过并记录 warning）。
-2. 调用每个提供商的 `BASE_URL + MODELS_PATH` 获取模型列表，并写入 Redis：
-
-   ```text
-   llm:vendor:{provider_id}:models -> 标准化后的模型列表 JSON
+   ```bash
+   bash scripts/generate_secret_key.sh
    ```
 
+   将输出写入 `.env` 中的 `SECRET_KEY`。
 
-3. 验证配置是否生效
--------------------
+3. 运行 Alembic 迁移，创建 `providers`、`provider_api_keys`、`provider_models` 等表：
 
-启动服务后，可以用以下接口检查配置是否正确：
+   ```bash
+   alembic upgrade head
+   ```
 
-1. 查看提供商列表：
+4. 使用管理 API（开发中）或临时脚本向数据库写入提供商/模型/密钥。下面示例脚本创建一个 OpenAI 提供商、一个加权 API Key，并演示如何追加静态模型：
+
+   ```bash
+   uv run python - <<'PY'
+from uuid import uuid4
+
+from app.db.session import SessionLocal
+from app.models import Provider, ProviderAPIKey, ProviderModel
+from app.services.encryption import encrypt_secret
+
+session = SessionLocal()
+provider = Provider(
+    id=uuid4(),
+    provider_id="openai",
+    name="OpenAI",
+    base_url="https://api.openai.com",
+    transport="http",
+    models_path="/v1/models",
+    messages_path="/v1/messages",
+    weight=1.0,
+    retryable_status_codes=[429, 500, 502, 503, 504],
+)
+session.add(provider)
+session.flush()
+
+session.add(
+    ProviderAPIKey(
+        provider_uuid=provider.id,
+        encrypted_key=encrypt_secret("sk-your-openai-key"),
+        label="default",
+        max_qps=50,
+        weight=2.0,
+    )
+)
+
+session.add(
+    ProviderModel(
+        provider_id=provider.id,
+        model_id="gpt-4o",
+        family="gpt-4",
+        display_name="GPT-4 Omni",
+        context_length=128000,
+        capabilities=["chat"],
+        pricing={"input": 0.01, "output": 0.03},
+    )
+)
+
+session.commit()
+session.close()
+PY
+   ```
+
+   - **永远不要**直接在数据库中写入明文 API Key。请使用 `app.services.encryption.encrypt_secret()` 生成密文。  
+   - `provider_models` 可选，用于没有 `/models` 接口的提供商；`capabilities` 是任意字符串数组（chat/completion/embedding 等）。  
+   - 多个 API Key 只需新增多行 `provider_api_keys`，权重/QPS/标签均可按列配置。
+
+5. 通过 `/users/{user_id}/api-keys` 或运维脚本创建管理员账号与调用密钥，调用 API 时带上 `Authorization: Bearer <base64(token)>`。
+
+
+2. 数据库字段速览
+----------------
+
+| 表 | 关键字段 | 说明 |
+|----|----------|------|
+| `providers` | `provider_id`、`name`、`base_url`、`transport`、`models_path`、`messages_path`、`weight`、`retryable_status_codes`、`max_qps`、`custom_headers` | 描述一个上游提供商。`transport` 支持 `http` / `sdk`。`custom_headers` 用于附加 HTTP 头。 |
+| `provider_api_keys` | `provider_uuid`、`encrypted_key`、`weight`、`max_qps`、`label`、`status` | 每行表示一个加密后的 API Key，`status != 'active'` 的记录会被忽略。 |
+| `provider_models` | `provider_id`、`model_id`、`display_name`、`context_length`、`capabilities`、`pricing`、`meta_hash` | 可选的静态模型列表。当某个提供商没有 `/models` 接口或需要手动指定模型能力时使用。 |
+
+> 更多字段含义可参考 `specs/003-db-provider-model-config/data-model.md`。
+
+
+3. 验证配置
+-----------
+
+当数据库写入完成后，可通过以下接口确认配置是否生效：
+
+1. 列出所有提供商：
 
    ```bash
    curl -X GET "http://localhost:8000/providers" \
-     -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
+     -H "Authorization: Bearer <base64(API_KEY)>"
    ```
 
-   返回中应包含你在 `LLM_PROVIDERS` 中配置的各个 `id`。
+   返回中应包含数据库里配置的所有 `provider_id`。
 
-2. 查看某个提供商的模型：
+2. 查看某个提供商的模型列表（会先读缓存，命中失败时刷新）：
 
    ```bash
    curl -X GET "http://localhost:8000/providers/openai/models" \
-     -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
+     -H "Authorization: Bearer <base64(API_KEY)>"
    ```
 
-   如果能看到模型列表，说明：
-   - `BASE_URL` / `MODELS_PATH` / `API_KEY` 配置正确；
-   - Redis 写入也正常（该列表会缓存到 Redis 中）。
+   - 如果提供商有 `/models` 接口，会实时抓取并写入 Redis 缓存；  
+   - 如果只配置了 `provider_models`（静态模型），会直接返回该列表。
 
-3. （可选）检查健康状态：
+3. 进行健康检查：
 
    ```bash
    curl -X GET "http://localhost:8000/providers/openai/health" \
-     -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
+     -H "Authorization: Bearer <base64(API_KEY)>"
+   ```
+
+4. 查看路由指标：
+
+   ```bash
+   curl -X GET "http://localhost:8000/providers/openai/metrics" \
+     -H "Authorization: Bearer <base64(API_KEY)>"
    ```
 
 
-4. 逻辑模型与路由相关配置
--------------------------
+4. 逻辑模型与路由
+-----------------
 
-逻辑模型本身的数据目前存储在 Redis 中，按 `llm:logical:{logical_model}` 键保存，格式遵守
-`app/models/logical_model.py` 的 `LogicalModel` 结构。配置方式通常有两种：
+逻辑模型数据仍存放在 Redis（键名 `llm:logical:{logical_model}`），结构参考 `app/models/logical_model.py`。配置方式与之前一致：
 
-1. 通过脚本/管理工具写入 LogicalModel：
+1. 在管理脚本中构造 `LogicalModel`，调用 `app/storage/redis_service.set_logical_model()` 写入；
+2. 或在开发环境中直接用 `redis-cli SET llm:logical:gpt-4 '<json>'` 进行调试。
 
-   - 例如编写一个管理脚本，从代码中构造 `LogicalModel` 实例，然后通过
-     `app/storage/redis_service.set_logical_model()` 写入 Redis。
-
-2. 手工写入（开发环境调试时）：
-
-   - 先在代码里构造一个 LogicalModel 并 `print(json.dumps(model.model_dump()))`，
-     再用 `redis-cli` 手工 `SET llm:logical:gpt-4 '...json...'`。
-
-配置好逻辑模型后，可以用以下接口验证：
+验证逻辑模型：
 
 ```bash
 # 列出所有逻辑模型
 curl -X GET "http://localhost:8000/logical-models" \
-  -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
+  -H "Authorization: Bearer <base64(API_KEY)>"
 
 # 查看某个逻辑模型
 curl -X GET "http://localhost:8000/logical-models/gpt-4" \
-  -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
+  -H "Authorization: Bearer <base64(API_KEY)>"
 
-# 查看逻辑模型的上游列表
+# 查看逻辑模型关联的上游
 curl -X GET "http://localhost:8000/logical-models/gpt-4/upstreams" \
-  -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
+  -H "Authorization: Bearer <base64(API_KEY)>"
 ```
 
-
-5. 路由策略与会话粘连
----------------------
-
-当逻辑模型和运行时指标都就绪后，可以使用 `/routing/decide` 接口检查路由决策：
-
-```bash
-curl -X POST "http://localhost:8000/routing/decide" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>" \
-  -d '{
-    "logical_model": "gpt-4",
-    "strategy": "latency_first",
-    "conversation_id": "conv_123",
-    "preferred_region": "us-east",
-    "exclude_providers": ["local"]
-  }'
-```
-
-- `strategy` 可选值：
-  - `latency_first`
-  - `cost_first`
-  - `reliability_first`
-  - `balanced`（默认）
-- `conversation_id` 提供会话粘连能力；绑定关系可通过：
-
-  ```bash
-  curl -X GET "http://localhost:8000/routing/sessions/conv_123" \
-    -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
-  ```
-
-  查看，删除粘连用：
-
-  ```bash
-  curl -X DELETE "http://localhost:8000/routing/sessions/conv_123" \
-    -H "Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>"
-  ```
+当逻辑模型缺失时，网关会尝试动态构建：根据 `/models` 缓存查找所有包含请求模型 ID 的提供商，自动拼接成临时的逻辑模型，实现跨厂商回退。
 
 
-6. 小结
--------
+5. 常见问题
+-----------
 
-- 所有多提供商配置均通过 `.env` 中的：
-  - `REDIS_URL`
-  - `LLM_PROVIDERS`
-  - `LLM_PROVIDER_{id}_*`
-- 模型发现、逻辑模型映射和路由决策可以通过 `/providers`、`/logical-models`、
-  `/routing/decide` 等接口逐步验证。
-- 推荐以 `.env.example` 为基础，在不同环境中维护不同的 `.env` 文件，
-  保持配置与代码解耦。 
+- **如何更新权重/SDK/自定义 Header？**  
+  直接更新 `providers` 中对应字段。网关在下一次查询时会自动生效。
+
+- **如何轮换 API Key？**  
+  新 Key：向 `provider_api_keys` 插入新行并设置 `status='active'`；旧 Key：将 `status` 标记为 `disabled`，网关会自动忽略。  
+  注意每行的 `encrypted_key` 必须通过 `encrypt_secret` 生成。
+
+- **如何导入旧的环境变量配置？**  
+  可编写一次性脚本读取 `.env`（或 `settings`），映射到三张表。`specs/003-db-provider-model-config/tasks.md` 中的 Phase 5/6 也提供了导入器的设计草案。

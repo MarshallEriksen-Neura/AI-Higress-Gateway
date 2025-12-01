@@ -35,6 +35,11 @@ class Settings(BaseSettings):
         alias="REDIS_URL",
         description="Redis connection URL, e.g. 'redis://redis:6379/0'",
     )
+    database_url: str = Field(
+        "postgresql+psycopg://postgres:postgres@localhost:5432/apiproxy",
+        alias="DATABASE_URL",
+        description="SQLAlchemy database URL, e.g. postgresql+psycopg://user:pass@host:port/db",
+    )
 
     # HTTP timeouts
     upstream_timeout: float = 600.0
@@ -53,14 +58,6 @@ class Settings(BaseSettings):
     mask_origin: str | None = Field(None, alias="MASK_ORIGIN")
     mask_referer: str | None = Field(None, alias="MASK_REFERER")
 
-    # Multi-provider configuration (001-model-routing).
-    # Raw provider id list; concrete provider configs are derived from this.
-    llm_providers_raw: str | None = Field(
-        default=None,
-        alias="LLM_PROVIDERS",
-        description="Comma-separated provider ids, e.g. 'openai,azure,local'",
-    )
-
     # Application log level for our apiproxy logger.
     # Can be overridden via LOG_LEVEL env var, e.g. "DEBUG" while debugging.
     log_level: str = Field(
@@ -74,33 +71,12 @@ class Settings(BaseSettings):
         description="Timezone name for log timestamps, e.g. 'Asia/Shanghai'. Defaults to system local time.",
     )
 
-    # Shared API token required by clients when calling this gateway.
-    api_auth_token: str = Field(
-        "timeline",
-        alias="APIPROXY_AUTH_TOKEN",
-        description="Expected token after base64 decoding the Authorization header",
-    )
-
     # Secret key for hashing/encrypting sensitive data (e.g. key preference hash).
     secret_key: str = Field(
         "please-change-me",
         alias="SECRET_KEY",
         description="Secret key used to derive hashed identifiers for API keys; please override in production",
     )
-
-    def get_llm_provider_ids(self) -> list[str]:
-        """
-        Return configured provider ids from LLM_PROVIDERS.
-        Whitespace is stripped and empty entries are ignored.
-        """
-        if not self.llm_providers_raw:
-            return []
-        return [
-            item.strip()
-            for item in self.llm_providers_raw.split(",")
-            if item.strip()
-        ]
-
 
 settings = Settings()  # Reads from environment if available
 

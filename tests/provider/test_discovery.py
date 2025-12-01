@@ -3,7 +3,7 @@ from typing import Any
 import httpx
 import pytest
 
-from app.models import Model, ProviderConfig
+from app.schemas import Model, ProviderConfig
 from app.provider.discovery import (
     ensure_provider_models_cached,
     fetch_models_from_provider,

@@ -1,29 +1,21 @@
-"""
-Pydantic data models for the multi-provider routing layer.
-
-These models mirror the structures defined in
-specs/001-model-routing/data-model.md and can be shared across
-provider discovery, logical-model mapping and routing components.
-"""
-
-from .logical_model import LogicalModel, PhysicalModel
-from .model import Model, ModelCapability
-from .provider import Provider, ProviderAPIKey, ProviderConfig, ProviderStatus
-from .routing_metrics import MetricsHistory, RoutingMetrics
-from .scheduling import SchedulingStrategy
-from .session import Session
+from .api_key import APIKey
+from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from .identity import Identity
+from .permission import Permission
+from .provider import Provider
+from .provider_api_key import ProviderAPIKey
+from .provider_model import ProviderModel
+from .user import User
 
 __all__ = [
-    "LogicalModel",
-    "MetricsHistory",
-    "Model",
-    "ModelCapability",
-    "PhysicalModel",
+    "APIKey",
+    "Base",
+    "Identity",
+    "Permission",
     "Provider",
     "ProviderAPIKey",
-    "ProviderConfig",
-    "ProviderStatus",
-    "RoutingMetrics",
-    "SchedulingStrategy",
-    "Session",
+    "ProviderModel",
+    "TimestampMixin",
+    "UUIDPrimaryKeyMixin",
+    "User",
 ]

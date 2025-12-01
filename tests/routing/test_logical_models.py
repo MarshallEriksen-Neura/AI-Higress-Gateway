@@ -4,9 +4,10 @@ from typing import Any
 from fastapi.testclient import TestClient
 
 from app.deps import get_redis
-from app.models import LogicalModel, ModelCapability, PhysicalModel
+from app.schemas import LogicalModel, ModelCapability, PhysicalModel
 from app.routes import create_app
 from app.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE
+from tests.utils import auth_headers, install_inmemory_db
 
 
 class DummyRedis:
@@ -30,6 +31,9 @@ class DummyRedis:
             prefix = pattern[:-1]
             return [k for k in self._data.keys() if k.startswith(prefix)]
         return [k for k in self._data.keys() if k == pattern]
+
+    async def delete(self, key: str):
+        self._data.pop(key, None)
 
 
 fake_redis = DummyRedis()
@@ -82,15 +86,14 @@ def test_logical_model_routes_list_and_get():
     # logical_model_routes is already included by create_app via app.include_router
 
     app.dependency_overrides[get_redis] = override_get_redis
+    install_inmemory_db(app)
 
     # Seed Redis with two logical models.
     for lm in _make_sample_models():
         _store_logical_model(lm)
 
     with TestClient(app=app, base_url="http://test") as client:
-        headers = {
-            "Authorization": "Bearer dGltZWxpbmU=",  # base64("timeline")
-        }
+        headers = auth_headers()
 
         resp = client.get("/logical-models", headers=headers)
         assert resp.status_code == 200
@@ -113,19 +116,17 @@ def test_logical_model_routes_list_and_get():
 def test_logical_model_routes_upstreams():
     app = create_app()
     app.dependency_overrides[get_redis] = override_get_redis
+    install_inmemory_db(app)
 
     fake_redis._data.clear()
     logical = _make_sample_models()[0]
     _store_logical_model(logical)
 
     with TestClient(app=app, base_url="http://test") as client:
-        headers = {
-            "Authorization": "Bearer dGltZWxpbmU=",
-        }
+        headers = auth_headers()
         resp = client.get("/logical-models/gpt-4/upstreams", headers=headers)
         assert resp.status_code == 200
         data = resp.json()
         assert isinstance(data["upstreams"], list)
         assert len(data["upstreams"]) == 1
         assert data["upstreams"][0]["provider_id"] == "openai"
-

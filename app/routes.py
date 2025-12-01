@@ -12,7 +12,7 @@ from fastapi import Body, Depends, FastAPI, Header, HTTPException, Request, stat
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
-from app.models import (
+from app.schemas import (
     LogicalModel,
     ModelCapability,
     PhysicalModel,
@@ -45,11 +45,13 @@ from .auth import require_api_key
 from .context_store import save_context
 from .deps import get_http_client, get_redis
 from .logging_config import logger
-from .logical_model_routes import router as logical_model_router
+from .api.api_key_routes import router as api_key_router
+from .api.logical_model_routes import router as logical_model_router
+from .api.provider_routes import router as provider_router
+from .api.routing_routes import router as routing_router
+from .api.session_routes import router as session_router
+from .api.user_routes import router as user_router
 from .model_cache import get_models_from_cache, set_models_cache
-from .provider_routes import router as provider_router
-from .routing_routes import router as routing_router
-from .session_routes import router as session_router
 from .settings import settings
 from .upstream import UpstreamStreamError, detect_request_format, stream_upstream
 
@@ -1519,6 +1521,8 @@ def create_app() -> FastAPI:
     # Routing decision and session APIs (User Story 3).
     app.include_router(routing_router)
     app.include_router(session_router)
+    app.include_router(user_router)
+    app.include_router(api_key_router)
 
     @app.middleware("http")
     async def log_requests(request: Request, call_next):

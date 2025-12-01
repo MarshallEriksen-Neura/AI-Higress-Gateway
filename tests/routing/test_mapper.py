@@ -1,5 +1,5 @@
 
-from app.models import LogicalModel, Model, ModelCapability, PhysicalModel
+from app.schemas import LogicalModel, Model, ModelCapability, PhysicalModel
 from app.routing.mapper import (
     ConsistencyIssue,
     build_provider_model_index,

@@ -1,162 +1,125 @@
-import os
+import uuid
 
-import pytest
-
+from app.models import Provider, ProviderAPIKey, ProviderModel
 from app.provider.config import get_provider_config, load_provider_configs
-from app.settings import settings
+from app.services.encryption import encrypt_secret
 
 
-@pytest.fixture(autouse=True)
-def reset_llm_providers_env(monkeypatch):
-    """
-    Ensure LLM_PROVIDERS-related env and settings are reset between tests.
-    """
-    original_raw = settings.llm_providers_raw
-    for key in list(os.environ.keys()):
-        if key.startswith("LLM_PROVIDER_"):
-            monkeypatch.delenv(key, raising=False)
-    settings.llm_providers_raw = None
-    yield
-    settings.llm_providers_raw = original_raw
-
-
-def _set_provider_env(monkeypatch, provider_id: str, **values: str) -> None:
-    prefix = f"LLM_PROVIDER_{provider_id}_"
-    for suffix, value in values.items():
-        monkeypatch.setenv(prefix + suffix, value)
-
-
-def test_load_provider_configs_skips_incomplete(monkeypatch):
-    settings.llm_providers_raw = "openai,bad"
-
-    _set_provider_env(
-        monkeypatch,
-        "openai",
-        NAME="OpenAI",
-        BASE_URL="https://api.openai.com",
-        API_KEY="sk-test",  # pragma: allowlist secret
-        MODELS_PATH="/v1/models",
+def _build_provider(*, slug: str = "openai", status: str = "active") -> Provider:
+    provider = Provider(
+        provider_id=slug,
+        name="OpenAI",
+        base_url="https://api.openai.com",
+        transport="http",
+        models_path="/v1/models",
+        messages_path="/v1/messages",
+        custom_headers={"X-Test": "1"},
+        retryable_status_codes=[429, "500"],
     )
+    provider.id = uuid.uuid4()
 
-    # Missing API_KEY -> should be skipped
-    _set_provider_env(
-        monkeypatch,
-        "bad",
-        NAME="Bad Provider",
-        BASE_URL="https://bad.example.com",
-    )
+    provider.api_keys = [
+        ProviderAPIKey(
+            provider_uuid=provider.id,
+            encrypted_key=encrypt_secret("sk-test"),
+            weight=2.0,
+            max_qps=10,
+            label="primary",
+            status=status,
+        )
+    ]
+    provider.models = [
+        ProviderModel(
+            provider_id=provider.id,
+            model_id="gpt-4o",
+            family="gpt-4",
+            display_name="GPT-4 Omni",
+            context_length=128000,
+            capabilities=["chat"],
+            pricing={"input": 0.01},
+        )
+    ]
+    return provider
 
-    providers = load_provider_configs()
-    ids: list[str] = [p.id for p in providers]
 
-    assert ids == ["openai"]
-    cfg = providers[0]
-    assert str(cfg.base_url).startswith("https://api.openai.com")
-    assert cfg.models_path == "/v1/models"
+def test_load_provider_configs_reads_from_db(monkeypatch):
+    provider = _build_provider()
 
+    def _fake_loader(session):
+        assert session == "fake-session"
+        return [provider]
 
-def test_get_provider_config_returns_single(monkeypatch):
-    settings.llm_providers_raw = "openai"
-    _set_provider_env(
-        monkeypatch,
-        "openai",
-        NAME="OpenAI",
-        BASE_URL="https://api.openai.com",
-        API_KEY="sk-test",  # pragma: allowlist secret
-    )
+    monkeypatch.setattr("app.provider.config._load_providers_from_db", _fake_loader)
 
-    cfg = get_provider_config("openai")
-    assert cfg is not None
+    configs = load_provider_configs(session="fake-session")
+    assert len(configs) == 1
+    cfg = configs[0]
     assert cfg.id == "openai"
-    assert cfg.name == "OpenAI"
-
-
-def test_provider_config_static_models_json(monkeypatch):
-    settings.llm_providers_raw = "mock"
-    _set_provider_env(
-        monkeypatch,
-        "mock",
-        NAME="Manual Provider",
-        BASE_URL="https://api.mock.local",
-        API_KEY="sk-test",  # pragma: allowlist secret
-        STATIC_MODELS_JSON='["model-a", {"id": "model-b", "context_length": 16384}]',
-    )
-
-    cfg = get_provider_config("mock")
-    assert cfg is not None
+    assert cfg.transport == "http"
     assert cfg.static_models is not None
-    assert cfg.static_models[0]["id"] == "model-a"
-    assert cfg.static_models[1]["context_length"] == 16384
-
-
-def test_provider_config_static_models_file(monkeypatch, tmp_path):
-    settings.llm_providers_raw = "mock"
-    static_file = tmp_path / "models.json"
-    static_file.write_text('[{"id": "manual-1"}]', encoding="utf-8")
-
-    _set_provider_env(
-        monkeypatch,
-        "mock",
-        NAME="Manual Provider",
-        BASE_URL="https://api.mock.local",
-        API_KEY="sk-test",  # pragma: allowlist secret
-        STATIC_MODELS_FILE=str(static_file),
-    )
-
-    cfg = get_provider_config("mock")
-    assert cfg is not None
-    assert cfg.static_models is not None
-    assert cfg.static_models[0]["id"] == "manual-1"
-
-
-def test_provider_config_supports_comma_separated_keys(monkeypatch):
-    settings.llm_providers_raw = "multi"
-    _set_provider_env(
-        monkeypatch,
-        "multi",
-        NAME="Multi Provider",
-        BASE_URL="https://api.multi.local",
-        API_KEYS="key-a, key-b ,key-c",  # pragma: allowlist secret
-    )
-
-    cfg = get_provider_config("multi")
-    assert cfg is not None
+    assert cfg.static_models[0]["id"] == "gpt-4o"
+    assert cfg.custom_headers == {"X-Test": "1"}
     keys = cfg.get_api_keys()
-    assert [k.key for k in keys] == ["key-a", "key-b", "key-c"]
-    # Legacy field is set for compatibility.
-    assert cfg.api_key == "key-a"  # pragma: allowlist secret
+    assert len(keys) == 1
+    assert keys[0].weight == 2.0
+    assert keys[0].label == "primary"
 
 
-def test_provider_config_supports_api_keys_json(monkeypatch):
-    settings.llm_providers_raw = "json"
-    _set_provider_env(
-        monkeypatch,
-        "json",
-        NAME="JSON Provider",
-        BASE_URL="https://api.json.local",
-        API_KEYS_JSON='[{"key":"k1","weight":2},{"key":"k2","max_qps":5,"label":"backup"}]',  # pragma: allowlist secret
-    )
+def test_provider_without_active_keys_is_skipped(monkeypatch):
+    inactive = _build_provider(status="disabled")
 
-    cfg = get_provider_config("json")
+    def _fake_loader(session):
+        return [inactive]
+
+    monkeypatch.setattr("app.provider.config._load_providers_from_db", _fake_loader)
+    configs = load_provider_configs(session="fake-session")
+    assert configs == []
+
+
+def test_get_provider_config_returns_none_when_missing(monkeypatch):
+    class _FakeSession:
+        def execute(self, stmt):
+            class _Result:
+                def scalars(self_inner):
+                    class _Scalars:
+                        def first(self_innermost):
+                            return None
+
+                    return _Scalars()
+
+            return _Result()
+
+    cfg = get_provider_config("missing", session=_FakeSession())
+    assert cfg is None
+
+
+def test_get_provider_config_converts_headers_and_codes(monkeypatch):
+    provider = _build_provider()
+    provider.static_models = [{"id": "manual"}]
+    provider.models = []
+
+    class _FakeSession:
+        def execute(self, stmt):
+            class _Result:
+                def __init__(self, provider_obj):
+                    self.provider_obj = provider_obj
+
+                def scalars(self):
+                    provider_obj = self.provider_obj
+
+                    class _Scalars:
+                        def __init__(self, inner_provider):
+                            self.inner_provider = inner_provider
+
+                        def first(self):
+                            return self.inner_provider
+
+                    return _Scalars(provider_obj)
+
+            return _Result(provider)
+
+    cfg = get_provider_config("openai", session=_FakeSession())
     assert cfg is not None
-    keys = cfg.get_api_keys()
-    assert len(keys) == 2
-    assert keys[0].weight == 2
-    assert keys[1].max_qps == 5
-    assert keys[1].label == "backup"
-
-
-def test_provider_config_supports_api_keys_json_string_list(monkeypatch):
-    settings.llm_providers_raw = "jsonlist"
-    _set_provider_env(
-        monkeypatch,
-        "jsonlist",
-        NAME="JSON List Provider",
-        BASE_URL="https://api.json.local",
-        API_KEYS_JSON='["k1","k2"]',  # pragma: allowlist secret
-    )
-
-    cfg = get_provider_config("jsonlist")
-    assert cfg is not None
-    keys = cfg.get_api_keys()
-    assert [k.key for k in keys] == ["k1", "k2"]
+    assert cfg.retryable_status_codes == [429, 500]
+    assert cfg.custom_headers == {"X-Test": "1"}
+    assert cfg.static_models == [{"id": "manual"}]

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
-from app.models import ProviderConfig
+from app.schemas import ProviderConfig
 from app.provider import claude_sdk, google_sdk, openai_sdk
 
 SDKErrorTypes = tuple[type[BaseException], ...]

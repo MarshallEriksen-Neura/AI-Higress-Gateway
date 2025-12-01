@@ -10,7 +10,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 from app.auth import require_api_key
 from app.deps import get_redis
 from app.errors import not_found
-from app.models import LogicalModel, PhysicalModel
+from app.schemas import LogicalModel, PhysicalModel
 from app.storage.redis_service import get_logical_model, list_logical_models
 
 router = APIRouter(

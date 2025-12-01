@@ -1,8 +1,29 @@
 import base64
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from uuid import UUID
 
-from fastapi import Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, status
+from sqlalchemy.orm import Session
 
-from app.settings import settings
+from app.deps import get_db, get_redis
+from app.services.api_key_cache import (
+    CachedAPIKey,
+    build_cache_entry,
+    cache_api_key,
+    get_cached_api_key,
+    invalidate_cached_api_key,
+)
+from app.services.api_key_service import derive_api_key_hash, find_api_key_by_hash
+
+
+@dataclass
+class AuthenticatedAPIKey:
+    id: UUID
+    user_id: UUID
+    user_username: str
+    is_superuser: bool
+    name: str
 
 
 def _decode_token(token: str) -> str:
@@ -18,32 +39,20 @@ def _decode_token(token: str) -> str:
             detail="Invalid API token",
         )
 
-    expected = settings.api_auth_token
-    if not expected:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Gateway token is not configured",
-        )
-
-    if decoded != expected:
-        # Only accept the literal configured value after decoding.
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid API token",
-        )
-
     return decoded
 
 
 async def require_api_key(
     authorization: str | None = Header(default=None),
     x_api_key: str | None = Header(default=None, alias="X-API-Key"),
-) -> str:
+    db: Session = Depends(get_db),
+    redis=Depends(get_redis),
+) -> AuthenticatedAPIKey:
     """
-    Simple API key guard.
+    Validate client API keys stored in the数据库。
 
     Preferred：Authorization: Bearer <base64(token)>；兼容 X-API-Key: <base64(token)>。
-    After base64 解码结果必须与 APIPROXY_AUTH_TOKEN 的值一致，否则返回 401。
+    Base64 解码后与数据库中的哈希值比对，支持多用户多密钥。
     """
     token_value: str | None = None
 
@@ -64,4 +73,50 @@ async def require_api_key(
             detail="Missing Authorization or X-API-Key header",
         )
 
-    return _decode_token(token_value)
+    decoded = _decode_token(token_value)
+    key_hash = derive_api_key_hash(decoded)
+    cached = await get_cached_api_key(redis, key_hash)
+    if cached is not None:
+        if cached.expires_at is not None and cached.expires_at <= datetime.now(UTC):
+            await invalidate_cached_api_key(redis, key_hash)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API token expired",
+            )
+        return _cached_to_authenticated(cached)
+
+    api_key = find_api_key_by_hash(db, key_hash)
+    if api_key is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API token",
+        )
+
+    if api_key.expires_at is not None and api_key.expires_at <= datetime.now(UTC):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="API token expired",
+        )
+
+    if not api_key.user or not api_key.user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="API token owner is inactive",
+        )
+
+    cache_entry = build_cache_entry(api_key)
+    await cache_api_key(redis, key_hash, cache_entry)
+    return _cached_to_authenticated(cache_entry)
+
+
+def _cached_to_authenticated(entry: CachedAPIKey) -> AuthenticatedAPIKey:
+    return AuthenticatedAPIKey(
+        id=UUID(entry.id),
+        user_id=UUID(entry.user_id),
+        user_username=entry.user_username,
+        is_superuser=entry.user_is_superuser,
+        name=entry.name,
+    )
+
+
+__all__ = ["AuthenticatedAPIKey", "require_api_key"]

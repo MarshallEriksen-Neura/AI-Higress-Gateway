@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from app.models import ProviderAPIKey, ProviderConfig
+from app.schemas import ProviderAPIKey, ProviderConfig
 from app.provider.key_pool import (
     NoAvailableProviderKey,
     acquire_provider_key,

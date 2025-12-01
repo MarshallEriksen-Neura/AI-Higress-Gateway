@@ -2,7 +2,7 @@
 Provider model discovery app.
 
 For each configured provider we call its `/models`-like endpoint,
-normalise the response into `app.models.Model` objects and store
+normalise the response into `app.schemas.Model` objects and store
 them in Redis using the key scheme defined in data-model.md:
 
     llm:vendor:{provider_id}:models -> JSON array
@@ -20,7 +20,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
     Redis = object  # type: ignore[misc,assignment]
 
 from app.logging_config import logger
-from app.models import Model, ModelCapability, ProviderConfig
+from app.schemas import Model, ModelCapability, ProviderConfig
 from app.provider.config import get_provider_config
 from app.provider.key_pool import (
     NoAvailableProviderKey,

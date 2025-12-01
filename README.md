@@ -81,52 +81,47 @@ APIProxy provides a robust and flexible solution for managing AI model interacti
    cp .env.example .env
    ```
 
-3. Edit `.env` with your configuration:
+3. Seed providers/models in the database:
 
-   ```env
-   # Redis URL (use default if using docker-compose)
-   REDIS_URL=redis://redis:6379/0
+   Provider and model metadata is now stored in PostgreSQL (`providers`, `provider_api_keys`, `provider_models`). Use Alembic to create the tables, then insert rows either via the upcoming management APIs or a short bootstrap script. The snippet below creates an OpenAI provider with one API key:
 
-   # ⚠️ IMPORTANT: Set your auth token
-   APIPROXY_AUTH_TOKEN=timeline
+   ```bash
+   uv run python - <<'PY'
+from uuid import uuid4
 
-   # Add your AI providers
-   LLM_PROVIDERS=openai,gemini,claude
+from app.db.session import SessionLocal
+from app.models import Provider, ProviderAPIKey
+from app.services.encryption import encrypt_secret
 
-   # OpenAI configuration
-   LLM_PROVIDER_openai_NAME=OpenAI
-   LLM_PROVIDER_openai_BASE_URL=https://api.openai.com
-   # Single-key:
-   LLM_PROVIDER_openai_API_KEY=your-openai-api-key
-   # Optional: multi-key (comma separated, equal weight)
-   # LLM_PROVIDER_openai_API_KEYS=key-a,key-b
-   # Optional: multi-key with weight/limits
-   # LLM_PROVIDER_openai_API_KEYS_JSON=[{"key":"key-a","weight":2},{"key":"key-b","max_qps":5}]
-   # Also supports JSON string array:
-   # LLM_PROVIDER_openai_API_KEYS_JSON=["key-a","key-b"]
-
-   # Gemini configuration
-   LLM_PROVIDER_gemini_NAME=Gemini
-   LLM_PROVIDER_gemini_BASE_URL=https://generativelanguage.googleapis.com
-   LLM_PROVIDER_gemini_MODELS_PATH=/v1beta/models
-   LLM_PROVIDER_gemini_API_KEY=your-gemini-api-key
-
-   # Google native SDK (no /v1 prefix auto-append)
-   LLM_PROVIDER_google_NAME=Google Native SDK
-   LLM_PROVIDER_google_BASE_URL=https://generativelanguage.googleapis.com
-   LLM_PROVIDER_google_TRANSPORT=sdk
-   LLM_PROVIDER_google_API_KEY=your-gemini-api-key
-
-   # Claude configuration
-   LLM_PROVIDER_claude_NAME=Claude
-   LLM_PROVIDER_claude_BASE_URL=https://api.anthropic.com
-   LLM_PROVIDER_claude_TRANSPORT=sdk
-   LLM_PROVIDER_claude_API_KEY=your-claude-api-key
+session = SessionLocal()
+provider = Provider(
+    id=uuid4(),
+    provider_id="openai",
+    name="OpenAI",
+    base_url="https://api.openai.com",
+    transport="http",
+    models_path="/v1/models",
+    messages_path="/v1/messages",
+    weight=1.0,
+)
+session.add(provider)
+session.flush()  # ensures provider.id is available for the FK
+session.add(
+    ProviderAPIKey(
+        provider_uuid=provider.id,
+        encrypted_key=encrypt_secret("sk-your-openai-api-key"),  # never stored in plaintext
+        label="default",
+        max_qps=50,
+    )
+)
+session.commit()
+session.close()
+PY
    ```
 
-   With `TRANSPORT=sdk`, APIProxy auto-detects the vendor (openai / google-genai / anthropic) and calls the official SDK without appending `/v1/...`.
+   Repeat the process for every upstream, add `provider_models` rows when you need static model metadata, and adjust weights/QPS the same way you would have tweaked the old environment variables. The encryption helper ensures API keys are always stored as ciphertext.
 
-   Generate and set `SECRET_KEY` (used to HMAC/encrypt sensitive identifiers; no plaintext keys are stored):
+   Generate and set `SECRET_KEY` (used to derive the Fernet key above and to HMAC/encrypt other identifiers):
 
    ```bash
    bash scripts/generate_secret_key.sh
@@ -134,18 +129,9 @@ APIProxy provides a robust and flexible solution for managing AI model interacti
 
    Put the generated random string into `.env` as `SECRET_KEY`.
 
-4. 🔑 Generate your API key (IMPORTANT!):
+4. 🔑 Bootstrap a user + API key (IMPORTANT!):
 
-   ```bash
-   uv run scripts/encode_token.py timeline
-   ```
-
-   This will output something like:
-   ```
-   dGltZWxpbmU=  # This is your encoded token
-   ```
-
-   **Save this encoded token** - you'll need it for API calls!
+   Use the `/users` and `/users/{user_id}/api-keys` admin APIs to create users and generate API keys. The API response includes the plain token once—store it securely and send it via `Authorization: Bearer <base64(token)>` (use `uv run scripts/encode_token.py <token>` if you need to re-encode later). Operations teams can seed the very first admin user/key via their preferred provisioning workflow (SQL migration, admin UI, etc.).
 
 5. Start the stack:
 
@@ -197,11 +183,10 @@ APIProxy provides a robust and flexible solution for managing AI model interacti
    cp .env.example .env
    ```
 
-   - Point `REDIS_URL` at your local Redis;  
-   - Configure `APIPROXY_AUTH_TOKEN` as the gateway API token (clients must send its Base64-encoded form; generate it via `uv run scripts/encode_token.py <token>`);  
-   - Configure `SECRET_KEY` for hashing/encrypting sensitive identifiers (run `bash scripts/generate_secret_key.sh` to get a random value);  
-   - Set up `LLM_PROVIDERS` and `LLM_PROVIDER_{id}_*`;  
-   - Optionally override retryable status codes per provider with `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES`.
+   - Point `REDIS_URL` and `DATABASE_URL` at your local services;
+   - Configure `SECRET_KEY` for hashing/encrypting sensitive identifiers (run `bash scripts/generate_secret_key.sh`);
+   - Use the `/users` and `/users/{user_id}/api-keys` endpoints (or your provisioning workflow) to create admin users and API keys, then send `Authorization: Bearer <base64(token)>` when calling the API;
+   - Insert/update provider rows directly in the database as described above (or by using your internal admin tooling); set retryable status codes, weights, SDK transport, etc. via the table columns instead of environment variables.
 
 3. Start the dev server:
 
@@ -217,14 +202,14 @@ APIProxy provides a robust and flexible solution for managing AI model interacti
 
 ## Configuration
 
-APIProxy is configured entirely via environment variables, typically loaded from `.env`. For full details see `.env.example` and `docs/configuration.md`.
+Infrastructure-level settings still live in `.env`, but provider/model metadata is persisted in the database. See `docs/configuration.md` for a full walkthrough of the new tables and scripts.
 
 Common settings:
 
 | Variable                           | Description                                                                                         | Default                     |
 |------------------------------------|-----------------------------------------------------------------------------------------------------|-----------------------------|
 | `REDIS_URL`                        | Redis connection URL                                                                                | `redis://redis:6379/0`      |
-| `APIPROXY_AUTH_TOKEN`              | Gateway API token; clients must send `Authorization: Bearer <base64(APIPROXY_AUTH_TOKEN)>` (generate via `uv run scripts/encode_token.py <token>`) | `timeline`                  |
+| *(per-user API keys)*             | Use `/users/{user_id}/api-keys` to mint API keys (or seed them via your ops tooling); send `Authorization: Bearer <base64(token)>` with each request | _(generated)_               |
 | `MODELS_CACHE_TTL`                 | TTL for the aggregated models cache (seconds)                                                       | `300`                       |
 | `MASK_AS_BROWSER`                  | When true, adds browser-like headers (User-Agent/Origin/Referer) to upstream requests              | `True`                      |
 | `MASK_USER_AGENT`                  | User-Agent string to use when `MASK_AS_BROWSER` is enabled                                         | see `.env.example`          |
@@ -232,24 +217,33 @@ Common settings:
 | `MASK_REFERER`                     | Optional Referer header when masking as a browser                                                   | `None`                      |
 | `LOG_LEVEL`                        | Application log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`)                             | `INFO`                      |
 | `LOG_TIMEZONE`                     | Timezone for log timestamps (e.g. `Asia/Shanghai`); defaults to the server's local timezone         | system local timezone       |
-| `LLM_PROVIDERS`                    | Comma-separated provider ids, e.g. `openai,gemini,claude`                                           | `None`                      |
-| `LLM_PROVIDER_{id}_NAME`           | Human-readable provider name                                                                        | required                    |
-| `LLM_PROVIDER_{id}_BASE_URL`       | Provider API base URL                                                                               | required                    |
-| `LLM_PROVIDER_{id}_TRANSPORT`      | `http` (default) to proxy via HTTP; `sdk` to call provider-native SDK (google-genai / openai / anthropic) without adding `/v1/...` | `http`                      |
-| `LLM_PROVIDER_{id}_API_KEY`        | API key / token for this provider (single-key legacy field)                                         | required if not using multi-key |
-| `LLM_PROVIDER_{id}_API_KEYS`       | Comma-separated multi-key shorthand (equal weights), e.g. `k1,k2,k3`                                | optional                    |
-| `LLM_PROVIDER_{id}_API_KEYS_JSON`  | Multi-key JSON array with `key`, optional `weight`, `max_qps`, `label`                              | optional                    |
-| `LLM_PROVIDER_{id}_MODELS_PATH`    | Path for listing models (relative to `BASE_URL`)                                                    | `/v1/models`                |
-| `LLM_PROVIDER_{id}_MESSAGES_PATH`  | Preferred Claude Messages path; set empty to force `/v1/messages` requests to fallback to `/v1/chat/completions` | `/v1/message`               |
-| `LLM_PROVIDER_{id}_WEIGHT`         | Base routing weight used by the scheduler                                                           | `1.0`                       |
-| `LLM_PROVIDER_{id}_REGION`         | Optional region label such as `global` or `us-east`                                                 | `None`                      |
-| `LLM_PROVIDER_{id}_MAX_QPS`        | Provider-level QPS limit                                                                            | `None`                      |
-| `LLM_PROVIDER_{id}_RETRYABLE_STATUS_CODES` | Comma-separated HTTP status codes or ranges (e.g. `429,500,502-504`) treated as retryable. When unset, built-in defaults apply for `openai`, `gemini`, and `claude/anthropic` (`[429,500,502,503,504]`); otherwise a generic rule of 429 and 5xx is used. | `None` (fall back to defaults) |
+| Variable          | Description                                                                                              | Default                                                |
+|-------------------|----------------------------------------------------------------------------------------------------------|--------------------------------------------------------|
+| `DATABASE_URL`    | SQLAlchemy URL for the primary Postgres instance                                                          | `postgresql+psycopg://postgres:postgres@localhost:5432/apiproxy` |
+| `REDIS_URL`       | Redis connection URL                                                                                      | `redis://redis:6379/0`                                 |
+| `SECRET_KEY`      | Random string used to derive Fernet/HMAC keys (generate via `bash scripts/generate_secret_key.sh`)        | `please-change-me`                                     |
+| `MODELS_CACHE_TTL`| TTL for the aggregated `/models` cache (seconds)                                                          | `300`                                                  |
+| `MASK_AS_BROWSER` | Whether to add browser-like headers to upstream calls                                                     | `True`                                                 |
+| `MASK_USER_AGENT` | User-Agent used when `MASK_AS_BROWSER` is enabled                                                          | Chrome UA (see `.env.example`)                         |
+| `MASK_ORIGIN`     | Optional Origin header when masking as a browser                                                          | `None`                                                 |
+| `MASK_REFERER`    | Optional Referer header when masking as a browser                                                         | `None`                                                 |
+| `LOG_LEVEL`       | Application log level                                                                                     | `INFO`                                                 |
+| `LOG_TIMEZONE`    | Optional timezone for log timestamps (e.g. `Asia/Shanghai`)                                               | system local                                           |
 
-> Providers that do not expose Anthropic-style `/v1/message(s)` endpoints should leave
-> `LLM_PROVIDER_{id}_MESSAGES_PATH` empty. The gateway will automatically convert
-> Claude payloads into OpenAI Chat Completions when clients call `/v1/messages` and
-> adapt the upstream response back into Claude format.
+> Provider-specific properties such as weights, transports, retryable status codes, SDK type, and static models are now stored in the `providers`, `provider_api_keys`, and `provider_models` tables. Update those rows instead of editing environment variables.
+
+### Database & migrations
+
+- Pydantic request/response schemas now live in `app/schemas`, while `app/models` contains the SQLAlchemy ORM definitions (currently `User`, `Identity`, and `Permission`).
+- Configure `DATABASE_URL` (see `.env.example`) to point at your Postgres instance. The provided `docker-compose.yml` already exposes a Postgres service with matching env vars.
+- Run migrations via Alembic:
+
+  ```bash
+  # install deps / activate venv first
+  alembic upgrade head
+  ```
+
+  This applies the initial migration located at `alembic/versions/0001_create_auth_tables.py`, which creates the three auth tables. Subsequent schema changes should follow the same workflow.
 
 ---
 

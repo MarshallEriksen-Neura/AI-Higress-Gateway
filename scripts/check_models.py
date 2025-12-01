@@ -123,8 +123,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--auth-token",
-        default=settings.api_auth_token,
-        help="APIPROXY_AUTH_TOKEN 明文，脚本会自动 base64 编码。",
+        required=True,
+        help="用户 API 密钥明文，脚本会自动 base64 编码 Authorization 头。",
     )
     parser.add_argument(
         "--skip-chat",

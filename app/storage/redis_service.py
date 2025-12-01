@@ -15,7 +15,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is missing
     Redis = object  # type: ignore[misc,assignment]
 
-from app.models import LogicalModel, MetricsHistory, RoutingMetrics, Session
+from app.schemas import LogicalModel, MetricsHistory, RoutingMetrics, Session
 from app.redis_client import redis_get_json, redis_set_json
 
 # Key templates (must match data-model.md).

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import time
 
-from app.models import Session
+from app.schemas import Session
 from app.redis_client import redis_delete
 from app.storage.redis_service import get_session as storage_get_session
 from app.storage.redis_service import set_session as storage_set_session

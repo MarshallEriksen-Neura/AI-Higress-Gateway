@@ -1,6 +1,6 @@
 import pytest
 
-from app.models import PhysicalModel
+from app.schemas import PhysicalModel
 from app.routing.provider_weight import (
     adjust_provider_weight,
     load_dynamic_weights,

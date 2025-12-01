@@ -13,7 +13,7 @@ from app.auth import require_api_key
 from app.deps import get_http_client, get_redis
 from app.errors import not_found
 from app.logging_config import logger
-from app.models import ProviderConfig, RoutingMetrics
+from app.schemas import ProviderConfig, RoutingMetrics
 from app.provider.config import get_provider_config, load_provider_configs
 from app.provider.discovery import ensure_provider_models_cached
 from app.provider.health import HealthStatus, check_provider_health
@@ -41,18 +41,14 @@ class ProviderMetricsResponse(BaseModel):
 
 @router.get("/providers", response_model=ProvidersResponse)
 async def list_providers() -> ProvidersResponse:
-    """
-    Return all configured providers from environment.
-    """
+    """Return all configured providers stored in the database."""
     providers = load_provider_configs()
     return ProvidersResponse(providers=providers, total=len(providers))
 
 
 @router.get("/providers/{provider_id}", response_model=ProviderConfig)
 async def get_provider(provider_id: str) -> ProviderConfig:
-    """
-    Return configuration of a single provider.
-    """
+    """Return configuration of a single provider."""
     cfg = get_provider_config(provider_id)
     if cfg is None:
         raise not_found(f"Provider '{provider_id}' not found")

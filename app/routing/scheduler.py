@@ -12,7 +12,7 @@ import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from app.models import (
+from app.schemas import (
     LogicalModel,
     PhysicalModel,
     RoutingMetrics,

@@ -1,5 +1,5 @@
 
-from app.models import MetricsHistory, ProviderStatus
+from app.schemas import MetricsHistory, ProviderStatus
 from app.routing.metrics import aggregate_metrics
 
 

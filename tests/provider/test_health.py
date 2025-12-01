@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-from app.models import ProviderConfig, ProviderStatus
+from app.schemas import ProviderConfig, ProviderStatus
 from app.provider.health import HealthStatus, check_provider_health
 from app.provider.key_pool import reset_key_pool
 

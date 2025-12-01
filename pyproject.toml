@@ -18,7 +18,10 @@ dependencies = [
     "django>=5.2.8",
     "sqlalchemy>=2.0.44",
     "alembic>=1.17.2",
+    "psycopg[binary]>=3.1.12",
+    "cryptography>=43.0.0",
     "ruff>=0.14.7",
+    "pydantic[email]>=2.12.5",
 ]
 
 [project.scripts]

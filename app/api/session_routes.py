@@ -11,7 +11,7 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 from app.auth import require_api_key
 from app.deps import get_redis
 from app.errors import not_found
-from app.models import Session
+from app.schemas import Session
 from app.routing.session_manager import delete_session, get_session
 
 router = APIRouter(

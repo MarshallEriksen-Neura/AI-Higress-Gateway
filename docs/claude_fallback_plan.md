@@ -9,9 +9,9 @@
 ## 设计要点
 ### 1. Provider/LogicalModel 元数据
 - 在 `ProviderConfig` 和动态发现的 `PhysicalModel` 中补充“Claude Messages 支持能力”。
-  - 新增 `messages_path: Optional[str]` 字段，默认 `/v1/message`，可通过 `.env` 覆盖。
+  - 新增 `messages_path: Optional[str]` 字段，默认 `/v1/message`，可通过 `providers.messages_path` 列配置。
   - 对仅有 Chat Completions 的提供商将该字段置空，表示需要 fallback。
-- 更新 `app/provider/config.py` 解析逻辑：读取 `LLM_PROVIDER_{id}_MESSAGES_PATH`，允许设置为空字符串。
+- 更新 `app/provider/config.py` 解析逻辑：读取数据库中的 `messages_path`，允许存储空字符串并转换为 `None`。
 - 静态 Redis 逻辑模型结构中同样透传 `messages_path`，便于后续扩展（本方案先只在动态逻辑模型中使用）。
 
 ### 2. 路由入口调整

@@ -56,6 +56,15 @@ def not_found(message: str, *, details: dict[str, Any] | None = None) -> HTTPExc
     )
 
 
+def forbidden(message: str, *, details: dict[str, Any] | None = None) -> HTTPException:
+    return http_error(
+        status.HTTP_403_FORBIDDEN,
+        error="forbidden",
+        message=message,
+        details=details,
+    )
+
+
 def service_unavailable(
     message: str, *, details: dict[str, Any] | None = None
 ) -> HTTPException:
@@ -70,8 +79,8 @@ def service_unavailable(
 __all__ = [
     "ErrorResponse",
     "bad_request",
+    "forbidden",
     "http_error",
     "not_found",
     "service_unavailable",
 ]
-
