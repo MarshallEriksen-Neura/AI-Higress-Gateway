@@ -1,12 +1,13 @@
 # ============================================
 # Python (Backend)
 # ============================================
-backend/__pycache__/
+backend/__pycache__
 backend/*.py[oc]
 backend/build/
 backend/dist/
 backend/wheels/
 backend/*.egg-info
+backend/*.pyc
 
 # Virtual environments
 backend/.venv

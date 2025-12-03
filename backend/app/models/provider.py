@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, Integer, String, text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, text
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, relationship
+from uuid import UUID
 
 from app.db.types import JSONBCompat
 
@@ -34,6 +36,23 @@ class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     last_check = Column(DateTime(timezone=True), nullable=True)
     metadata_json = Column("metadata", JSONBCompat(), nullable=True)
 
+    # Ownership and visibility metadata.
+    # When owner_id is NULL and visibility is "public", the provider is part of
+    # the global shared pool. When owner_id is set and visibility is "private",
+    # the provider is a user-scoped private provider.
+    owner_id: Mapped[UUID | None] = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    visibility: Mapped[str] = Column(
+        String(16),
+        nullable=False,
+        server_default=text("'public'"),
+        default="public",
+    )
+
     api_keys: Mapped[list["ProviderAPIKey"]] = relationship(
         "ProviderAPIKey",
         back_populates="provider",
@@ -53,6 +72,7 @@ class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         passive_deletes=True,
         lazy="selectin",
     )
+    owner: Mapped["User"] = relationship("User")
 
 
 __all__ = ["Provider"]

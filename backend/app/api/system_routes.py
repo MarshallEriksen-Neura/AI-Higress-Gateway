@@ -20,6 +20,7 @@ from app.services.key_management_service import (
     UserCreationError,
     validate_key_strength,
 )
+from app.settings import settings
 
 router = APIRouter(tags=["system"], prefix="/system")
 
@@ -53,6 +54,20 @@ class KeyValidationRequest(BaseModel):
 class KeyValidationResponse(BaseModel):
     is_valid: bool = Field(..., description="密钥是否有效")
     message: str = Field(..., description="验证结果消息")
+
+
+class ProviderLimitsResponse(BaseModel):
+    """系统级提供商限制配置。"""
+
+    default_user_private_provider_limit: int
+    max_user_private_provider_limit: int
+    require_approval_for_shared_providers: bool
+
+
+class ProviderLimitsUpdateRequest(BaseModel):
+    default_user_private_provider_limit: int = Field(ge=0)
+    max_user_private_provider_limit: int = Field(ge=0)
+    require_approval_for_shared_providers: bool
 
 
 @router.post("/secret-key/generate", response_model=SecretKeyResponse)
@@ -190,6 +205,63 @@ def validate_key(
         message = "密钥强度不足，建议使用更长的随机密钥"
     
     return KeyValidationResponse(is_valid=is_valid, message=message)
+
+
+@router.get("/provider-limits", response_model=ProviderLimitsResponse)
+def get_provider_limits(
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> ProviderLimitsResponse:
+    """
+    获取系统中与 Provider 相关的配额与审核配置。
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有超级管理员可以查看提供商限制配置",
+        )
+
+    return ProviderLimitsResponse(
+        default_user_private_provider_limit=settings.default_user_private_provider_limit,
+        max_user_private_provider_limit=settings.max_user_private_provider_limit,
+        require_approval_for_shared_providers=settings.require_approval_for_shared_providers,
+    )
+
+
+@router.put("/provider-limits", response_model=ProviderLimitsResponse)
+def update_provider_limits(
+    payload: ProviderLimitsUpdateRequest,
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> ProviderLimitsResponse:
+    """
+    更新系统中的 Provider 限制配置（仅当前进程内生效）。
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="只有超级管理员可以更新提供商限制配置",
+        )
+
+    # 简单的范围校验：默认上限不能超过最大上限
+    if payload.default_user_private_provider_limit > payload.max_user_private_provider_limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="默认私有提供商数量上限不能大于最大可配置上限",
+        )
+
+    # 直接更新 settings 实例；重启进程后会回到 env 配置
+    settings.default_user_private_provider_limit = (
+        payload.default_user_private_provider_limit
+    )
+    settings.max_user_private_provider_limit = payload.max_user_private_provider_limit
+    settings.require_approval_for_shared_providers = (
+        payload.require_approval_for_shared_providers
+    )
+
+    return ProviderLimitsResponse(
+        default_user_private_provider_limit=settings.default_user_private_provider_limit,
+        max_user_private_provider_limit=settings.max_user_private_provider_limit,
+        require_approval_for_shared_providers=settings.require_approval_for_shared_providers,
+    )
 
 
 @router.get("/status")

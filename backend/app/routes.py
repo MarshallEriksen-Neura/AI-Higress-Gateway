@@ -53,15 +53,24 @@ from .logging_config import logger
 from .api.auth_routes import router as auth_router
 from .api.logical_model_routes import router as logical_model_router
 from .api.provider_routes import router as provider_router
+from .api.metrics_routes import router as metrics_router
 from .api.routing_routes import router as routing_router
 from .api.session_routes import router as session_router
 from .api.system_routes import router as system_router
+from .api.v1.admin_provider_routes import router as admin_provider_router
+from .api.v1.admin_user_permission_routes import router as admin_user_permission_router
 from .api.v1.api_key_routes import router as api_key_router
+from .api.v1.private_provider_routes import router as private_provider_router
 from .api.v1.provider_key_routes import router as provider_key_router
+from .api.v1.provider_submission_routes import router as provider_submission_router
 from .api.v1.user_routes import router as user_router
 from .model_cache import get_models_from_cache, set_models_cache
-from .models import ProviderModel
+from .models import Provider, ProviderModel
 from .services.bootstrap_admin import ensure_initial_admin
+from .services.metrics_service import (
+    call_upstream_http_with_metrics,
+    stream_upstream_with_metrics,
+)
 from .settings import settings
 from .upstream import UpstreamStreamError, detect_request_format, stream_upstream
 
@@ -827,26 +836,55 @@ async def _load_metrics_for_candidates(
 async def _get_or_fetch_models(
     redis,
     db: Session,
+    current_key: AuthenticatedAPIKey,
 ) -> ModelsResponse:
     """
-    Return cached models when available, otherwise fall back to the DB snapshot.
+    Return a model list scoped to the current API key's allowed providers.
+
+    - 若当前 API Key 没有限制，则返回全局缓存的模型列表；
+    - 若存在 provider 限制，则只返回这些 provider 下的模型，不使用全局缓存。
     """
-    cached = await get_models_from_cache(redis)
-    if cached:
-        return ModelsResponse(**cached)
+    # 无限制的 Key 可以复用全局缓存，避免频繁扫描数据库。
+    if not current_key.has_provider_restrictions:
+        cached = await get_models_from_cache(redis)
+        if cached:
+            return ModelsResponse(**cached)
+
+        try:
+            stmt = select(ProviderModel.model_id).order_by(ProviderModel.model_id)
+            rows = db.execute(stmt).scalars().all()
+        except Exception:  # pragma: no cover - 防御性日志
+            logger.exception("Failed to load provider models from database")
+            rows = []
+
+        models = [ModelInfo(id=str(model_id)) for model_id in rows if model_id]
+        models_response = ModelsResponse(data=models)
+        await set_models_cache(redis, models_response.model_dump())
+        return models_response
+
+    # Key 具有 provider 限制时，只返回允许的 provider 下的模型，不走全局缓存。
+    allowed = [pid for pid in current_key.allowed_provider_ids if pid]
+    if not allowed:
+        # 理论上不应出现（APIKeyProviderRestrictionService 会清空标志位），但这里兜底返回空列表。
+        return ModelsResponse(data=[])
 
     try:
-        stmt = select(ProviderModel.model_id).order_by(ProviderModel.model_id)
+        stmt = (
+            select(ProviderModel.model_id)
+            .join(Provider, ProviderModel.provider_id == Provider.id)
+            .where(Provider.provider_id.in_(allowed))
+            .order_by(ProviderModel.model_id)
+        )
         rows = db.execute(stmt).scalars().all()
-    except Exception:
-        logger.exception("Failed to load provider models from database")
+    except Exception:  # pragma: no cover - 防御性日志
+        logger.exception(
+            "Failed to load provider models from database for restricted key %s",
+            current_key.id,
+        )
         rows = []
 
     models = [ModelInfo(id=str(model_id)) for model_id in rows if model_id]
-
-    models_response = ModelsResponse(data=models)
-    await set_models_cache(redis, models_response.model_dump())
-    return models_response
+    return ModelsResponse(data=models)
 
 def _build_ordered_candidates(
     selected: CandidateScore,
@@ -1522,11 +1560,19 @@ def create_app() -> FastAPI:
     # Routing decision and session APIs (User Story 3).
     app.include_router(routing_router)
     app.include_router(session_router)
+    # Metrics API
+    app.include_router(metrics_router)
     
     # User and API key management - using JWT authentication
     app.include_router(user_router)
     app.include_router(api_key_router)
     app.include_router(provider_key_router)
+    # User private providers and provider submissions.
+    app.include_router(private_provider_router)
+    app.include_router(provider_submission_router)
+    # Admin management for providers and user permissions.
+    app.include_router(admin_user_permission_router)
+    app.include_router(admin_provider_router)
 
     @app.on_event("startup")
     async def _ensure_admin_account() -> None:
@@ -1580,34 +1626,35 @@ def create_app() -> FastAPI:
     @app.get(
         "/models",
         response_model=ModelsResponse,
-        dependencies=[Depends(require_api_key)],
     )
     async def list_models(
         redis=Depends(get_redis),
         db: Session = Depends(get_db),
+        current_key: AuthenticatedAPIKey = Depends(require_api_key),
     ) -> ModelsResponse:
-        models_response = await _get_or_fetch_models(redis, db)
+        models_response = await _get_or_fetch_models(redis, db, current_key)
         return models_response
 
     @app.get(
         "/v1/models",
         response_model=ModelsResponse,
-        dependencies=[Depends(require_api_key)],
     )
     async def list_models_v1(
         redis=Depends(get_redis),
         db: Session = Depends(get_db),
+        current_key: AuthenticatedAPIKey = Depends(require_api_key),
     ) -> ModelsResponse:
         """
         向后兼容的别名：某些 SDK 默认请求 /v1/models。
         """
-        return await list_models(redis=redis, db=db)
+        return await list_models(redis=redis, db=db, current_key=current_key)
 
     @app.post("/v1/chat/completions")
     async def chat_completions(
         request: Request,
         client: httpx.AsyncClient = Depends(get_http_client),
         redis=Depends(get_redis),
+        db: Session = Depends(get_db),
         x_session_id: str | None = Header(default=None, alias="X-Session-Id"),
         raw_body: dict[str, Any] = Body(...),
         current_key: AuthenticatedAPIKey = Depends(require_api_key),
@@ -2018,18 +2065,29 @@ def create_app() -> FastAPI:
                         url,
                     )
 
-                    try:
-                        # Use a provider-specific model id when forwarding
-                        # upstream so that grouped ids like "provider-2/xxx"
-                        # are translated correctly for each vendor.
-                        upstream_payload = dict(payload)
-                        upstream_payload["model"] = model_id
+                    # Use a provider-specific model id when forwarding
+                    # upstream so that grouped ids like "provider-2/xxx"
+                    # are translated correctly for each vendor.
+                    upstream_payload = dict(payload)
+                    upstream_payload["model"] = model_id
 
-                        r = await client.post(url, headers=headers, json=upstream_payload)
+                    try:
+                        r = await call_upstream_http_with_metrics(
+                            client=client,
+                            url=url,
+                            headers=headers,
+                            json_body=upstream_payload,
+                            db=db,
+                            provider_id=provider_id,
+                            logical_model=logical_model.logical_id,
+                        )
                     except httpx.HTTPError as exc:
                         if key_selection:
                             record_key_failure(
-                                key_selection, retryable=True, status_code=None, redis=redis
+                                key_selection,
+                                retryable=True,
+                                status_code=None,
+                                redis=redis,
                             )
                         _mark_provider_failure(provider_id, retryable=True)
                         logger.warning(
@@ -2129,9 +2187,9 @@ def create_app() -> FastAPI:
                             url,
                             provider_id,
                             model_id,
-                                payload,
-                                text,
-                            )
+                            payload,
+                            text,
+                        )
                         last_status = status_code
                         last_error_text = text
                         _mark_provider_failure(provider_id, retryable=True)
@@ -2368,7 +2426,7 @@ def create_app() -> FastAPI:
                         upstream_payload = dict(payload)
                         upstream_payload["model"] = model_id
 
-                        async for chunk in stream_upstream(
+                        async for chunk in stream_upstream_with_metrics(
                             client=client,
                             method="POST",
                             url=url,
@@ -2376,6 +2434,9 @@ def create_app() -> FastAPI:
                             json_body=upstream_payload,
                             redis=redis,
                             session_id=x_session_id,
+                            db=db,
+                            provider_id=provider_id,
+                            logical_model=logical_model.logical_id,
                         ):
                             if first_chunk:
                                 first_chunk = False

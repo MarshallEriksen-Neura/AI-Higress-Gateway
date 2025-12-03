@@ -6,6 +6,9 @@ from .permission import Permission
 from .provider import Provider
 from .provider_api_key import ProviderAPIKey
 from .provider_model import ProviderModel
+from .provider_submission import ProviderSubmission
+from .provider_metrics_history import ProviderRoutingMetricsHistory
+from .user_permission import UserPermission
 from .user import User
 
 __all__ = [
@@ -17,7 +20,10 @@ __all__ = [
     "Provider",
     "ProviderAPIKey",
     "ProviderModel",
+    "ProviderSubmission",
+    "ProviderRoutingMetricsHistory",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
+    "UserPermission",
     "User",
 ]

@@ -282,6 +282,66 @@
 
 ---
 
+### 5. 管理员获取用户权限列表
+
+**接口**: `GET /admin/users/{user_id}/permissions`
+
+**描述**: 管理员查看指定用户的权限和配额配置，例如是否允许创建私有提供商、是否可以提交共享提供商等。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**响应**:
+```json
+[
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "permission_type": "create_private_provider | submit_shared_provider | unlimited_providers | private_provider_limit | ...",
+    "permission_value": "string | null",
+    "expires_at": "datetime | null",
+    "notes": "string | null",
+    "created_at": "datetime",
+    "updated_at": "datetime"
+  }
+]
+```
+
+---
+
+### 6. 管理员授予或更新用户权限
+
+**接口**: `POST /admin/users/{user_id}/permissions`
+
+**描述**: 管理员为用户授予或更新某一项权限/配额。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**请求体**:
+```json
+{
+  "permission_type": "create_private_provider | submit_shared_provider | unlimited_providers | private_provider_limit | ...",
+  "permission_value": "string | null",
+  "expires_at": "datetime | null",
+  "notes": "string | null"
+}
+```
+
+**响应**: 与权限列表中的单条记录结构相同。
+
+---
+
+### 7. 管理员撤销用户权限
+
+**接口**: `DELETE /admin/users/{user_id}/permissions/{permission_id}`
+
+**描述**: 管理员撤销用户的一条权限记录。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**成功响应**: 204 No Content
+
+---
+
 ## API密钥管理
 
 ### 1. 获取API密钥列表
@@ -769,6 +829,382 @@
 
 ---
 
+### 5.1 获取 Provider 路由指标时间序列（按分钟）
+
+**接口**: `GET /metrics/providers/timeseries`
+
+**描述**: 获取指定 Provider + 逻辑模型在给定时间范围内的分钟级指标时间序列，可用于绘制折线图。
+
+**认证**: API 密钥
+
+**查询参数**:
+- `provider_id` (必填): 厂商 ID，例如 `openai`
+- `logical_model` (必填): 逻辑模型 ID，例如 `gpt-4`
+- `time_range` (可选): 时间范围，支持：
+  - `today`: 今天 0 点以来
+  - `7d`: 过去 7 天（默认）
+  - `30d`: 过去 30 天
+  - `all`: 全部历史数据
+- `bucket` (可选): 时间粒度，当前仅支持 `minute`
+
+**响应**:
+```json
+{
+  "provider_id": "openai",
+  "logical_model": "gpt-4",
+  "time_range": "7d",
+  "bucket": "minute",
+  "points": [
+    {
+      "window_start": "2025-12-03T10:00:00Z",
+      "total_requests": 120,
+      "success_requests": 115,
+      "error_requests": 5,
+      "latency_avg_ms": 120.5,
+      "latency_p95_ms": 250.0,
+      "latency_p99_ms": 350.0,
+      "error_rate": 0.0417
+    }
+  ]
+}
+```
+
+**错误响应**:
+- 400: 不支持的 bucket 等参数
+- 500: 查询指标失败
+
+---
+
+### 5.2 获取 Provider 路由指标汇总
+
+**接口**: `GET /metrics/providers/summary`
+
+**描述**: 获取指定 Provider + 逻辑模型在给定时间范围内的汇总指标，可用于仪表卡片展示（总请求数、错误率、平均延迟等）。
+
+**认证**: API 密钥
+
+**查询参数**:
+- `provider_id` (必填): 厂商 ID，例如 `openai`
+- `logical_model` (必填): 逻辑模型 ID，例如 `gpt-4`
+- `time_range` (可选): 时间范围，支持 `today`、`7d`、`30d`、`all`，语义同上
+
+**响应**:
+```json
+{
+  "provider_id": "openai",
+  "logical_model": "gpt-4",
+  "time_range": "7d",
+  "total_requests": 1234,
+  "success_requests": 1200,
+  "error_requests": 34,
+  "error_rate": 0.0275,
+  "latency_avg_ms": 110.3
+}
+```
+
+**错误响应**:
+- 500: 查询指标失败
+
+---
+
+> 提示：当客户端使用带有 `allowed_provider_ids` 限制的 API 密钥访问 `/models` 或聊天接口时，
+> 实际可用的模型和路由候选 Provider 会根据该密钥允许的 `provider_id` 自动过滤。
+
+### 6. 获取用户私有提供商列表
+
+**接口**: `GET /users/{user_id}/private-providers`
+
+**描述**: 获取指定用户的所有私有提供商，仅该用户本人或超级管理员可访问。
+
+**认证**: JWT 令牌
+
+**响应**:
+```json
+[
+  {
+    "id": "uuid",
+    "provider_id": "string",
+    "name": "string",
+    "base_url": "url",
+    "provider_type": "native/aggregator",
+    "transport": "http/sdk",
+    "visibility": "private",
+    "owner_id": "uuid",
+    "status": "healthy/degraded/down",
+    "created_at": "datetime",
+    "updated_at": "datetime"
+  }
+]
+```
+
+---
+
+### 7. 创建用户私有提供商
+
+**接口**: `POST /users/{user_id}/private-providers`
+
+**描述**: 为指定用户创建新的私有提供商，仅该用户的 API Key 可以选择使用。
+
+**认证**: JWT 令牌  
+**权限要求**:
+- 只能为自己创建（除非是超级管理员）  
+- 需要具备 `create_private_provider` 权限  
+- 受系统配置或用户权限中的私有提供商数量上限限制
+
+**请求体（核心字段）**:
+```json
+{
+  "provider_id": "string (1-50字符, 全局唯一)",
+  "name": "string (1-100字符)",
+  "base_url": "url",
+  "api_key": "string",
+  "provider_type": "native 或 aggregator (可选, 默认native)",
+  "transport": "http 或 sdk (可选, 默认http)"
+  // 其余可选字段: weight, region, cost_input, cost_output, max_qps,
+  // retryable_status_codes, custom_headers, models_path, messages_path, static_models
+}
+```
+
+**响应**:
+```json
+{
+  "id": "uuid",
+  "provider_id": "string",
+  "name": "string",
+  "base_url": "url",
+  "provider_type": "native/aggregator",
+  "transport": "http/sdk",
+  "visibility": "private",
+  "owner_id": "uuid",
+  "status": "healthy",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+**错误响应**:
+- 403: 无权为其他用户创建私有提供商或没有创建权限  
+- 403: 已达到私有提供商数量限制  
+- 400: provider_id 已存在
+
+---
+
+### 8. 更新用户私有提供商
+
+**接口**: `PUT /users/{user_id}/private-providers/{provider_id}`
+
+**描述**: 更新用户私有提供商的基础配置（不允许修改 provider_id）。
+
+**认证**: JWT 令牌
+
+**请求体**:
+```json
+{
+  "name": "string (可选)",
+  "base_url": "url (可选)",
+  "provider_type": "native/aggregator (可选)",
+  "transport": "http/sdk (可选)",
+  "weight": 1.0,
+  "region": "string | null",
+  "cost_input": 0.0,
+  "cost_output": 0.0,
+  "max_qps": 1000,
+  "retryable_status_codes": [429, 500, 502, 503, 504],
+  "custom_headers": { "Header-Name": "value" },
+  "models_path": "/v1/models",
+  "messages_path": "/v1/message",
+  "static_models": [ /* 可选的静态模型配置 */ ]
+}
+```
+
+**响应**: 同 “创建用户私有提供商”。
+
+**错误响应**:
+- 404: Private provider 不存在  
+- 403: 无权修改其他用户的私有提供商
+
+---
+
+### 9. 用户提交共享提供商
+
+**接口**: `POST /providers/submissions`
+
+**描述**: 用户提交一个新的共享提供商，经过管理员审核后可加入全局提供商池。
+
+**认证**: JWT 令牌  
+**权限要求**: 需要具备 `submit_shared_provider` 权限
+
+**请求体**:
+```json
+{
+  "name": "string (1-100字符)",
+  "provider_id": "string (1-50字符, 作为全局 provider_id)",
+  "base_url": "url",
+  "provider_type": "native 或 aggregator (可选, 默认native)",
+  "api_key": "string",
+  "description": "string (可选, 最长约2000字符)",
+  "extra_config": {
+    // 可选扩展配置，如自定义 header、模型路径等
+  }
+}
+```
+
+**响应**:
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "name": "string",
+  "provider_id": "string",
+  "base_url": "url",
+  "provider_type": "native/aggregator",
+  "description": "string | null",
+  "approval_status": "pending",
+  "reviewed_by": null,
+  "review_notes": null,
+  "reviewed_at": null,
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+**错误响应**:
+- 403: 当前用户未被授权提交共享提供商  
+- 400: 提供商配置验证失败（如无法访问 /models）
+
+---
+
+### 10. 管理员查看共享提供商提交
+
+**接口**: `GET /providers/submissions?status=pending|approved|rejected`
+
+**描述**: 管理员查看所有用户提交的共享提供商。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**响应**:
+```json
+[
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "name": "string",
+    "provider_id": "string",
+    "base_url": "url",
+    "provider_type": "native/aggregator",
+    "description": "string | null",
+    "approval_status": "pending/approved/rejected",
+    "reviewed_by": "uuid | null",
+    "review_notes": "string | null",
+    "reviewed_at": "datetime | null",
+    "created_at": "datetime",
+    "updated_at": "datetime"
+  }
+]
+```
+
+---
+
+### 11. 管理员审核共享提供商提交
+
+**接口**: `PUT /providers/submissions/{submission_id}/review`
+
+**描述**: 管理员审核用户提交的共享提供商。通过后会自动创建对应的全局 Provider。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**请求体**:
+```json
+{
+  "approved": true,
+  "review_notes": "string (可选)"
+}
+```
+
+**响应**:
+```json
+{
+  "id": "uuid",
+  "user_id": "uuid",
+  "name": "string",
+  "provider_id": "string",
+  "base_url": "url",
+  "provider_type": "native/aggregator",
+  "description": "string | null",
+  "approval_status": "approved/rejected",
+  "reviewed_by": "uuid | null",
+  "review_notes": "string | null",
+  "reviewed_at": "datetime | null",
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+**错误响应**:
+- 404: 提交记录不存在  
+- 403: 需要管理员权限
+
+---
+
+### 12. 管理员查看 Provider 列表（含可见性/所有者）
+
+**接口**: `GET /admin/providers`
+
+**描述**: 管理员查看所有 Provider 列表，可按可见性和所有者过滤。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**查询参数**:
+- `visibility` (可选): `public` / `private` / `restricted`  
+- `owner_id` (可选): 指定所有者用户 ID
+
+**响应**:
+```json
+{
+  "providers": [
+    {
+      "id": "uuid",
+      "provider_id": "string",
+      "name": "string",
+      "base_url": "url",
+      "provider_type": "native/aggregator",
+      "transport": "http/sdk",
+      "visibility": "public/private/restricted",
+      "owner_id": "uuid | null",
+      "status": "healthy/degraded/down",
+      "created_at": "datetime",
+      "updated_at": "datetime"
+    }
+  ],
+  "total": 1
+}
+```
+
+---
+
+### 13. 管理员更新 Provider 可见性
+
+**接口**: `PUT /admin/providers/{provider_id}/visibility`
+
+**描述**: 管理员更新指定 Provider 的可见性（例如从 private 提升为 public）。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**请求体**:
+```json
+{
+  "visibility": "public | private | restricted"
+}
+```
+
+**响应**: 与管理员 Provider 列表中的单条 Provider 结构相同。
+
+**错误响应**:
+- 404: Provider 不存在  
+- 403: 需要管理员权限
+
+---
+
 ## 逻辑模型管理
 
 ### 1. 获取逻辑模型列表
@@ -1102,7 +1538,51 @@
 
 ---
 
-### 5. 获取系统状态
+### 5. 获取系统 Provider 限制配置
+
+**接口**: `GET /system/provider-limits`
+
+**描述**: 获取与提供商相关的系统级配额与审核配置。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**响应**:
+```json
+{
+  "default_user_private_provider_limit": 3,
+  "max_user_private_provider_limit": 20,
+  "require_approval_for_shared_providers": true
+}
+```
+
+---
+
+### 6. 更新系统 Provider 限制配置
+
+**接口**: `PUT /system/provider-limits`
+
+**描述**: 更新与提供商相关的系统级配额与审核配置（仅当前进程内生效，重启后以环境变量为准）。
+
+**认证**: JWT 令牌 (仅限超级用户)
+
+**请求体**:
+```json
+{
+  "default_user_private_provider_limit": 3,
+  "max_user_private_provider_limit": 20,
+  "require_approval_for_shared_providers": true
+}
+```
+
+**响应**: 同 “获取系统 Provider 限制配置”。
+
+**错误响应**:
+- 400: 默认上限大于最大上限  
+- 403: 只有超级管理员可以更新提供商限制配置
+
+---
+
+### 7. 获取系统状态
 
 **接口**: `GET /system/status`
 

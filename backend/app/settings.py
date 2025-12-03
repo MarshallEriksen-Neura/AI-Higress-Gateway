@@ -78,6 +78,25 @@ class Settings(BaseSettings):
         description="Secret key used to derive hashed identifiers for API keys; please override in production",
     )
 
+    # Per-user private provider limits and shared-provider approval behaviour.
+    default_user_private_provider_limit: int = Field(
+        3,
+        alias="DEFAULT_USER_PRIVATE_PROVIDER_LIMIT",
+        description="默认每个用户可创建的私有提供商数量上限",
+        ge=0,
+    )
+    max_user_private_provider_limit: int = Field(
+        20,
+        alias="MAX_USER_PRIVATE_PROVIDER_LIMIT",
+        description="系统允许设置的最大私有提供商上限（用于管理员面板校验）",
+        ge=0,
+    )
+    require_approval_for_shared_providers: bool = Field(
+        True,
+        alias="REQUIRE_APPROVAL_FOR_SHARED_PROVIDERS",
+        description="是否要求用户提交的共享提供商必须经过管理员审核",
+    )
+
 settings = Settings()  # Reads from environment if available
 
 
