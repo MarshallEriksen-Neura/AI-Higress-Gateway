@@ -790,35 +790,31 @@
 
 ---
 
-### 5. 获取提供商路由指标
+### 5. 获取提供商路由指标（实时快照）
 
 **接口**: `GET /providers/{provider_id}/metrics`
 
-**描述**: 获取提供商的路由指标。
+**描述**: 获取提供商的路由指标实时快照（来自 Redis，按逻辑模型聚合）。
 
 **认证**: API密钥
 
 **查询参数**:
-- logical_model (可选): 逻辑模型过滤器
+- `logical_model` (可选): 逻辑模型过滤器；若提供，则返回该逻辑模型与 Provider 的一条聚合记录
 
 **响应**:
 ```json
 {
   "metrics": [
     {
-      "logical_model": "string",
-      "provider_id": "string",
-      "success_rate": 0.99,
-      "avg_latency_ms": 100,
-      "p95_latency_ms": 200,
-      "p99_latency_ms": 300,
-      "last_success": 1234567890.0,
-      "last_failure": 1234567890.0,
-      "consecutive_failures": 0,
-      "total_requests": 1000,
-      "total_failures": 10,
-      "window_start": 1234567890.0,
-      "window_duration": 300.0
+      "logical_model": "gpt-4",
+      "provider_id": "openai",
+      "latency_p95_ms": 200.0,
+      "latency_p99_ms": 350.0,
+      "error_rate": 0.02,
+      "success_qps_1m": 3.5,
+      "total_requests_1m": 220,
+      "last_updated": 1733212345.123,
+      "status": "healthy"  // healthy / degraded / down
     }
   ]
 }
@@ -846,6 +842,14 @@
   - `30d`: 过去 30 天
   - `all`: 全部历史数据
 - `bucket` (可选): 时间粒度，当前仅支持 `minute`
+- `transport` (可选): 传输模式过滤：
+  - `http`: 仅统计 HTTP 调用
+  - `sdk`: 仅统计 SDK 调用
+  - `all` (默认): 统计所有模式
+- `is_stream` (可选): 流式过滤：
+  - `true`: 仅统计流式调用
+  - `false`: 仅统计非流式调用
+  - `all` (默认): 统计所有调用
 
 **响应**:
 ```json
@@ -854,6 +858,8 @@
   "logical_model": "gpt-4",
   "time_range": "7d",
   "bucket": "minute",
+  "transport": "all",
+  "is_stream": "all",
   "points": [
     {
       "window_start": "2025-12-03T10:00:00Z",
@@ -887,6 +893,10 @@
 - `provider_id` (必填): 厂商 ID，例如 `openai`
 - `logical_model` (必填): 逻辑模型 ID，例如 `gpt-4`
 - `time_range` (可选): 时间范围，支持 `today`、`7d`、`30d`、`all`，语义同上
+- `transport` (可选): 传输模式过滤（同上）
+- `is_stream` (可选): 流式过滤（同上）
+- `user_id` (可选): 若提供，则仅统计该用户下的调用
+- `api_key_id` (可选): 若提供，则仅统计该 API Key 下的调用
 
 **响应**:
 ```json
@@ -894,6 +904,10 @@
   "provider_id": "openai",
   "logical_model": "gpt-4",
   "time_range": "7d",
+  "transport": "all",
+  "is_stream": "all",
+  "user_id": null,
+  "api_key_id": null,
   "total_requests": 1234,
   "success_requests": 1200,
   "error_requests": 34,
