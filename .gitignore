@@ -25,6 +25,9 @@ backend/logs/
 # Backend environment
 backend/.env
 
+# Root environment (for Docker Compose)
+.env
+
 # ============================================
 # Node.js (Frontend)
 # ============================================

@@ -5,13 +5,10 @@ JWT认证服务，用于用户登录令牌的管理和验证
 import datetime
 from typing import Any, Dict, Optional, Union
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.settings import settings
-
-# 密码哈希上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT配置
 JWT_SECRET_KEY = settings.secret_key
@@ -32,11 +29,14 @@ def hash_password(password: str) -> str:
     """
     # 确保密码不超过 72 字节（bcrypt 限制）
     password_bytes = password.encode('utf-8')
-    print(f"Password length: {len(password_bytes)} bytes")
     if len(password_bytes) > 72:
-        password = password[:72]
-        print(f"Truncated password to: {len(password.encode('utf-8'))} bytes")
-    return pwd_context.hash(password)
+        # 按字节截断
+        password_bytes = password_bytes[:72]
+    
+    # 直接使用 bcrypt 库，避免 passlib 的初始化问题
+    salt = bcrypt.gensalt()
+    hashed = bcrypt.hashpw(password_bytes, salt)
+    return hashed.decode('utf-8')
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
@@ -50,7 +50,14 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     Returns:
         验证是否通过
     """
-    return pwd_context.verify(plain_password, hashed_password)
+    # 确保密码不超过 72 字节
+    password_bytes = plain_password.encode('utf-8')
+    if len(password_bytes) > 72:
+        password_bytes = password_bytes[:72]
+    
+    # 直接使用 bcrypt 库
+    hashed_bytes = hashed_password.encode('utf-8')
+    return bcrypt.checkpw(password_bytes, hashed_bytes)
 
 
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[datetime.timedelta] = None) -> str:

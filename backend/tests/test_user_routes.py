@@ -11,11 +11,12 @@ from sqlalchemy.pool import StaticPool
 from app.deps import get_db, get_redis
 from app.models import Base, User
 from app.routes import create_app
-from tests.utils import InMemoryRedis, auth_headers, seed_user_and_key
+from tests.utils import InMemoryRedis, auth_headers, jwt_auth_headers, seed_user_and_key
 
 
-def _auth_headers() -> dict[str, str]:
-    return auth_headers()
+def _jwt_auth_headers(user_id: str) -> dict[str, str]:
+    """生成 JWT 认证头（用于用户管理路由）"""
+    return jwt_auth_headers(user_id)
 
 
 @pytest.fixture()
@@ -45,17 +46,19 @@ def client_with_db() -> tuple[TestClient, sessionmaker[Session]]:
 
     app.dependency_overrides[get_redis] = override_get_redis
 
+    # 创建测试用的超级用户
+    admin_user = None
     with TestingSessionLocal() as session:
-        seed_user_and_key(session, token_plain="timeline")
+        admin_user, _ = seed_user_and_key(session, token_plain="timeline")
 
     with TestClient(app, base_url="http://test") as client:
-        yield client, TestingSessionLocal
+        yield client, TestingSessionLocal, str(admin_user.id)
 
     Base.metadata.drop_all(bind=engine)
 
 
 def test_register_user_persists_record(client_with_db):
-    client, session_factory = client_with_db
+    client, session_factory, admin_id = client_with_db
     payload = {
         "username": "alice",
         "email": "alice@example.com",
@@ -64,7 +67,7 @@ def test_register_user_persists_record(client_with_db):
         "avatar": "https://img.local/alice.png",
     }
 
-    resp = client.post("/users", json=payload, headers=_auth_headers())
+    resp = client.post("/users", json=payload, headers=_jwt_auth_headers(admin_id))
 
     assert resp.status_code == 201
     data = resp.json()
@@ -80,32 +83,32 @@ def test_register_user_persists_record(client_with_db):
 
 
 def test_register_user_duplicate_username_returns_400(client_with_db):
-    client, _ = client_with_db
+    client, _, admin_id = client_with_db
     base_payload = {
         "username": "bob",
         "email": "bob@example.com",
         "password": "Secret123!",
     }
-    resp = client.post("/users", json=base_payload, headers=_auth_headers())
+    resp = client.post("/users", json=base_payload, headers=_jwt_auth_headers(admin_id))
     assert resp.status_code == 201
 
     resp_dup = client.post(
         "/users",
         json={**base_payload, "email": "bob-2@example.com"},
-        headers=_auth_headers(),
+        headers=_jwt_auth_headers(admin_id),
     )
     assert resp_dup.status_code == 400
     assert resp_dup.json()["detail"]["message"] == "用户名已存在"
 
 
 def test_update_user_changes_profile_and_password(client_with_db):
-    client, session_factory = client_with_db
+    client, session_factory, admin_id = client_with_db
     payload = {
         "username": "charlie",
         "email": "charlie@example.com",
         "password": "Secret123!",
     }
-    resp = client.post("/users", json=payload, headers=_auth_headers())
+    resp = client.post("/users", json=payload, headers=_jwt_auth_headers(admin_id))
     assert resp.status_code == 201
     user_id = resp.json()["id"]
 
@@ -120,7 +123,7 @@ def test_update_user_changes_profile_and_password(client_with_db):
     resp_update = client.put(
         f"/users/{user_id}",
         json=update_payload,
-        headers=_auth_headers(),
+        headers=_jwt_auth_headers(admin_id),
     )
     assert resp_update.status_code == 200
     data = resp_update.json()
@@ -135,35 +138,35 @@ def test_update_user_changes_profile_and_password(client_with_db):
 
 
 def test_update_missing_user_returns_404(client_with_db):
-    client, _ = client_with_db
+    client, _, admin_id = client_with_db
     resp = client.put(
         "/users/00000000-0000-0000-0000-000000000000",
         json={"display_name": "n/a"},
-        headers=_auth_headers(),
+        headers=_jwt_auth_headers(admin_id),
     )
     assert resp.status_code == 404
 
 
 def test_superuser_can_ban_user_and_revoke_access(client_with_db):
-    client, _ = client_with_db
+    client, _, admin_id = client_with_db
 
     create_payload = {
         "username": "diana",
         "email": "diana@example.com",
         "password": "Secret123!",
     }
-    resp_user = client.post("/users", json=create_payload, headers=_auth_headers())
+    resp_user = client.post("/users", json=create_payload, headers=_jwt_auth_headers(admin_id))
     assert resp_user.status_code == 201
     user_id = resp_user.json()["id"]
 
     resp_key = client.post(
         f"/users/{user_id}/api-keys",
         json={"name": "diana-key", "expiry": "never"},
-        headers=_auth_headers(),
+        headers=_jwt_auth_headers(admin_id),
     )
     assert resp_key.status_code == 201
-    user_token = resp_key.json()["token"]
-    user_headers = auth_headers(user_token)
+    # 使用新创建用户的 JWT token
+    user_headers = _jwt_auth_headers(user_id)
 
     resp_cache = client.put(
         f"/users/{user_id}",
@@ -175,7 +178,7 @@ def test_superuser_can_ban_user_and_revoke_access(client_with_db):
     ban_resp = client.put(
         f"/users/{user_id}/status",
         json={"is_active": False},
-        headers=_auth_headers(),
+        headers=_jwt_auth_headers(admin_id),
     )
     assert ban_resp.status_code == 200
     assert ban_resp.json()["is_active"] is False
@@ -186,23 +189,23 @@ def test_superuser_can_ban_user_and_revoke_access(client_with_db):
         headers=user_headers,
     )
     assert resp_after_ban.status_code == 403
-    assert resp_after_ban.json()["detail"] == "API token owner is inactive"
+    assert resp_after_ban.json()["detail"] == "User account is disabled"
 
 
 def test_non_superuser_cannot_ban_user(client_with_db):
-    client, session_factory = client_with_db
+    client, session_factory, admin_id = client_with_db
 
     target_payload = {
         "username": "eve",
         "email": "eve@example.com",
         "password": "Secret123!",
     }
-    resp_user = client.post("/users", json=target_payload, headers=_auth_headers())
+    resp_user = client.post("/users", json=target_payload, headers=_jwt_auth_headers(admin_id))
     assert resp_user.status_code == 201
     target_id = resp_user.json()["id"]
 
     with session_factory() as session:
-        _, _ = seed_user_and_key(
+        worker_user, _ = seed_user_and_key(
             session,
             token_plain="worker",
             username="worker",
@@ -210,7 +213,7 @@ def test_non_superuser_cannot_ban_user(client_with_db):
             is_superuser=False,
         )
 
-    worker_headers = auth_headers("worker")
+    worker_headers = _jwt_auth_headers(str(worker_user.id))
     resp_ban = client.put(
         f"/users/{target_id}/status",
         json={"is_active": False},

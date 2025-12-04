@@ -63,20 +63,25 @@ def generate_secure_random_password(length: int = 16) -> str:
     生成安全的随机密码
     
     Args:
-        length: 密码长度
+        length: 密码长度（字符数，默认16）
         
     Returns:
-        随机生成的密码
+        随机生成的密码（保证不超过72字节）
         
     Raises:
         SystemKeyGenerationError: 如果生成失败
     """
     try:
-        # 直接生成固定长度的随机密码，确保不超过 72 字节（bcrypt 限制）
-        # 使用较小的参数确保生成的字符串不会太长
-        # secrets.token_urlsafe(n) 生成大约 1.3*n 长度的字符串
-        # 所以我们使用 n=48 可以生成大约 64 字符长度的字符串，远小于 72 字节限制
-        password = secrets.token_urlsafe(48)
+        # 生成安全的随机密码，确保不超过 72 字节（bcrypt 限制）
+        # secrets.token_urlsafe(n) 生成大约 4*n/3 长度的 base64 字符串
+        # 为了确保不超过 72 字节，我们使用较小的值
+        # token_urlsafe(32) 生成约 43 字符，远小于 72 字节
+        actual_length = min(length, 32)
+        password = secrets.token_urlsafe(actual_length)
+        # 双重保险：确保不超过 72 字节
+        password_bytes = password.encode('utf-8')
+        if len(password_bytes) > 72:
+            password = password_bytes[:72].decode('utf-8', errors='ignore')
         return password
     except Exception as exc:
         raise SystemKeyGenerationError(f"Failed to generate secure password: {exc}") from exc

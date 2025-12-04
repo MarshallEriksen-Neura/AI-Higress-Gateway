@@ -33,7 +33,7 @@ class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     models_path: Mapped[str] = Column(String(100), nullable=False, server_default=text("'/v1/models'"))
     messages_path: Mapped[str | None] = Column(String(100), nullable=True)
     chat_completions_path: Mapped[str] = Column(
-        String(100), nullable=False, server_default=text("/v1/chat/completions"), default="/v1/chat/completions"
+        String(100), nullable=False, server_default=text("'/v1/chat/completions'"), default="/v1/chat/completions"
     )
     responses_path: Mapped[str | None] = Column(String(100), nullable=True)
     static_models = Column(JSONBCompat(), nullable=True)

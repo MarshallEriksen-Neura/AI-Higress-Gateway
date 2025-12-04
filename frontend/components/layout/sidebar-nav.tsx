@@ -15,7 +15,8 @@ import {
     Settings,
     Users,
     UserCircle,
-    Shield
+    Shield,
+    Package
 } from "lucide-react";
 
 const navItems = [
@@ -28,6 +29,11 @@ const navItems = [
         titleKey: "nav.providers",
         href: "/dashboard/providers",
         icon: Server,
+    },
+    {
+        titleKey: "nav.provider_presets",
+        href: "/dashboard/provider-presets",
+        icon: Package,
     },
     {
         titleKey: "nav.logical_models",

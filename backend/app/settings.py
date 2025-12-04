@@ -1,4 +1,7 @@
 
+import os
+from pathlib import Path
+
 from pydantic import Field
 
 try:
@@ -23,8 +26,11 @@ except ModuleNotFoundError:  # pragma: no cover - lightweight fallback for tests
 
 class Settings(BaseSettings):
     # Read from OS env and optional .env file in project root.
+    # Calculate the project root directory (two levels up from this file)
+    _project_root = Path(__file__).parent.parent.parent
+    
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_project_root / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )

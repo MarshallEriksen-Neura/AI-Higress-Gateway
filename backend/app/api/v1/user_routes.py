@@ -110,13 +110,14 @@ def _build_user_response(db: Session, user_id: UUID) -> UserResponse:
 def register_user_endpoint(
     payload: UserCreateRequest,
     db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
 ) -> UserResponse:
     """注册一个新用户并存储哈希密码。"""
 
     try:
         user = create_user(db, payload)
     except UsernameAlreadyExistsError:
-        raise bad_request("邮箱已被使用")
+        raise bad_request("用户名已存在")
     except EmailAlreadyExistsError:
         raise bad_request("邮箱已被使用")
 

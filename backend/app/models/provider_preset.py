@@ -17,15 +17,20 @@ class ProviderPreset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     display_name: Mapped[str] = Column(String(100), nullable=False)
     description: Mapped[str | None] = Column(Text, nullable=True)
     provider_type: Mapped[str] = Column(
-        String(16), nullable=False, server_default=text("native"), default="native"
+        String(16), nullable=False, server_default=text("'native'"), default="native"
     )
     transport: Mapped[str] = Column(
-        String(16), nullable=False, server_default=text("http"), default="http"
+        String(16), nullable=False, server_default=text("'http'"), default="http"
     )
     base_url: Mapped[str] = Column(String(255), nullable=False)
-    models_path: Mapped[str] = Column(String(100), nullable=False, server_default=text("/v1/models"))
+    models_path: Mapped[str] = Column(
+        String(100), nullable=False, server_default=text("'/v1/models'"), default="/v1/models"
+    )
     chat_completions_path: Mapped[str] = Column(
-        String(100), nullable=False, server_default=text("/v1/chat/completions"), default="/v1/chat/completions"
+        String(100),
+        nullable=False,
+        server_default=text("'/v1/chat/completions'"),
+        default="/v1/chat/completions",
     )
     messages_path: Mapped[str | None] = Column(String(100), nullable=True)
     responses_path: Mapped[str | None] = Column(String(100), nullable=True)

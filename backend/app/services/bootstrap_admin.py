@@ -40,13 +40,17 @@ def ensure_initial_admin(session: Session) -> BootstrapAdminResult | None:
             display_name="Administrator",
         )
         
-        # 获取API密钥并缓存
+        # 获取API密钥并缓存（best-effort，失败不影响初始化）
         from app.services.api_key_service import list_api_keys_for_user
         # admin_credentials 包含 user 对象，不是字符串
         user = admin_credentials["user"]
         api_keys = list_api_keys_for_user(session, user.id)
         if api_keys:
-            cache_api_key_sync(api_keys[0])
+            try:
+                cache_api_key_sync(api_keys[0])
+            except Exception as exc:
+                # Redis 不可用时不应阻塞初始化流程
+                logger.debug(f"Failed to cache API key (non-critical): {exc}")
         
         token = admin_credentials["api_key"]
         token_base64 = base64.b64encode(token.encode("utf-8")).decode("ascii")

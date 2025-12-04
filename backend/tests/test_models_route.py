@@ -9,6 +9,7 @@ from app.deps import get_redis
 from app.model_cache import MODELS_CACHE_KEY
 from app.models import Provider, ProviderModel
 from app.routes import create_app
+from app.services.chat_routing_service import _get_or_fetch_models  # noqa: F401
 from tests.utils import InMemoryRedis, auth_headers, install_inmemory_db
 
 

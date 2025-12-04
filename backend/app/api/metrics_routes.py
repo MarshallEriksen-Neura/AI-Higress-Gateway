@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 from typing import Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -403,7 +404,7 @@ def get_user_summary(
                 "weight_sum"
             ),
         )
-        .where(ProviderRoutingMetricsHistory.user_id == user_id)
+        .where(ProviderRoutingMetricsHistory.user_id == UUID(user_id))
     )
 
     if start_at is not None:
@@ -494,7 +495,7 @@ def get_api_key_summary(
                 "weight_sum"
             ),
         )
-        .where(ProviderRoutingMetricsHistory.api_key_id == api_key_id)
+        .where(ProviderRoutingMetricsHistory.api_key_id == UUID(api_key_id))
     )
 
     if start_at is not None:

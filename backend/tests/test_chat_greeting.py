@@ -16,6 +16,35 @@ if str(ROOT_DIR) not in sys.path:
 from app.deps import get_http_client, get_redis  # noqa: E402
 from app.schemas import LogicalModel, ModelCapability, PhysicalModel, ProviderConfig  # noqa: E402
 from app.routes import create_app  # noqa: E402
+from app.services.chat_routing_service import (  # noqa: E402
+    HealthResponse,
+    ModelsResponse,
+    ModelInfo,
+    GeminiToOpenAIStreamAdapter,
+    ClaudeMessagesFallbackStreamError,
+    ResponsesFallbackStreamError,
+    _build_openai_completion_from_gemini,
+    _encode_sse_payload,
+    _get_or_fetch_models,
+    _normalize_payload_by_model,
+    _strip_model_group_prefix,
+    _build_ordered_candidates,
+    _is_retryable_upstream_status,
+    _apply_upstream_path_override,
+    _enforce_allowed_providers,
+    _build_provider_headers,
+    _send_claude_fallback_non_stream,
+    _send_responses_fallback_non_stream,
+    _claude_streaming_fallback_iterator,
+    _responses_streaming_fallback_iterator,
+    _load_metrics_for_candidates,
+    _build_dynamic_logical_model_for_group,
+    _adapt_responses_payload,
+    _chat_to_responses_payload,
+    _wrap_chat_stream_response,
+    _should_attempt_claude_messages_fallback,
+    _GEMINI_MODEL_REGEX,
+)
 from app.settings import settings  # noqa: E402
 from app.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE  # noqa: E402
 from tests.utils import install_inmemory_db  # noqa: E402
@@ -158,7 +187,14 @@ def _mock_send(request: httpx.Request) -> httpx.Response:
             user_text = "".join(segments)
         elif isinstance(input_value, str):
             user_text = input_value
-        reply = f"你好！{instructions} - {user_text}".strip(" -")
+        
+        # Build reply with both instructions and user_text
+        reply_parts = []
+        if instructions:
+            reply_parts.append(instructions)
+        if user_text:
+            reply_parts.append(user_text)
+        reply = " - ".join(reply_parts) if reply_parts else "你好！"
         response_payload = {
             "id": "resp-test",
             "object": "response",
@@ -541,8 +577,35 @@ def _prepare_basic_app(monkeypatch):
     _seed_logical_model()
 
     app = create_app()
-    install_inmemory_db(app)
-    install_inmemory_db(app)
+    SessionLocal = install_inmemory_db(app)
+
+    # Seed test models into the database using the SessionLocal from install_inmemory_db
+    from app.models import Provider, ProviderModel
+    db = SessionLocal()
+    try:
+        # Create mock provider
+        provider = Provider(
+            provider_id="mock",
+            name="Mock Provider",
+            base_url="https://mock.local",
+            api_key_encrypted=b"test",
+            is_active=True,
+        )
+        db.add(provider)
+        db.flush()
+        
+        # Add test-model to the database
+        model = ProviderModel(
+            provider_id=provider.id,
+            model_id="test-model",
+            is_active=True,
+        )
+        db.add(model)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
 
     # Override Redis and HTTP client dependencies.
     app.dependency_overrides[get_redis] = override_get_redis
@@ -579,8 +642,8 @@ def _prepare_sdk_app(
     def _load_provider_configs():
         return [cfg]
 
-    def _get_provider_config(provider_id: str):
-        if provider_id == cfg.id:
+    def _get_provider_config(pid: str):
+        if pid == cfg.id:
             return cfg
         return None
 
@@ -619,8 +682,36 @@ def _prepare_sdk_app(
     fake_redis._data[key] = json.dumps(logical.model_dump(), ensure_ascii=False)
 
     app = create_app()
-    install_inmemory_db(app)
-    install_inmemory_db(app)
+    SessionLocal = install_inmemory_db(app)
+    
+    # Seed SDK models into the database using the SessionLocal from install_inmemory_db
+    from app.models import Provider, ProviderModel
+    db = SessionLocal()
+    try:
+        # Create SDK provider
+        provider = Provider(
+            provider_id=provider_id,
+            name=provider_name,
+            base_url=base_url,
+            api_key_encrypted=b"test",
+            is_active=True,
+        )
+        db.add(provider)
+        db.flush()
+        
+        # Add SDK model to the database
+        sdk_model = ProviderModel(
+            provider_id=provider.id,
+            model_id=model_id,
+            is_active=True,
+        )
+        db.add(sdk_model)
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+    
     app.dependency_overrides[get_redis] = override_get_redis
     # HTTP client不会被 SDK 分支真正使用，但依然需要满足 FastAPI 依赖签名。
     app.dependency_overrides[get_http_client] = override_get_http_client

@@ -14,7 +14,7 @@ from app.services.api_key_service import (
     build_api_key_prefix,
     derive_api_key_hash,
 )
-from app.services.jwt_auth_service import hash_password
+from app.services.jwt_auth_service import create_access_token, hash_password
 
 
 def install_inmemory_db(app, *, token_plain: str = "timeline") -> sessionmaker[Session]:
@@ -100,8 +100,15 @@ def seed_user_and_key(
 
 
 def auth_headers(token_plain: str = "timeline") -> dict[str, str]:
+    """生成 API Key 格式的认证头（用于模型访问路由）"""
     encoded = base64.b64encode(token_plain.encode("utf-8")).decode("ascii")
     return {"Authorization": f"Bearer {encoded}"}
+
+
+def jwt_auth_headers(user_id: str) -> dict[str, str]:
+    """生成 JWT token 格式的认证头（用于用户管理路由）"""
+    access_token = create_access_token({"sub": user_id})
+    return {"Authorization": f"Bearer {access_token}"}
 
 
 class InMemoryRedis:
@@ -118,4 +125,4 @@ class InMemoryRedis:
         self._data.pop(key, None)
 
 
-__all__ = ["InMemoryRedis", "auth_headers", "install_inmemory_db", "seed_user_and_key"]
+__all__ = ["InMemoryRedis", "auth_headers", "jwt_auth_headers", "install_inmemory_db", "seed_user_and_key"]
