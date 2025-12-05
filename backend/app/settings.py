@@ -69,6 +69,38 @@ class Settings(BaseSettings):
         description="Timezone used by Celery beat / scheduled tasks.",
     )
 
+    # Metrics buffer & sampling
+    metrics_buffer_enabled: bool = Field(
+        True,
+        alias="METRICS_BUFFER_ENABLED",
+        description="是否启用本地指标缓冲，按批写入数据库",
+    )
+    metrics_flush_interval_seconds: int = Field(
+        30,
+        alias="METRICS_FLUSH_INTERVAL_SECONDS",
+        description="指标缓冲刷新间隔（秒）",
+        ge=1,
+    )
+    metrics_latency_sample_size: int = Field(
+        128,
+        alias="METRICS_LATENCY_SAMPLE_SIZE",
+        description="每个时间桶保留的延迟样本量，用于估算分位数",
+        ge=0,
+    )
+    metrics_max_buffered_buckets: int = Field(
+        500,
+        alias="METRICS_MAX_BUFFERED_BUCKETS",
+        description="触发异步刷新前允许积累的最大桶数",
+        ge=1,
+    )
+    metrics_success_sample_rate: float = Field(
+        1.0,
+        alias="METRICS_SUCCESS_SAMPLE_RATE",
+        description="成功请求的采样率（0~1）；失败请求始终全量记录",
+        ge=0.0,
+        le=1.0,
+    )
+
     # HTTP timeouts
     upstream_timeout: float = 600.0
 

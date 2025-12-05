@@ -8,32 +8,42 @@ from uuid import UUID
 
 import httpx
 
-from sqlalchemy import Float, cast
-from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from app.logging_config import logger
 from app.models import ProviderRoutingMetricsHistory
 from app.upstream import UpstreamStreamError, stream_upstream
+from app.settings import settings
+from app.services.metrics_buffer import BufferedMetricsRecorder, MetricsKey, MetricsStats
 
 BucketSizeSeconds = Literal[60]
 
 DEFAULT_BUCKET_SECONDS: BucketSizeSeconds = 60
+
+metrics_recorder = BufferedMetricsRecorder(
+    flush_interval_seconds=settings.metrics_flush_interval_seconds,
+    latency_sample_size=settings.metrics_latency_sample_size,
+    max_buffered_buckets=settings.metrics_max_buffered_buckets,
+    success_sample_rate=settings.metrics_success_sample_rate,
+)
+
+if settings.metrics_buffer_enabled:
+    metrics_recorder.start()
 
 
 def _current_bucket_start(now: dt.datetime, bucket_seconds: int) -> dt.datetime:
     """
     将当前时间截断到指定秒数的聚合桶起点（例如按分钟聚合）。
     """
-    # 统一使用 UTC，避免跨时区聚合混乱。
     if now.tzinfo is None:
         now = now.replace(tzinfo=dt.timezone.utc)
     else:
         now = now.astimezone(dt.timezone.utc)
 
-    # 这里只做到“分钟起点”的截断，便于和人类时间对齐。
-    floored = now.replace(second=0, microsecond=0)
-    return floored
+    # 使用 timestamp 截断，支持不同桶尺寸（默认 60s）。
+    epoch_seconds = int(now.timestamp())
+    bucket_start = epoch_seconds - (epoch_seconds % bucket_seconds)
+    return dt.datetime.fromtimestamp(bucket_start, tz=dt.timezone.utc)
 
 
 def record_provider_call_metric(
@@ -50,21 +60,34 @@ def record_provider_call_metric(
     bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
 ) -> None:
     """
-    将单次上游调用累加到 provider_routing_metrics_history 的时间桶里。
+    将单次上游调用累加到本地缓冲区，由后台批量写入 provider_routing_metrics_history。
 
-    设计目标：
-    - 每次调用只做一次 INSERT ... ON CONFLICT DO UPDATE，写入成本可控；
-    - 先聚合出“调用次数 + 平均延迟 + 错误率”，满足报表/趋势图需求；
-    - p95/p99 先简单用平均值占位，后续可以改为离线/异步精细计算。
+    - 默认开启指标缓冲：减少每次请求的同步写库开销。
+    - 若关闭缓冲（METRICS_BUFFER_ENABLED=false），退化为立即 UPSERT。
     """
     try:
         now = dt.datetime.now(tz=dt.timezone.utc)
         window_start = _current_bucket_start(now, bucket_seconds)
 
-        success_inc = 1 if success else 0
-        error_inc = 0 if success else 1
+        if settings.metrics_buffer_enabled:
+            metrics_recorder.record_sample(
+                provider_id=provider_id,
+                logical_model=logical_model,
+                transport=transport,
+                is_stream=is_stream,
+                user_id=user_id,
+                api_key_id=api_key_id,
+                window_start=window_start,
+                bucket_seconds=bucket_seconds,
+                success=success,
+                latency_ms=latency_ms,
+            )
+            return
 
-        base_insert = insert(ProviderRoutingMetricsHistory).values(
+        # 缓冲关闭时，直接写库（保留旧逻辑）。
+        stats = MetricsStats()
+        stats.record(success=success, latency_ms=latency_ms, sample_limit=1)
+        key = MetricsKey(
             provider_id=provider_id,
             logical_model=logical_model,
             transport=transport,
@@ -72,64 +95,10 @@ def record_provider_call_metric(
             user_id=user_id,
             api_key_id=api_key_id,
             window_start=window_start,
-            window_duration=bucket_seconds,
-            total_requests_1m=1,
-            success_requests=success_inc,
-            error_requests=error_inc,
-            latency_avg_ms=latency_ms,
-            # 先使用平均值占位，后续可通过离线任务更新为真实 p95/p99。
-            latency_p95_ms=latency_ms,
-            latency_p99_ms=latency_ms,
-            error_rate=float(error_inc),
-            success_qps_1m=success_inc / bucket_seconds,
-            status="healthy",
+            bucket_seconds=bucket_seconds,
         )
-
-        # on_conflict 里基于当前行做累加与派生指标更新。
-        new_total = ProviderRoutingMetricsHistory.total_requests_1m + 1
-        new_success = ProviderRoutingMetricsHistory.success_requests + success_inc
-        new_error = ProviderRoutingMetricsHistory.error_requests + error_inc
-
-        update_stmt = base_insert.on_conflict_do_update(
-            constraint="uq_provider_routing_metrics_history_bucket",
-            set_={
-                "total_requests_1m": new_total,
-                "success_requests": new_success,
-                "error_requests": new_error,
-                # 简单的加权平均： (旧均值 * 旧总数 + 本次延迟) / 新总数
-                "latency_avg_ms": (
-                    (
-                        ProviderRoutingMetricsHistory.latency_avg_ms
-                        * ProviderRoutingMetricsHistory.total_requests_1m
-                        + latency_ms
-                    )
-                    / cast(new_total, Float)
-                ),
-                # 先用平均值占位，后续可以通过离线任务离线刷新真实 P95/P99。
-                "latency_p95_ms": (
-                    (
-                        ProviderRoutingMetricsHistory.latency_avg_ms
-                        * ProviderRoutingMetricsHistory.total_requests_1m
-                        + latency_ms
-                    )
-                    / cast(new_total, Float)
-                ),
-                "latency_p99_ms": (
-                    (
-                        ProviderRoutingMetricsHistory.latency_avg_ms
-                        * ProviderRoutingMetricsHistory.total_requests_1m
-                        + latency_ms
-                    )
-                    / cast(new_total, Float)
-                ),
-                "error_rate": cast(new_error, Float) / cast(new_total, Float),
-                "success_qps_1m": cast(new_success, Float) / float(bucket_seconds),
-                # 暂时统一认为“healthy”，后续可按错误率/延迟派生。
-                "status": ProviderRoutingMetricsHistory.status,
-            },
-        )
-
-        db.execute(update_stmt)
+        immediate_stmt = metrics_recorder._build_upsert_stmt(key, stats)
+        db.execute(immediate_stmt)
         db.commit()
     except Exception:  # pragma: no cover - 防御性日志，不影响主流程
         logger.exception(
@@ -137,6 +106,11 @@ def record_provider_call_metric(
             provider_id,
             logical_model,
         )
+
+
+def flush_metrics_buffer() -> int:
+    """手动触发一次缓冲刷新，便于调试或关停前落盘。"""
+    return metrics_recorder.flush()
 
 
 async def call_upstream_http_with_metrics(
@@ -410,6 +384,7 @@ async def stream_sdk_with_metrics(
 
 __all__ = [
     "record_provider_call_metric",
+    "flush_metrics_buffer",
     "call_upstream_http_with_metrics",
     "stream_upstream_with_metrics",
     "call_sdk_generate_with_metrics",
