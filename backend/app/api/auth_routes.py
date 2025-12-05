@@ -7,7 +7,6 @@ from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 try:
@@ -18,6 +17,12 @@ except ModuleNotFoundError:
 from app.deps import get_db, get_redis
 from app.jwt_auth import AuthenticatedUser, require_jwt_refresh_token, require_jwt_token
 from app.schemas.token import DeviceInfo
+from app.schemas.auth import (
+    LoginRequest,
+    RefreshTokenRequest,
+    RegisterRequest,
+    TokenResponse,
+)
 from app.schemas.user import UserResponse
 from app.services.credit_service import get_or_create_account_for_user
 from app.services.jwt_auth_service import (
@@ -43,29 +48,6 @@ from app.services.user_service import (
 )
 
 router = APIRouter(tags=["authentication"], prefix="/auth")
-
-
-# 请求和响应模型
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-    expires_in: int  # 访问令牌过期时间（秒）
-
-
-class RefreshTokenRequest(BaseModel):
-    refresh_token: str
-
-
-class RegisterRequest(BaseModel):
-    email: str = Field(..., description="邮箱地址")
-    password: str = Field(..., min_length=6, description="密码")
-    display_name: str = None
 
 
 DEFAULT_USER_ROLE_CODE = "default_user"

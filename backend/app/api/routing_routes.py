@@ -4,7 +4,6 @@ import time
 from collections.abc import Sequence
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
 
 try:
     from redis.asyncio import Redis
@@ -14,13 +13,8 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 from app.auth import require_api_key
 from app.deps import get_redis
 from app.errors import not_found, service_unavailable
-from app.schemas import (
-    LogicalModel,
-    PhysicalModel,
-    RoutingMetrics,
-    SchedulingStrategy,
-    Session,
-)
+from app.schemas import LogicalModel, PhysicalModel, RoutingMetrics, SchedulingStrategy, Session
+from app.schemas.routing import CandidateInfo, RoutingDecision, RoutingRequest
 from app.routing.mapper import select_candidate_upstreams
 from app.routing.provider_weight import load_dynamic_weights
 from app.routing.scheduler import choose_upstream
@@ -31,40 +25,6 @@ router = APIRouter(
     tags=["routing"],
     dependencies=[Depends(require_api_key)],
 )
-
-
-class RoutingRequest(BaseModel):
-    logical_model: str = Field(..., description="Logical model id")
-    conversation_id: str | None = Field(
-        default=None, description="Conversation id for stickiness"
-    )
-    user_id: str | None = Field(default=None, description="User id (unused for now)")
-    preferred_region: str | None = Field(
-        default=None, description="Preferred region for upstream selection"
-    )
-    strategy: str | None = Field(
-        default=None,
-        description="Strategy name (latency_first/cost_first/reliability_first/balanced)",
-    )
-    exclude_providers: list[str] | None = Field(
-        default=None, description="Optional list of provider ids to exclude"
-    )
-
-
-class CandidateInfo(BaseModel):
-    upstream: PhysicalModel
-    score: float
-    metrics: RoutingMetrics | None = None
-
-
-class RoutingDecision(BaseModel):
-    logical_model: str
-    selected_upstream: PhysicalModel
-    decision_time: float
-    reasoning: str
-    alternative_upstreams: list[PhysicalModel] | None = None
-    strategy_used: str | None = None
-    all_candidates: list[CandidateInfo] | None = None
 
 
 def _strategy_from_name(name: str | None) -> SchedulingStrategy:

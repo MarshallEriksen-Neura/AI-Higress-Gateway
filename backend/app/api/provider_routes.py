@@ -2,7 +2,6 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
 
 try:
     from redis.asyncio import Redis
@@ -14,6 +13,11 @@ from app.deps import get_http_client, get_redis
 from app.errors import not_found
 from app.logging_config import logger
 from app.schemas import ProviderConfig, RoutingMetrics
+from app.schemas.provider_routes import (
+    ProviderMetricsResponse,
+    ProviderModelsResponse,
+    ProvidersResponse,
+)
 from app.provider.config import get_provider_config, load_provider_configs
 from app.provider.discovery import ensure_provider_models_cached
 from app.provider.health import HealthStatus, check_provider_health
@@ -23,21 +27,6 @@ router = APIRouter(
     tags=["providers"],
     dependencies=[Depends(require_api_key)],
 )
-
-
-class ProvidersResponse(BaseModel):
-    providers: list[ProviderConfig] = Field(default_factory=list)
-    total: int
-
-
-class ProviderModelsResponse(BaseModel):
-    models: list[dict[str, Any]] = Field(default_factory=list)
-    total: int
-
-
-class ProviderMetricsResponse(BaseModel):
-    metrics: list[RoutingMetrics] = Field(default_factory=list)
-
 
 @router.get("/providers", response_model=ProvidersResponse)
 async def list_providers() -> ProvidersResponse:

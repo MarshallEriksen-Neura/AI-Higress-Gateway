@@ -1,6 +1,5 @@
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
 
 try:
     from redis.asyncio import Redis
@@ -10,22 +9,18 @@ except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is
 from app.auth import require_api_key
 from app.deps import get_redis
 from app.errors import not_found
-from app.schemas import LogicalModel, PhysicalModel
+from app.schemas import (
+    LogicalModel,
+    LogicalModelUpstreamsResponse,
+    LogicalModelsResponse,
+    PhysicalModel,
+)
 from app.storage.redis_service import get_logical_model, list_logical_models
 
 router = APIRouter(
     tags=["logical-models"],
     dependencies=[Depends(require_api_key)],
 )
-
-
-class LogicalModelsResponse(BaseModel):
-    models: list[LogicalModel] = Field(default_factory=list)
-    total: int
-
-
-class LogicalModelUpstreamsResponse(BaseModel):
-    upstreams: list[PhysicalModel] = Field(default_factory=list)
 
 
 @router.get("/logical-models", response_model=LogicalModelsResponse)

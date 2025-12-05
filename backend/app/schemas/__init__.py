@@ -15,13 +15,28 @@ from .api_key import (
     APIKeyResponse,
     APIKeyUpdateRequest,
 )
+from .auth import LoginRequest, RefreshTokenRequest, RegisterRequest, TokenResponse
 from .credit import (
     CreditAccountResponse,
     CreditTopupRequest,
     CreditTransactionResponse,
 )
-from .logical_model import LogicalModel, PhysicalModel
+from .logical_model import (
+    LogicalModel,
+    LogicalModelUpstreamsResponse,
+    LogicalModelsResponse,
+    PhysicalModel,
+)
 from .model import Model, ModelCapability
+from .metrics import (
+    APIKeyMetricsSummary,
+    MetricsBucket,
+    MetricsDataPoint,
+    MetricsTimeRange,
+    ProviderMetricsSummary,
+    ProviderMetricsTimeSeries,
+    UserMetricsSummary,
+)
 from .provider import (
     Provider,
     ProviderAPIKey,
@@ -56,8 +71,24 @@ from .provider_control import (
      UserProviderResponse,
      UserProviderUpdateRequest,
 )
+from .provider_routes import (
+    ProviderMetricsResponse,
+    ProviderModelsResponse,
+    ProvidersResponse,
+)
+from .routing import CandidateInfo, RoutingDecision, RoutingRequest
 from .routing_metrics import MetricsHistory, RoutingMetrics
 from .scheduling import SchedulingStrategy
+from .system import (
+    KeyValidationRequest,
+    KeyValidationResponse,
+    ProviderLimitsResponse,
+    ProviderLimitsUpdateRequest,
+    SecretKeyGenerationRequest,
+    SecretKeyResponse,
+    SystemAdminInitRequest,
+    SystemAdminInitResponse,
+)
 from .session import Session
 from .user import (
     UserCreateRequest,
@@ -74,11 +105,18 @@ __all__ = [
     "APIKeyExpiry",
     "APIKeyResponse",
     "APIKeyUpdateRequest",
+    "APIKeyMetricsSummary",
+    "CandidateInfo",
     "CreditAccountResponse",
     "CreditTopupRequest",
     "CreditTransactionResponse",
     "LogicalModel",
+    "LogicalModelUpstreamsResponse",
+    "LogicalModelsResponse",
     "MetricsHistory",
+    "MetricsBucket",
+    "MetricsDataPoint",
+    "MetricsTimeRange",
     "Model",
     "ModelCapability",
     "PhysicalModel",
@@ -86,6 +124,17 @@ __all__ = [
     "ProviderAPIKey",
     "ProviderConfig",
     "ProviderStatus",
+    "ProviderLimitsResponse",
+    "ProviderLimitsUpdateRequest",
+    "ProviderMetricsResponse",
+    "ProviderMetricsSummary",
+    "ProviderMetricsTimeSeries",
+    "ProviderModelsResponse",
+    "ProvidersResponse",
+    "SecretKeyGenerationRequest",
+    "SecretKeyResponse",
+    "SystemAdminInitRequest",
+    "SystemAdminInitResponse",
     "AdminProviderResponse",
     "AdminProvidersResponse",
     "PermissionResponse",
@@ -106,9 +155,14 @@ __all__ = [
     "ProviderAPIKeyCreateRequest",
     "ProviderAPIKeyUpdateRequest",
     "ProviderAPIKeyResponse",
+    "RefreshTokenRequest",
+    "RegisterRequest",
+    "RoutingDecision",
     "RoutingMetrics",
+    "RoutingRequest",
     "SchedulingStrategy",
     "Session",
+    "TokenResponse",
     "UserPermissionGrantRequest",
     "UserPermissionResponse",
     "UserRolesUpdateRequest",
@@ -119,4 +173,8 @@ __all__ = [
     "UserResponse",
     "UserStatusUpdateRequest",
     "UserUpdateRequest",
+    "KeyValidationRequest",
+    "KeyValidationResponse",
+    "LoginRequest",
+    "UserMetricsSummary",
 ]

@@ -49,4 +49,18 @@ class LogicalModel(BaseModel):
     updated_at: float = Field(..., description="Last update timestamp (epoch seconds)")
 
 
-__all__ = ["LogicalModel", "PhysicalModel"]
+class LogicalModelsResponse(BaseModel):
+    models: list[LogicalModel] = Field(default_factory=list)
+    total: int
+
+
+class LogicalModelUpstreamsResponse(BaseModel):
+    upstreams: list[PhysicalModel] = Field(default_factory=list)
+
+
+__all__ = [
+    "LogicalModel",
+    "LogicalModelUpstreamsResponse",
+    "LogicalModelsResponse",
+    "PhysicalModel",
+]
