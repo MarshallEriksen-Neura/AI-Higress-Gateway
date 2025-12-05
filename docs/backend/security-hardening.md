@@ -78,6 +78,12 @@ app.add_middleware(
     enable_command_injection_check=True,
     enable_user_agent_check=True,
     log_suspicious_requests=True,
+    inspect_body=True,  # 启用后会解析 JSON/表单请求体并做规则匹配
+    inspect_body_max_length=10_240,  # 请求体扫描大小上限，防止超大包体 DoS
+    ban_ip_on_detection=True,  # 命中恶意规则后自动封禁来源 IP
+    ban_ttl_seconds=900,  # 封禁 15 分钟（结合 Redis 可跨实例共享）
+    allowed_ips={"10.0.0.9"},  # 可选：对可信 IP / 健康检查放行
+    allowed_path_prefixes={"/health"},  # 可选：对特定路径放行
 )
 ```
 
@@ -87,6 +93,12 @@ app.add_middleware(
 - 路径遍历（../, %2e%2e/ 等）
 - 命令注入（;, |, $() 等）
 - 扫描工具识别（sqlmap, nikto, nmap 等）
+
+**封禁与取证建议**：
+- 短期封禁：使用内存或 Redis 存储，命中规则后直接写入封禁名单（带 TTL），可快速阻断重复攻击 IP；
+- 长期追踪：若需要审计或拉黑高风险来源，可将命中记录追加到数据库/日志管道，由离线任务决定是否写入持久化黑名单表；
+- 业务白名单：为健康检查、可信代理等来源 IP 或路径预留白名单，避免因规则误伤产生全局封禁；
+- DoS 防护：开启请求体扫描时建议配置 `inspect_body_max_length`，仅解析文本类 Content-Type，防止大包体导致 CPU/内存被耗尽。
 
 ### 2. 容器化安全
 
