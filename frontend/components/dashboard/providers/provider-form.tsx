@@ -62,8 +62,8 @@ const providerFormSchema = z
         staticModels: z.array(z.any()).default([]),
         supportedApiStyles: z.array(z.string()).default([]),
         
-        // API Key
-        apiKey: z.string().trim().default(""),
+        // API Key（必填）
+        apiKey: z.string().trim().min(1, "API Key 不能为空"),
     })
     .superRefine((values, ctx) => {
         // 所有模式下，当未使用预设时都需要合法的 Base URL

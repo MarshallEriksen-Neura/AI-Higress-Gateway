@@ -242,13 +242,16 @@ class TokenRedisService:
 
         return token_record
 
-    async def revoke_token(self, jti: str, reason: str = "user_logout") -> bool:
+    async def revoke_token(
+        self, jti: str, reason: str = "user_logout", grace_period_seconds: int = 0
+    ) -> bool:
         """
         撤销单个 token
 
         Args:
             jti: JWT ID
             reason: 撤销原因
+            grace_period_seconds: 宽限期（秒），在此期间 token 仍然有效
 
         Returns:
             是否成功撤销
@@ -280,18 +283,38 @@ class TokenRedisService:
         if remaining_seconds <= 0:
             return False
 
-        # 添加到黑名单
-        blacklist_entry = TokenBlacklistEntry(
-            jti=jti, user_id=token_record.user_id, revoked_at=now, reason=reason
-        )
+        # 如果有宽限期，延迟添加到黑名单
+        if grace_period_seconds > 0:
+            # 计算实际撤销时间
+            revoke_at = now + timedelta(seconds=grace_period_seconds)
+            blacklist_entry = TokenBlacklistEntry(
+                jti=jti, user_id=token_record.user_id, revoked_at=revoke_at, reason=reason
+            )
 
-        blacklist_key = TOKEN_BLACKLIST_KEY.format(jti=jti)
-        await redis_set_json(
-            self.redis,
-            blacklist_key,
-            blacklist_entry.model_dump(mode="json"),
-            ttl_seconds=remaining_seconds,
-        )
+            # 黑名单的 TTL 需要考虑宽限期
+            blacklist_ttl = remaining_seconds + grace_period_seconds
+            blacklist_key = TOKEN_BLACKLIST_KEY.format(jti=jti)
+            
+            # 存储黑名单条目，但在验证时会检查 revoked_at 时间
+            await redis_set_json(
+                self.redis,
+                blacklist_key,
+                blacklist_entry.model_dump(mode="json"),
+                ttl_seconds=blacklist_ttl,
+            )
+        else:
+            # 立即添加到黑名单
+            blacklist_entry = TokenBlacklistEntry(
+                jti=jti, user_id=token_record.user_id, revoked_at=now, reason=reason
+            )
+
+            blacklist_key = TOKEN_BLACKLIST_KEY.format(jti=jti)
+            await redis_set_json(
+                self.redis,
+                blacklist_key,
+                blacklist_entry.model_dump(mode="json"),
+                ttl_seconds=remaining_seconds,
+            )
 
         # 如果是 refresh token，标记为已撤销
         if token_type == "refresh":
@@ -422,7 +445,23 @@ class TokenRedisService:
         """
         blacklist_key = TOKEN_BLACKLIST_KEY.format(jti=jti)
         data = await redis_get_json(self.redis, blacklist_key)
-        return data is not None
+        
+        if data is None:
+            return False
+        
+        # 检查是否在宽限期内
+        try:
+            entry = TokenBlacklistEntry.model_validate(data)
+            now = datetime.now(timezone.utc)
+            
+            # 如果撤销时间还未到，token 仍然有效
+            if entry.revoked_at > now:
+                return False
+            
+            return True
+        except Exception:
+            # 如果解析失败，保守地认为已被撤销
+            return True
 
     async def update_session_last_used(self, user_id: str, refresh_token_jti: str) -> None:
         """

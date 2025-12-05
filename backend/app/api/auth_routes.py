@@ -370,8 +370,8 @@ async def refresh_token(
             family_id=family_id  # 保持相同的家族
         )
         
-        # 撤销旧的 refresh token
-        await token_service.revoke_token(jti, reason="token_rotated")
+        # 撤销旧的 refresh token，添加 30 秒宽限期以允许飞行中的请求完成
+        await token_service.revoke_token(jti, reason="token_rotated", grace_period_seconds=30)
         
         # 存储新的 access token
         await token_service.store_access_token(

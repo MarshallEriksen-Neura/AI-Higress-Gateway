@@ -33,7 +33,9 @@ export function BasicProviderConfig({
                 render={({ field }: { field: any }) => (
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                            <FormLabel required>Provider 名称</FormLabel>
+                            <FormLabel>
+                                Provider 名称 <span className="text-destructive">*</span>
+                            </FormLabel>
                             {isFieldOverridden("name") && (
                                 <Badge variant="outline" className="text-xs">
                                     已覆盖
@@ -58,7 +60,9 @@ export function BasicProviderConfig({
                     name="providerType"
                     render={({ field }: { field: any }) => (
                         <div className="space-y-2">
-                            <FormLabel required>Provider 类型</FormLabel>
+                            <FormLabel>
+                                Provider 类型 <span className="text-destructive">*</span>
+                            </FormLabel>
                             <Tabs
                                 value={field.value}
                                 onValueChange={(value) => {
@@ -83,7 +87,9 @@ export function BasicProviderConfig({
                     name="transport"
                     render={({ field }: { field: any }) => (
                         <div className="space-y-2">
-                            <FormLabel required>传输方式</FormLabel>
+                            <FormLabel>
+                                传输方式 <span className="text-destructive">*</span>
+                            </FormLabel>
                             <Tabs
                                 value={field.value}
                                 onValueChange={(value) => {
@@ -111,8 +117,10 @@ export function BasicProviderConfig({
                     name="sdkVendor"
                     render={({ field }: { field: any }) => (
                         <div className="space-y-2">
-                            <FormLabel required>SDK 类型</FormLabel>
-                            <div className="flex gap-2">
+                                <FormLabel>
+                                    SDK 类型 <span className="text-destructive">*</span>
+                                </FormLabel>
+                                <div className="flex gap-2">
                                 <Button
                                     type="button"
                                     variant={field.value === "openai" ? "default" : "outline"}
@@ -161,7 +169,9 @@ export function BasicProviderConfig({
                 render={({ field }: { field: any }) => (
                     <div className="space-y-2">
                         <div className="flex items-center gap-2">
-                            <FormLabel required>Base URL</FormLabel>
+                            <FormLabel>
+                                Base URL <span className="text-destructive">*</span>
+                            </FormLabel>
                             {isFieldOverridden("baseUrl") && (
                                 <Badge variant="outline" className="text-xs">
                                     已覆盖
@@ -185,14 +195,16 @@ export function BasicProviderConfig({
                 name="apiKey"
                 render={({ field }: { field: any }) => (
                     <div className="space-y-2">
-                        <FormLabel>API Key（可选）</FormLabel>
+                        <FormLabel>
+                            API Key <span className="text-destructive">*</span>
+                        </FormLabel>
                         <Input
                             {...field}
                             type="password"
                             placeholder="sk-..."
                         />
                         <p className="text-xs text-muted-foreground">
-                            创建后也可以在 Provider 详情页单独管理密钥
+                            上游厂商的 API 密钥，将以加密形式存储
                         </p>
                     </div>
                 )}

@@ -41,11 +41,6 @@ const navItems = [
         icon: Key,
     },
     {
-        titleKey: "nav.routing",
-        href: "/dashboard/routing",
-        icon: Network,
-    },
-    {
         titleKey: "nav.metrics",
         href: "/dashboard/metrics",
         icon: Activity,
@@ -53,6 +48,11 @@ const navItems = [
 ];
 
 const adminItems = [
+    {
+        titleKey: "nav.routing",
+        href: "/dashboard/routing",
+        icon: Network,
+    },
     {
         titleKey: "nav.provider_presets",
         href: "/dashboard/provider-presets",

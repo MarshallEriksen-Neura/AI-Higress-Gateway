@@ -30,6 +30,7 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000'
 
 // 刷新 token 的状态管理
 let isRefreshing = false;
+let refreshTokenPromise: Promise<string> | null = null;
 let failedQueue: Array<{
   resolve: (value?: any) => void;
   reject: (reason?: any) => void;
@@ -138,11 +139,9 @@ const createHttpClient = (): AxiosInstance => {
           
           // 如果不是刷新token请求，且不是已重试的请求，尝试刷新token
           if (!originalRequest._retry) {
-            if (isRefreshing) {
-              // 如果正在刷新，将请求加入队列
-              return new Promise((resolve, reject) => {
-                failedQueue.push({ resolve, reject });
-              }).then(token => {
+            // 如果正在刷新，等待刷新完成后使用新 token 重试
+            if (isRefreshing && refreshTokenPromise) {
+              return refreshTokenPromise.then(token => {
                 if (originalRequest.headers) {
                   originalRequest.headers.Authorization = `Bearer ${token}`;
                 }
@@ -155,28 +154,35 @@ const createHttpClient = (): AxiosInstance => {
             originalRequest._retry = true;
             isRefreshing = true;
 
-            try {
-              const newToken = await refreshAccessToken();
-              processQueue(null, newToken);
-              
-              // 更新原请求的 token 并重试
+            // 创建共享的刷新 Promise
+            refreshTokenPromise = refreshAccessToken()
+              .then(newToken => {
+                processQueue(null, newToken);
+                return newToken;
+              })
+              .catch(refreshError => {
+                processQueue(refreshError, null);
+                
+                // 刷新失败，清除所有token并触发认证错误回调
+                tokenManager.clearAll();
+                if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
+                  authErrorCallback?.();
+                }
+                showError('会话已过期，请重新登录');
+                throw refreshError;
+              })
+              .finally(() => {
+                isRefreshing = false;
+                refreshTokenPromise = null;
+              });
+
+            // 等待刷新完成后重试原请求
+            return refreshTokenPromise.then(newToken => {
               if (originalRequest.headers) {
                 originalRequest.headers.Authorization = `Bearer ${newToken}`;
               }
               return instance(originalRequest);
-            } catch (refreshError) {
-              processQueue(refreshError, null);
-              
-              // 刷新失败，清除所有token并触发认证错误回调
-              tokenManager.clearAll();
-              if (typeof window !== 'undefined' && !window.location.pathname.includes('/login')) {
-                authErrorCallback?.();
-              }
-              showError('会话已过期，请重新登录');
-              return Promise.reject(refreshError);
-            } finally {
-              isRefreshing = false;
-            }
+            });
           }
         }
 

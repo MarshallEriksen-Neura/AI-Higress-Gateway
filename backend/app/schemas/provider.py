@@ -224,12 +224,45 @@ class ProviderAPIKeyResponse(BaseModel):
         from_attributes = True
 
 
+class ProviderResponse(BaseModel):
+    """
+    提供商的API响应模型，用于返回提供商信息
+    """
+    id: str = Field(..., description="提供商的UUID")
+    provider_id: str = Field(..., description="提供商的唯一标识符")
+    name: str = Field(..., description="提供商名称")
+    base_url: str = Field(..., description="API基础URL")
+    transport: str = Field(default="http", description="传输类型：http或sdk")
+    provider_type: str = Field(default="native", description="提供商类型：native或aggregator")
+    sdk_vendor: str | None = Field(default=None, description="SDK供应商标识")
+    weight: float = Field(default=1.0, description="路由权重")
+    region: str | None = Field(default=None, description="区域标识")
+    cost_input: float | None = Field(default=None, description="输入token价格")
+    cost_output: float | None = Field(default=None, description="输出token价格")
+    billing_factor: float = Field(default=1.0, description="计费因子")
+    max_qps: int | None = Field(default=None, description="最大QPS限制")
+    models_path: str = Field(default="/v1/models", description="模型列表路径")
+    messages_path: str | None = Field(default=None, description="消息API路径")
+    chat_completions_path: str = Field(default="/v1/chat/completions", description="聊天完成路径")
+    responses_path: str | None = Field(default=None, description="响应API路径")
+    status: str = Field(default="healthy", description="提供商状态")
+    visibility: str = Field(default="public", description="可见性：public或private")
+    owner_id: str | None = Field(default=None, description="所有者用户ID（私有提供商）")
+    preset_id: str | None = Field(default=None, description="关联的预设ID")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str | None = Field(default=None, description="更新时间")
+    
+    class Config:
+        from_attributes = True
+
+
 __all__ = [
-    "Provider", 
-    "ProviderAPIKey", 
-    "ProviderConfig", 
+    "Provider",
+    "ProviderAPIKey",
+    "ProviderConfig",
     "ProviderStatus",
     "ProviderAPIKeyCreateRequest",
     "ProviderAPIKeyUpdateRequest",
     "ProviderAPIKeyResponse",
+    "ProviderResponse",
 ]
