@@ -63,6 +63,68 @@ def app_with_request_validator():
     return app
 
 
+@pytest.fixture
+def app_with_request_validator_body_and_ban():
+    """Create a test app with body inspection and IP ban enabled."""
+    app = FastAPI()
+    app.add_middleware(
+        RequestValidatorMiddleware,
+        enable_sql_injection_check=True,
+        enable_xss_check=True,
+        enable_path_traversal_check=True,
+        inspect_body=True,
+        ban_ip_on_detection=True,
+        ban_ttl_seconds=60,
+        log_suspicious_requests=False,  # Disable logging in tests
+    )
+
+    @app.post("/submit")
+    async def submit(payload: dict):
+        return payload
+
+    return app
+
+
+@pytest.fixture
+def app_with_request_validator_allowlist():
+    """Create app that skips validation for allowlisted IPs."""
+    app = FastAPI()
+    app.add_middleware(
+        RequestValidatorMiddleware,
+        enable_sql_injection_check=True,
+        enable_xss_check=True,
+        enable_path_traversal_check=True,
+        inspect_body=True,
+        ban_ip_on_detection=True,
+        allowed_ips={"10.0.0.9"},
+        log_suspicious_requests=False,
+    )
+
+    @app.get("/submit")
+    async def submit():
+        return {"message": "ok"}
+
+    return app
+
+
+@pytest.fixture
+def app_with_request_validator_body_limit():
+    """Create app that enforces a body size limit during inspection."""
+    app = FastAPI()
+    app.add_middleware(
+        RequestValidatorMiddleware,
+        inspect_body=True,
+        inspect_body_max_length=20,
+        log_suspicious_requests=False,
+    )
+
+    @app.post("/payload")
+    async def payload(data: dict):
+        return data
+
+    return app
+
+
 class TestSecurityHeadersMiddleware:
     """Test security headers middleware."""
 
@@ -181,6 +243,35 @@ class TestRequestValidatorMiddleware:
             response = client.get(pattern)
             assert response.status_code == 403
 
+    def test_sql_injection_in_body_blocked(self, app_with_request_validator_body_and_ban):
+        """Test that SQL injection payloads in request body are blocked."""
+        client = TestClient(app_with_request_validator_body_and_ban)
+
+        response = client.post(
+            "/submit",
+            json={"name": "test'; DROP TABLE users;--"},
+        )
+
+        assert response.status_code == 403
+        assert response.json()["reason"] == "sql_injection_in_body"
+
+    def test_attack_ip_is_banned_after_detection(self, app_with_request_validator_body_and_ban):
+        """Test that an IP triggering detection is banned for subsequent requests."""
+        client = TestClient(app_with_request_validator_body_and_ban)
+        headers = {"X-Real-IP": "10.0.0.8"}
+
+        first_response = client.get("/submit?id=1' OR '1'='1", headers=headers)
+        assert first_response.status_code == 403
+
+        second_response = client.post(
+            "/submit",
+            json={"name": "normal"},
+            headers=headers,
+        )
+
+        assert second_response.status_code == 403
+        assert second_response.json()["reason"] == "ip_blocked"
+
     def test_suspicious_user_agent_blocked(self, app_with_request_validator):
         """Test that suspicious user agents are blocked."""
         client = TestClient(app_with_request_validator)
@@ -195,6 +286,25 @@ class TestRequestValidatorMiddleware:
         for agent in suspicious_agents:
             response = client.get("/test", headers={"User-Agent": agent})
             assert response.status_code == 403
+
+    def test_allowlisted_ip_bypasses_detection(self, app_with_request_validator_allowlist):
+        """Requests from allowlisted IPs should bypass validation and banning."""
+        client = TestClient(app_with_request_validator_allowlist)
+        headers = {"X-Real-IP": "10.0.0.9"}
+
+        response = client.get("/submit?id=1' OR '1'='1", headers=headers)
+
+        assert response.status_code == 200
+        assert response.json()["message"] == "ok"
+
+    def test_large_body_rejected_during_inspection(self, app_with_request_validator_body_limit):
+        """Oversized bodies should be rejected before inspection to avoid DoS."""
+        client = TestClient(app_with_request_validator_body_limit)
+
+        response = client.post("/payload", json={"data": "x" * 30})
+
+        assert response.status_code == 413
+        assert response.json()["error"] == "payload_too_large"
 
 
 class TestMiddlewareIntegration:

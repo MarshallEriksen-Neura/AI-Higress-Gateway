@@ -92,6 +92,9 @@ def create_app() -> FastAPI:
         enable_command_injection_check=True,
         enable_user_agent_check=True,
         log_suspicious_requests=True,
+        inspect_body=True,
+        ban_ip_on_detection=True,
+        ban_ttl_seconds=900,
     )
 
     # CORS

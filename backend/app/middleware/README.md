@@ -79,9 +79,22 @@ app.add_middleware(
     RequestValidatorMiddleware,
     enable_sql_injection_check=True,
     enable_xss_check=True,
+    enable_path_traversal_check=True,
+    enable_command_injection_check=True,
     log_suspicious_requests=True,
+    inspect_body=True,  # 解析并扫描 JSON/表单请求体
+    inspect_body_max_length=10_240,  # 请求体扫描大小上限（字节），超出直接拒绝
+    ban_ip_on_detection=True,  # 命中规则后自动封禁 IP
+    ban_ttl_seconds=900,  # 封禁 15 分钟，可通过 Redis 共享
+    allowed_ips={"10.0.0.9"},  # 可选：跳过校验的白名单 IP（如内网健康检查）
 )
 ```
+
+**增强功能**：
+- 可选解析请求体，对 POST/PUT/PATCH/DELETE 的 JSON 或表单内容做注入/XSS 检测；
+- 支持命中规则后自动封禁来源 IP，默认使用内存存储，可传入 Redis 客户端以共享封禁名单；
+- 返回体中追加 `reason` 字段，便于定位阻断原因（如 `sql_injection_in_body`、`ip_blocked`）。
+- 支持白名单 IP / 路径前缀跳过检测；扫描请求体时可限制最大大小并仅处理文本类 Content-Type，降低 DoS 风险。
 
 ## 测试
 
