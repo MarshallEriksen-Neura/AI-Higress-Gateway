@@ -2,6 +2,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 
+from app.provider.config import get_provider_config, load_provider_configs
+
 from .api.auth_routes import router as auth_router
 from .api.logical_model_routes import router as logical_model_router
 from .api.metrics_routes import router as metrics_router

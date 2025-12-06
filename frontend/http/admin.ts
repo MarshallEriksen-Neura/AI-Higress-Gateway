@@ -105,4 +105,24 @@ export const adminService = {
         const response = await httpClient.get('/admin/users');
         return response.data;
     },
+
+    // 获取用户权限
+    getUserPermissions: async (userId: string): Promise<import('@/lib/api-types').UserPermission[]> => {
+        const response = await httpClient.get(`/admin/users/${userId}/permissions`);
+        return response.data;
+    },
+
+    // 授予/更新用户权限
+    grantUserPermission: async (
+        userId: string,
+        data: import('@/lib/api-types').GrantPermissionRequest
+    ): Promise<import('@/lib/api-types').UserPermission> => {
+        const response = await httpClient.post(`/admin/users/${userId}/permissions`, data);
+        return response.data;
+    },
+
+    // 撤销用户权限
+    revokeUserPermission: async (userId: string, permissionId: string): Promise<void> => {
+        await httpClient.delete(`/admin/users/${userId}/permissions/${permissionId}`);
+    },
 };

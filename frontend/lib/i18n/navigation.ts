@@ -17,6 +17,8 @@ export const navigationTranslations: Record<Language, Record<string, string>> = 
     "nav.my_profile": "My Profile",
     "nav.credits": "Credits",
     "nav.provider_presets": "Provider Presets",
+    "nav.my_submissions": "My Submissions",
+    "nav.provider_submissions": "Provider Submissions",
     // Dashboard
     "dashboard.title": "AI Higress",
     "dashboard.subtitle": "Ink Wash Control Center",
@@ -46,6 +48,8 @@ export const navigationTranslations: Record<Language, Record<string, string>> = 
     "nav.my_profile": "我的资料",
     "nav.provider_presets": "提供商预设",
     "nav.credits": "积分管理",
+    "nav.my_submissions": "我的投稿",
+    "nav.provider_submissions": "投稿管理",
     // Dashboard
     "dashboard.title": "AI Higress",
     "dashboard.subtitle": "水墨控制中心",

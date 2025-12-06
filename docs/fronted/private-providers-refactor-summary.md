@@ -198,11 +198,15 @@ const quotaLimit = await getQuotaLimit(userAuth.id, userAuth.token);
 ## 待完成功能
 
 ### 1. 配额 API 集成
-- **当前状态**: 使用硬编码的配额限制（10）
-- **待实现**: 
-  - 后端配额 API: `GET /users/{user_id}/quota`
-  - 前端集成真实配额数据
-  - 动态配额更新
+- **当前状态**: 已接入真实配额 API
+- **实现内容**:
+  - 后端新增 `GET /users/{user_id}/quota`：
+    - 返回字段：`private_provider_limit`、`private_provider_count`、`is_unlimited`
+    - 使用 `UserPermissionService.get_provider_limit` + `count_user_private_providers` 计算用户配额
+  - 前端 `MyProvidersPage`：
+    - 使用 `usePrivateProviderQuota(userId)` 获取配额数据
+    - `QuotaCard` 展示当前数量与上限，支持「无限制」账号文案
+    - 创建按钮在达到配额上限后会给出提示并阻止继续创建（无限制账号不受影响）
 
 ### 2. 编辑功能
 - **当前状态**: 编辑按钮显示但功能未实现

@@ -6,8 +6,6 @@ from typing import Mapping, Sequence
 from uuid import UUID
 
 from sqlalchemy import Select, func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from app.models import AggregateRoutingMetrics, ProviderRoutingMetricsHistory
@@ -19,6 +17,18 @@ def _align_window(ts: dt.datetime, window_seconds: int) -> dt.datetime:
     epoch = int(ts.timestamp())
     start_epoch = epoch - (epoch % window_seconds)
     return dt.datetime.fromtimestamp(start_epoch, tz=dt.timezone.utc)
+
+
+def _normalize_ts(ts: dt.datetime) -> dt.datetime:
+    """Normalize timestamps for key comparison.
+
+    Some backends（如 SQLite）会返回没有 tzinfo 的 datetime，而我们在内存中通常
+    使用带 UTC tzinfo 的时间。为避免 AggregationKey 在不同来源之间不相等，
+    这里统一转换为 UTC-aware datetime。
+    """
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=dt.timezone.utc)
+    return ts.astimezone(dt.timezone.utc)
 
 
 def _status_from_metrics(error_rate: float, latency_p95_ms: float) -> str:
@@ -150,47 +160,68 @@ class OfflineMetricsRecalculator:
             return 0
 
         existing = self._load_existing(session, start, end, window_seconds)
-        upserts = [
-            payload
-            for payload in payloads
-            if self._should_update(existing.get(self._key_from_payload(payload)), payload)
-        ]
-        if not upserts:
-            return 0
 
-        insert_fn = (
-            sqlite_insert if session.bind and session.bind.dialect.name == "sqlite" else pg_insert
-        )
+        # 为兼容不同数据库方言，这里不依赖 INSERT .. ON CONFLICT 语法，
+        # 而是按窗口键在内存中做 upsert，再用 ORM 更新/插入。
+        written = 0
+        now = dt.datetime.now(dt.timezone.utc)
 
-        stmt = insert_fn(AggregateRoutingMetrics).values(
-            [
-                {
-                    **payload,
-                    "source_version": self.source_version,
-                }
-                for payload in upserts
-            ]
-        )
+        for payload in payloads:
+            key = self._key_from_payload(payload)
+            current = existing.get(key)
 
-        update_map = {
-            "total_requests": stmt.excluded.total_requests,
-            "success_requests": stmt.excluded.success_requests,
-            "error_requests": stmt.excluded.error_requests,
-            "latency_p50_ms": stmt.excluded.latency_p50_ms,
-            "latency_p90_ms": stmt.excluded.latency_p90_ms,
-            "latency_p95_ms": stmt.excluded.latency_p95_ms,
-            "latency_p99_ms": stmt.excluded.latency_p99_ms,
-            "error_rate": stmt.excluded.error_rate,
-            "success_qps": stmt.excluded.success_qps,
-            "status": stmt.excluded.status,
-            "window_duration": stmt.excluded.window_duration,
-            "recalculated_at": func.now(),
-            "source_version": stmt.excluded.source_version,
-        }
+            if current is None:
+                # 新 bucket，直接插入
+                row = AggregateRoutingMetrics(
+                    provider_id=payload["provider_id"],
+                    logical_model=payload["logical_model"],
+                    transport=payload["transport"],
+                    is_stream=payload["is_stream"],
+                    user_id=payload["user_id"],
+                    api_key_id=payload["api_key_id"],
+                    window_start=payload["window_start"],
+                    window_duration=payload["window_duration"],
+                    total_requests=payload["total_requests"],
+                    success_requests=payload["success_requests"],
+                    error_requests=payload["error_requests"],
+                    latency_p50_ms=payload["latency_p50_ms"],
+                    latency_p90_ms=payload["latency_p90_ms"],
+                    latency_p95_ms=payload["latency_p95_ms"],
+                    latency_p99_ms=payload["latency_p99_ms"],
+                    error_rate=payload["error_rate"],
+                    success_qps=payload["success_qps"],
+                    status=payload["status"],
+                    recalculated_at=now,
+                    source_version=self.source_version,
+                )
+                session.add(row)
+                written += 1
+                # 维护 existing 缓存，避免同一批次内重复插入。
+                existing[key] = row
+                continue
 
-        session.execute(stmt.on_conflict_do_update(constraint="uq_aggregate_metrics_bucket", set_=update_map))
+            # 已存在记录，根据差异阈值判断是否需要更新。
+            if not self._should_update(current, payload):
+                continue
+
+            current.total_requests = int(payload["total_requests"])
+            current.success_requests = int(payload["success_requests"])
+            current.error_requests = int(payload["error_requests"])
+            current.latency_p50_ms = float(payload["latency_p50_ms"])
+            current.latency_p90_ms = float(payload["latency_p90_ms"])
+            current.latency_p95_ms = float(payload["latency_p95_ms"])
+            current.latency_p99_ms = float(payload["latency_p99_ms"])
+            current.error_rate = float(payload["error_rate"])
+            current.success_qps = float(payload["success_qps"])
+            current.status = str(payload["status"])
+            current.window_duration = int(payload["window_duration"])
+            current.recalculated_at = now
+            current.source_version = self.source_version
+
+            written += 1
+
         session.flush()
-        return len(upserts)
+        return written
 
     def recalculate(
         self,
@@ -283,7 +314,7 @@ class OfflineMetricsRecalculator:
             is_stream=row.is_stream,
             user_id=row.user_id,
             api_key_id=row.api_key_id,
-            window_start=row.window_start,
+            window_start=_normalize_ts(row.window_start),
             window_duration=row.window_duration,
         )
 
@@ -295,7 +326,7 @@ class OfflineMetricsRecalculator:
             is_stream=payload["is_stream"],
             user_id=payload["user_id"],
             api_key_id=payload["api_key_id"],
-            window_start=payload["window_start"],
+            window_start=_normalize_ts(payload["window_start"]),
             window_duration=payload["window_duration"],
         )
 

@@ -157,8 +157,7 @@
 
 **优先级**: 中
 
-**页面路径建议**: `/dashboard/sessions` 或 `/profile/sessions`
-
+**页面路径建议**: 建议直接使用当前已有的用户管理页面 然后补充相应功能
 **功能需求**:
 - 查看当前用户的所有活跃会话
 - 显示设备信息(User-Agent、IP地址)
@@ -215,7 +214,9 @@
 
 **优先级**: 中
 
-**页面路径建议**: `/system/roles/{roleId}/permissions`
+**实现状态**: ✅ 已实现（`/system/roles/[roleId]/permissions`）
+
+**页面路径**: `/system/roles/{roleId}/permissions`
 
 **功能需求**:
 - 查看角色已绑定的权限
@@ -244,7 +245,9 @@
 
 **优先级**: 中低
 
-**页面路径建议**: `/system/users/{userId}/roles`
+**实现状态**: ✅ 已实现（`/system/users/[userId]/roles`）
+
+**页面路径**: `/system/users/{userId}/roles`
 
 **功能需求**:
 - 查看用户当前角色

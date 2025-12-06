@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl, ConfigDict
 
 
 SdkVendorValue = Literal["openai", "google", "claude"]
@@ -219,9 +219,8 @@ class ProviderAPIKeyResponse(BaseModel):
     status: str
     created_at: str
     updated_at: str | None = None
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ProviderResponse(BaseModel):
@@ -251,9 +250,8 @@ class ProviderResponse(BaseModel):
     preset_id: str | None = Field(default=None, description="关联的预设ID")
     created_at: str = Field(..., description="创建时间")
     updated_at: str | None = Field(default=None, description="更新时间")
-    
-    class Config:
-        from_attributes = True
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 __all__ = [

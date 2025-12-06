@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 
 from app.models import RegistrationWindowStatus
 from app.services.registration_window_service import create_registration_window
@@ -42,7 +43,7 @@ def test_register_auto_activation_window(app_with_inmemory_db) -> None:
 
     with SessionLocal() as session:
         status = session.execute(
-            "select status from registration_windows limit 1"
+            text("select status from registration_windows limit 1")
         ).scalar_one()
         assert status == RegistrationWindowStatus.CLOSED.value
 
@@ -73,8 +74,11 @@ def test_register_manual_activation_window(app_with_inmemory_db) -> None:
 
     with SessionLocal() as session:
         row = session.execute(
-            "select registered_count, status, auto_activate from registration_windows limit 1"
+            text(
+                "select registered_count, status, auto_activate from registration_windows limit 1"
+            )
         ).one()
         assert row.registered_count == 1
         assert row.status == RegistrationWindowStatus.ACTIVE.value
-        assert row.auto_activate is False
+        # SQLite 中布尔字段通过原始 SQL 查询返回为 0/1，这里显式转为 bool 以保证断言稳定
+        assert bool(row.auto_activate) is False

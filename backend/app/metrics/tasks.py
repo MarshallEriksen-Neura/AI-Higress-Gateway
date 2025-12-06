@@ -28,8 +28,14 @@ def recalc_recent_metrics(hours: int | None = None) -> int:
 
     session = SessionLocal()
     try:
-        end = _now_utc_minute()
+        # 计算重算区间的结束时间：为避免与最新写入强竞争，可以向历史偏移一段保护时间。
+        now = _now_utc_minute()
+        guard_hours = max(settings.offline_metrics_guard_hours, 0)
+        end = now - dt.timedelta(hours=guard_hours) if guard_hours else now
+
         lookback = hours or settings.offline_metrics_lookback_hours
+        if lookback <= 0:
+            return 0
         start = end - dt.timedelta(hours=lookback)
 
         total_written = 0
@@ -49,14 +55,15 @@ def recalc_recent_metrics(hours: int | None = None) -> int:
 
 
 celery_app.conf.beat_schedule = getattr(celery_app.conf, "beat_schedule", {}) or {}
-celery_app.conf.beat_schedule.update(
-    {
-        "offline-metrics-recalc": {
-            "task": "tasks.metrics.offline_recalc_recent",
-            "schedule": settings.offline_metrics_interval_seconds,
+if settings.offline_metrics_enabled:
+    celery_app.conf.beat_schedule.update(
+        {
+            "offline-metrics-recalc": {
+                "task": "tasks.metrics.offline_recalc_recent",
+                "schedule": settings.offline_metrics_interval_seconds,
+            }
         }
-    }
-)
+    )
 
 
 __all__ = ["recalc_recent_metrics"]

@@ -98,38 +98,45 @@ export const usePrivateProviders = (options: UsePrivateProvidersOptions) => {
   };
 };
 
+interface UserQuotaApiResponse {
+  private_provider_limit: number;
+  private_provider_count: number;
+  is_unlimited: boolean;
+}
+
 /**
  * 获取私有提供商配额信息
- * 
+ *
  * @param userId - 用户 ID
- * 
+ *
  * @example
  * ```tsx
- * const { current, limit, percentage, loading } = usePrivateProviderQuota(userId);
+ * const { current, limit, isUnlimited, loading } = usePrivateProviderQuota(userId);
  * ```
  */
 export const usePrivateProviderQuota = (userId: string | null) => {
-  // TODO: 接入真实的配额 API
-  // const { data, error, loading, refresh } = useApiGet<{ current: number; limit: number }>(
-  //   userId ? `/users/${userId}/quota` : null,
-  //   { strategy: "default" }
-  // );
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<UserQuotaApiResponse>(
+    userId ? `/users/${userId}/quota` : null,
+    { strategy: "default" }
+  );
 
-  // 暂时返回模拟数据
-  const data = { current: 0, limit: 10 };
-  const loading = false;
-  const error = null;
-
-  const percentage = data.limit > 0 ? (data.current / data.limit) * 100 : 0;
-  const remaining = Math.max(0, data.limit - data.current);
+  const current = data?.private_provider_count ?? 0;
+  const limit = data?.private_provider_limit ?? 0;
+  const isUnlimited = data?.is_unlimited ?? false;
 
   return {
-    current: data.current,
-    limit: data.limit,
-    percentage,
-    remaining,
+    current,
+    limit,
+    isUnlimited,
     loading,
+    validating,
     error,
-    refresh: async () => {},
+    refresh,
   };
 };

@@ -1,9 +1,11 @@
 """
 Request validation middleware to detect and block malicious requests.
 """
+
 import re
 import time
 from typing import Callable, Pattern
+from urllib.parse import unquote_plus
 
 from fastapi import Request, status
 from fastapi.responses import JSONResponse
@@ -93,6 +95,13 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
         re.compile(r"\.\.\\"),
     ]
 
+    # 访问敏感系统路径（即便已被规范化也视为可疑）
+    CRITICAL_SYSTEM_PATH_PATTERNS: list[Pattern] = [
+        re.compile(r"(^|/)(etc/passwd|etc/shadow|etc/hosts)", re.IGNORECASE),
+        re.compile(r"(^|/)(proc/|sys/|dev/)", re.IGNORECASE),
+        re.compile(r"(^|/)(windows/|winnt/|system32)", re.IGNORECASE),
+    ]
+
     # 命令注入模式
     COMMAND_INJECTION_PATTERNS: list[Pattern] = [
         re.compile(r"[;&|`$]"),
@@ -161,7 +170,9 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
         self.get_client_ip = get_client_ip or self._default_get_client_ip
 
         if self.ban_ip_on_detection or redis_client:
-            self.ban_store = RedisBanStore(redis_client) if redis_client else InMemoryBanStore()
+            self.ban_store = (
+                RedisBanStore(redis_client) if redis_client else InMemoryBanStore()
+            )
         else:
             self.ban_store = None
 
@@ -185,7 +196,63 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
             return False
         return any(pattern.search(text) for pattern in patterns)
 
-    def _is_suspicious_request(self, request: Request, body_text: str = "") -> tuple[bool, str]:
+    def _collect_path_candidates(self, request: Request) -> set[str]:
+        """
+        收集用于路径遍历检测的候选字符串：
+        - 规范化后的 path
+        - 原始 raw_path（如果存在）
+        - 各自的 URL 解码版本
+        """
+        candidates: set[str] = set()
+
+        path = request.url.path or ""
+        if path:
+            candidates.add(path)
+
+        raw_path = request.scope.get("raw_path")
+        if isinstance(raw_path, (bytes, bytearray)):
+            raw_path_str = raw_path.decode(errors="ignore")
+        else:
+            raw_path_str = raw_path or ""
+        if raw_path_str:
+            candidates.add(raw_path_str)
+
+        decoded_candidates = {unquote_plus(p) for p in candidates}
+        candidates.update(decoded_candidates)
+
+        return {c for c in candidates if c}
+
+    def _collect_query_candidates(self, request: Request) -> set[str]:
+        """
+        收集用于 Query 检测的候选字符串：
+        - URL 对象中的 query
+        - scope 中的原始 query_string
+        - 各自的 URL 解码版本（处理 %xx 与 + 空格）
+        """
+        candidates: set[str] = set()
+
+        raw_query = str(request.url.query or "")
+        if raw_query:
+            candidates.add(raw_query)
+
+        query_bytes = request.scope.get("query_string", b"")
+        if isinstance(query_bytes, (bytes, bytearray)):
+            raw_query_scope = query_bytes.decode(errors="ignore")
+        else:
+            raw_query_scope = query_bytes or ""
+        if raw_query_scope:
+            candidates.add(raw_query_scope)
+
+        decoded_candidates = {unquote_plus(q) for q in candidates}
+        candidates.update(decoded_candidates)
+
+        return {c for c in candidates if c}
+
+    def _is_suspicious_request(
+        self,
+        request: Request,
+        body_text: str = "",
+    ) -> tuple[bool, str]:
         """
         检查请求是否可疑。
 
@@ -197,32 +264,61 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
             if self._check_patterns(user_agent, self.SUSPICIOUS_USER_AGENTS):
                 return True, "suspicious_user_agent"
 
-        path = request.url.path
-        query = str(request.url.query)
+        path_candidates = self._collect_path_candidates(request)
+        query_candidates = self._collect_query_candidates(request)
 
         if self.enable_path_traversal_check:
-            if self._check_patterns(path, self.PATH_TRAVERSAL_PATTERNS):
-                return True, "path_traversal_attempt"
-            if self._check_patterns(query, self.PATH_TRAVERSAL_PATTERNS):
-                return True, "path_traversal_in_query"
+            # 先检查路径本身
+            for value in path_candidates:
+                if self._check_patterns(value, self.PATH_TRAVERSAL_PATTERNS):
+                    return True, "path_traversal_attempt"
+
+            # 规范化后仍指向敏感系统路径，也视为路径遍历/探测行为
+            for value in path_candidates:
+                if self._check_patterns(value, self.CRITICAL_SYSTEM_PATH_PATTERNS):
+                    return True, "path_traversal_attempt"
+
+            # 再检查 query 中是否包含路径遍历
+            for value in query_candidates:
+                if self._check_patterns(value, self.PATH_TRAVERSAL_PATTERNS):
+                    return True, "path_traversal_in_query"
+
+            for value in query_candidates:
+                if self._check_patterns(value, self.CRITICAL_SYSTEM_PATH_PATTERNS):
+                    return True, "path_traversal_in_query"
+
+        body_candidates: set[str] = set()
+        if body_text:
+            body_candidates.add(body_text)
+            body_candidates.add(unquote_plus(body_text))
+            body_candidates = {b for b in body_candidates if b}
 
         if self.enable_sql_injection_check:
-            if self._check_patterns(query, self.SQL_INJECTION_PATTERNS):
-                return True, "sql_injection_in_query"
-            if body_text and self._check_patterns(body_text, self.SQL_INJECTION_PATTERNS):
-                return True, "sql_injection_in_body"
+            for value in query_candidates:
+                if self._check_patterns(value, self.SQL_INJECTION_PATTERNS):
+                    return True, "sql_injection_in_query"
+
+            for value in body_candidates:
+                if self._check_patterns(value, self.SQL_INJECTION_PATTERNS):
+                    return True, "sql_injection_in_body"
 
         if self.enable_xss_check:
-            if self._check_patterns(query, self.XSS_PATTERNS):
-                return True, "xss_in_query"
-            if body_text and self._check_patterns(body_text, self.XSS_PATTERNS):
-                return True, "xss_in_body"
+            for value in query_candidates:
+                if self._check_patterns(value, self.XSS_PATTERNS):
+                    return True, "xss_in_query"
+
+            for value in body_candidates:
+                if self._check_patterns(value, self.XSS_PATTERNS):
+                    return True, "xss_in_body"
 
         if self.enable_command_injection_check:
-            if self._check_patterns(query, self.COMMAND_INJECTION_PATTERNS):
-                return True, "command_injection_in_query"
-            if body_text and self._check_patterns(body_text, self.COMMAND_INJECTION_PATTERNS):
-                return True, "command_injection_in_body"
+            for value in query_candidates:
+                if self._check_patterns(value, self.COMMAND_INJECTION_PATTERNS):
+                    return True, "command_injection_in_query"
+
+            for value in body_candidates:
+                if self._check_patterns(value, self.COMMAND_INJECTION_PATTERNS):
+                    return True, "command_injection_in_body"
 
         return False, ""
 
@@ -243,12 +339,14 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
         client_ip = self.get_client_ip(request)
         path = request.url.path
 
+        # 白名单 IP / 路径前缀直接放行
         if (self.allowed_ips and client_ip in self.allowed_ips) or (
             self.allowed_path_prefixes
             and any(path.startswith(prefix) for prefix in self.allowed_path_prefixes)
         ):
             return await call_next(request)
 
+        # 封禁 IP 直接拒绝
         if self.ban_store and await self.ban_store.is_banned(client_ip):
             return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -262,15 +360,17 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
         body_text = ""
         current_request = request
 
+        # 只对有请求体的方法做 body 检查
         if self.inspect_body and request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
             content_type = request.headers.get("content-type", "")
-            if not any(content_type.startswith(prefix) for prefix in self.allowed_body_content_types):
-                current_request = request
-            else:
+            if any(
+                content_type.startswith(prefix)
+                for prefix in self.allowed_body_content_types
+            ):
                 body_text, refreshed_request = await self._get_body_text(request)
                 if body_text == "__payload_too_large__":
                     return JSONResponse(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        status_code=status.HTTP_413_CONTENT_TOO_LARGE,
                         content={
                             "error": "payload_too_large",
                             "message": "请求体过大，已被拒绝",

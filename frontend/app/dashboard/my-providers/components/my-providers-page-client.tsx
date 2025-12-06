@@ -9,6 +9,7 @@ import { ProvidersTableEnhanced } from "@/components/dashboard/providers/provide
 import { ProviderFormEnhanced } from "@/components/dashboard/providers/provider-form";
 import { Provider, providerService } from "@/http/provider";
 import { useI18n } from "@/lib/i18n-context";
+import { usePrivateProviderQuota } from "@/lib/swr/use-private-providers";
 import { QuotaCard } from "./quota-card";
 import { HealthStats } from "./health-stats";
 import {
@@ -23,13 +24,11 @@ import {
 interface MyProvidersPageClientProps {
   initialProviders: Provider[];
   userId: string;
-  quotaLimit: number;
 }
 
 export function MyProvidersPageClient({
   initialProviders,
   userId,
-  quotaLimit,
 }: MyProvidersPageClientProps) {
   const { t } = useI18n();
 
@@ -41,6 +40,13 @@ export function MyProvidersPageClient({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [deletingProviderId, setDeletingProviderId] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // 私有 Provider 配额信息
+  const {
+    limit: quotaLimit,
+    isUnlimited,
+    loading: isQuotaLoading,
+  } = usePrivateProviderQuota(userId);
 
   // 刷新提供商列表
   const refresh = useCallback(async () => {
@@ -77,12 +83,12 @@ export function MyProvidersPageClient({
   // 打开创建表单
   const handleCreate = useCallback(() => {
     // 检查配额
-    if (providers.length >= quotaLimit) {
+    if (!isUnlimited && quotaLimit > 0 && providers.length >= quotaLimit) {
       toast.error(t("my_providers.quota_warning"));
       return;
     }
     setFormOpen(true);
-  }, [providers.length, quotaLimit, t]);
+  }, [providers.length, quotaLimit, isUnlimited, t]);
 
   // 表单成功回调
   const handleFormSuccess = useCallback(() => {
@@ -111,12 +117,22 @@ export function MyProvidersPageClient({
       await providerService.deletePrivateProvider(userId, deletingProviderId);
       toast.success(t("providers.toast_delete_success"));
       await refresh();
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(t("providers.toast_delete_error"), error);
-      const message =
-        error.response?.data?.detail ||
-        error.message ||
-        t("providers.toast_delete_error");
+
+      let message = t("providers.toast_delete_error");
+      if (typeof error === "object" && error !== null) {
+        const maybeAxiosError = error as {
+          response?: { data?: { detail?: string } };
+          message?: string;
+        };
+
+        message =
+          maybeAxiosError.response?.data?.detail ||
+          maybeAxiosError.message ||
+          message;
+      }
+
       toast.error(message);
     } finally {
       setIsDeleting(false);
@@ -154,7 +170,8 @@ export function MyProvidersPageClient({
         <QuotaCard
           current={providers.length}
           limit={quotaLimit}
-          isLoading={isRefreshing}
+          isUnlimited={isUnlimited}
+          isLoading={isRefreshing || isQuotaLoading}
         />
         <HealthStats providers={providers} isLoading={isRefreshing} />
       </div>

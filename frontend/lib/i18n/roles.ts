@@ -18,6 +18,17 @@ export const rolesTranslations: Record<Language, Record<string, string>> = {
     "roles.delete_confirm": "Are you sure you want to delete this role?",
     "roles.permissions_save": "Save Permissions",
     "roles.permissions_desc": "Select the permissions for this role",
+    // Role permissions page
+    "roles.permissions_page_title": "Role Permissions",
+    "roles.permissions_page_subtitle": "Manage permissions for role {role}",
+    "roles.back_to_roles": "Back to Roles",
+    "roles.permissions_search_placeholder": "Search permissions...",
+    "roles.permissions_help": "Permissions control access to admin features. Grant them carefully.",
+    "roles.selected_permissions": "Selected Permissions",
+    "roles.no_permissions": "No permissions available",
+    "roles.permissions_load_error": "Failed to load role permissions",
+    "roles.permissions_save_success": "Role permissions updated successfully",
+    "roles.permissions_save_error": "Failed to update role permissions",
   },
   zh: {
     // Roles page
@@ -36,5 +47,16 @@ export const rolesTranslations: Record<Language, Record<string, string>> = {
     "roles.delete_confirm": "确定要删除该角色吗？",
     "roles.permissions_save": "保存权限",
     "roles.permissions_desc": "为该角色选择权限",
+    // Role permissions page
+    "roles.permissions_page_title": "角色权限配置",
+    "roles.permissions_page_subtitle": "为角色 {role} 配置可访问的系统权限",
+    "roles.back_to_roles": "返回角色列表",
+    "roles.permissions_search_placeholder": "搜索权限编码或说明...",
+    "roles.permissions_help": "权限用于控制对系统管理功能的访问，请谨慎授予。",
+    "roles.selected_permissions": "已选权限",
+    "roles.no_permissions": "暂无可用权限",
+    "roles.permissions_load_error": "加载角色权限失败",
+    "roles.permissions_save_success": "角色权限更新成功",
+    "roles.permissions_save_error": "更新角色权限失败",
   },
 };

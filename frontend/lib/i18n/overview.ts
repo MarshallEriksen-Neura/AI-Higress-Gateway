@@ -32,7 +32,7 @@ export const overviewTranslations: Record<Language, Record<string, string>> = {
     "overview.recent_activity": "近期活动",
     "overview.recent_activity_placeholder": "活动图表占位",
     // Hero section
-    "hero.welcome": "欢迎使用 AI Higress，专为 AI 时代打造的强大 API 网关。本项目展示了独特的"水墨"设计语言，将中国传统美学与现代 Web 技术完美融合。",
+    "hero.welcome": "欢迎使用 AI Higress，专为 AI 时代打造的强大 API 网关。本项目展示了独特的\"水墨\"设计语言，将中国传统美学与现代 Web 技术完美融合。",
     "hero.explore": "探索我们的仪表盘，体验优雅地管理 AI 提供商和指标。",
   },
 };

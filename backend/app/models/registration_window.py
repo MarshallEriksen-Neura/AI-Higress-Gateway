@@ -22,7 +22,12 @@ class RegistrationWindow(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     registered_count: Mapped[int] = Column(Integer, nullable=False, default=0)
     auto_activate: Mapped[bool] = Column(Boolean, nullable=False, default=True)
     status: Mapped[RegistrationWindowStatus] = Column(
-        Enum(RegistrationWindowStatus, native_enum=False),
+        Enum(
+            RegistrationWindowStatus,
+            name="registrationwindowstatus",
+            native_enum=False,
+            values_callable=lambda enum_cls: [member.value for member in enum_cls],
+        ),
         nullable=False,
         default=RegistrationWindowStatus.SCHEDULED,
     )

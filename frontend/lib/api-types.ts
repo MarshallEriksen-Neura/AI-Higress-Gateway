@@ -112,3 +112,43 @@ export interface UpdateProviderKeyRequest {
   max_qps?: number;
   status?: 'active' | 'inactive';
 }
+
+// ============= 会话管理相关 =============
+export interface DeviceInfo {
+  user_agent: string | null;
+  ip_address: string | null;
+}
+
+export interface SessionResponse {
+  session_id: string;
+  created_at: string;
+  last_used_at: string;
+  device_info: DeviceInfo | null;
+  is_current: boolean;
+}
+
+export interface ParsedDeviceInfo {
+  browser: string;
+  os: string;
+  deviceType: 'desktop' | 'mobile' | 'tablet' | 'unknown';
+  icon: 'Monitor' | 'Smartphone' | 'Tablet' | 'HelpCircle';
+}
+
+// ============= 用户权限相关 =============
+export interface UserPermission {
+  id: string;
+  user_id: string;
+  permission_type: string;
+  permission_value: string | null;
+  expires_at: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GrantPermissionRequest {
+  permission_type: string;
+  permission_value?: string;
+  expires_at?: string;
+  notes?: string;
+}

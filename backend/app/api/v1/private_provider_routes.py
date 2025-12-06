@@ -12,6 +12,7 @@ from app.schemas import (
     UserProviderCreateRequest,
     UserProviderResponse,
     UserProviderUpdateRequest,
+    UserQuotaResponse,
 )
 from app.services.user_permission_service import UserPermissionService
 from app.services.user_provider_service import (
@@ -22,6 +23,7 @@ from app.services.user_provider_service import (
     list_private_providers,
     update_private_provider,
 )
+from app.settings import settings
 
 router = APIRouter(
     tags=["user-providers"],
@@ -34,6 +36,45 @@ def _ensure_can_manage_user(current: AuthenticatedUser, target_user_id: UUID) ->
         return
     if current.id != str(target_user_id):
         raise forbidden("无权管理其他用户的私有提供商")
+
+
+@router.get(
+    "/users/{user_id}/quota",
+    response_model=UserQuotaResponse,
+)
+def get_user_quota_endpoint(
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> UserQuotaResponse:
+    """
+    获取指定用户的私有 Provider 配额信息。
+
+    - 仅支持本人或超级管理员查询；
+    - `private_provider_limit` 为展示用上限值；
+    - 对于超级管理员或拥有 `unlimited_providers` 权限的用户，会返回 `is_unlimited=True`，
+      此时 `private_provider_limit` 仅作为前端展示建议值，后端不会做硬性限制。
+    """
+
+    _ensure_can_manage_user(current_user, user_id)
+
+    perm = UserPermissionService(db)
+    raw_limit = perm.get_provider_limit(user_id)
+    is_unlimited = raw_limit is None
+    # 对于无限制用户，给出一个合理的展示上限，避免前端进度条失真
+    display_limit = (
+        settings.max_user_private_provider_limit
+        if is_unlimited
+        else int(raw_limit)
+    )
+
+    current_count = count_user_private_providers(db, user_id)
+
+    return UserQuotaResponse(
+        private_provider_limit=display_limit,
+        private_provider_count=current_count,
+        is_unlimited=is_unlimited,
+    )
 
 
 @router.post(

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { UserCircle, Plus, Edit, Trash2, Shield } from "lucide-react";
+import { UserCircle, Plus, Edit, Trash2, Shield, Key } from "lucide-react";
 import { useI18n } from "@/lib/i18n-context";
 import { adminService, Role } from "@/http/admin";
 import { userService } from "@/http/user";
@@ -174,8 +174,21 @@ export default function UsersPage() {
                                     <TableCell>{getStatusBadge(user.is_active)}</TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex items-center justify-end space-x-2">
-                                            <Button variant="ghost" size="sm" onClick={() => openRolesDialog(user)}>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    window.location.href = `/system/users/${user.id}/roles`;
+                                                }}
+                                            >
                                                 <Shield className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => window.location.href = `/system/users/${user.id}/permissions`}
+                                            >
+                                                <Key className="w-4 h-4" />
                                             </Button>
                                             <Button variant="ghost" size="sm">
                                                 <Edit className="w-4 h-4" />

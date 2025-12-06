@@ -6,7 +6,10 @@ from sqlalchemy.pool import StaticPool
 
 from app.models import Base
 from app.schemas.provider_control import UserProviderCreateRequest, UserProviderUpdateRequest
-from app.services.user_provider_service import create_private_provider
+from app.services.user_provider_service import (
+    create_private_provider,
+    update_private_provider,
+)
 from tests.utils import seed_user_and_key
 
 

@@ -15,6 +15,13 @@ export const usersTranslations: Record<Language, Record<string, string>> = {
     "users.roles_dialog_title": "Manage User Roles",
     "users.roles_dialog_desc": "Assign roles to this user",
     "users.select_roles": "Select roles for this user",
+    // User roles page
+    "users.roles_search_placeholder": "Search roles...",
+    "users.assigned_roles": "Assigned Roles",
+    "users.roles_load_error": "Failed to load user roles",
+    "users.roles_save_success": "User roles updated successfully",
+    "users.roles_save_error": "Failed to update user roles",
+    "users.roles_empty": "No roles available",
   },
   zh: {
     // Users page
@@ -30,5 +37,12 @@ export const usersTranslations: Record<Language, Record<string, string>> = {
     "users.roles_dialog_title": "管理用户角色",
     "users.roles_dialog_desc": "为该用户分配角色",
     "users.select_roles": "为该用户选择角色",
+    // User roles page
+    "users.roles_search_placeholder": "搜索角色名称或编码...",
+    "users.assigned_roles": "已分配角色",
+    "users.roles_load_error": "加载用户角色失败",
+    "users.roles_save_success": "用户角色更新成功",
+    "users.roles_save_error": "更新用户角色失败",
+    "users.roles_empty": "暂无可用角色",
   },
 };

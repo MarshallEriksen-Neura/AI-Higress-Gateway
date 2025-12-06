@@ -18,7 +18,8 @@ import {
     UserCircle,
     Shield,
     Package,
-    Lock
+    Lock,
+    Send
 } from "lucide-react";
 
 const navItems = [
@@ -53,6 +54,11 @@ const navItems = [
         icon: Coins,
     },
     {
+        titleKey: "nav.my_submissions",
+        href: "/dashboard/my-submissions",
+        icon: Send,
+    },
+    {
         titleKey: "nav.metrics",
         href: "/dashboard/metrics",
         icon: Activity,
@@ -84,6 +90,11 @@ const adminItems = [
         titleKey: "nav.roles",
         href: "/system/roles",
         icon: Shield,
+    },
+    {
+        titleKey: "nav.provider_submissions",
+        href: "/system/provider-submissions",
+        icon: Send,
     },
 ];
 

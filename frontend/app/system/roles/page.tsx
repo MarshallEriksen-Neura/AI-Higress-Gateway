@@ -165,7 +165,13 @@ export default function RolesPage() {
                                     <TableCell className="text-muted-foreground">{role.description}</TableCell>
                                     <TableCell className="text-right">
                                         <div className="flex items-center justify-end space-x-2">
-                                            <Button variant="ghost" size="sm" onClick={() => openPermissionsDialog(role)}>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => {
+                                                    window.location.href = `/system/roles/${role.id}/permissions`;
+                                                }}
+                                            >
                                                 <Lock className="w-4 h-4" />
                                             </Button>
                                             <Button variant="ghost" size="sm" onClick={() => {

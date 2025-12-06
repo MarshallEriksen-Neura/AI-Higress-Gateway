@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator, ConfigDict
 
 from app.models.registration_window import RegistrationWindowStatus
 
@@ -37,8 +37,7 @@ class RegistrationWindowResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        use_enum_values = True
+    model_config = ConfigDict(use_enum_values=True)
 
 
 __all__ = [

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import os
 
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
@@ -25,12 +26,24 @@ class RegistrationQuotaExceededError(RegistrationWindowError):
     """Raised when no remaining slots are available."""
 
 
+def _ensure_utc(dt: datetime) -> datetime:
+    """Normalize datetimes to timezone-aware UTC to avoid naive/aware comparison issues."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _now(now: datetime | None = None) -> datetime:
-    return now or datetime.now(timezone.utc)
+    """Return a timezone-aware UTC 'now' value."""
+    if now is None:
+        return datetime.now(timezone.utc)
+    return _ensure_utc(now)
 
 
 def _sync_window_states(session: Session, *, now: datetime) -> None:
     """Promote due windows to active and close expired ones."""
+
+    now = _ensure_utc(now)
 
     # Activate scheduled windows whose start_time has arrived
     due_stmt: Select[tuple[RegistrationWindow]] = select(RegistrationWindow).where(
@@ -76,6 +89,9 @@ def create_registration_window(
     max_registrations: int,
     auto_activate: bool = True,
 ) -> RegistrationWindow:
+    start_time = _ensure_utc(start_time)
+    end_time = _ensure_utc(end_time)
+
     if max_registrations <= 0:
         raise ValueError("max_registrations must be greater than zero")
     if end_time <= start_time:
@@ -100,7 +116,16 @@ def create_registration_window(
 
 
 def _schedule_window_tasks(window: RegistrationWindow) -> None:
-    """Schedule Celery tasks for activation/closure; log and continue on failures."""
+    """Schedule Celery tasks for activation/closure; log and continue on failures.
+
+    在测试环境下（通过检测 pytest 注入的环境变量）直接跳过 Celery 调度，
+    避免因无法连接 broker 而导致测试长时间卡住。
+    """
+
+    # pytest 在运行测试时会设置 PYTEST_CURRENT_TEST 环境变量；
+    # 利用这一点在单元测试中禁用真正的异步任务调度。
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        return
 
     try:
         from app.tasks.registration import (
@@ -140,9 +165,11 @@ def activate_window_by_id(session: Session, window_id) -> RegistrationWindow | N
         return window
 
     current_time = _now()
-    if window.start_time <= current_time <= window.end_time:
+    window_start = _ensure_utc(window.start_time)
+    window_end = _ensure_utc(window.end_time)
+    if window_start <= current_time <= window_end:
         window.status = RegistrationWindowStatus.ACTIVE
-    elif window.end_time < current_time:
+    elif window_end < current_time:
         window.status = RegistrationWindowStatus.CLOSED
     session.commit()
     session.refresh(window)
@@ -172,7 +199,9 @@ def claim_registration_slot(
     if window is None:
         raise RegistrationWindowNotFoundError("当前未开放注册窗口")
 
-    if window.end_time < current_time:
+    window_end = _ensure_utc(window.end_time)
+
+    if window_end < current_time:
         window.status = RegistrationWindowStatus.CLOSED
         session.commit()
         raise RegistrationWindowClosedError("注册时间已结束")
@@ -200,11 +229,13 @@ def rollback_registration_slot(
     current_time = _now(now)
     if window.registered_count > 0:
         window.registered_count -= 1
+    window_start = _ensure_utc(window.start_time)
+    window_end = _ensure_utc(window.end_time)
     if (
         window.status == RegistrationWindowStatus.CLOSED
         and window.registered_count < window.max_registrations
-        and window.end_time >= current_time
-        and window.start_time <= current_time
+        and window_end >= current_time
+        and window_start <= current_time
     ):
         window.status = RegistrationWindowStatus.ACTIVE
 

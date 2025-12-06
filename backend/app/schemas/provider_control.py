@@ -96,6 +96,25 @@ class UserProviderCreateRequest(BaseModel):
         return self
 
 
+class UserQuotaResponse(BaseModel):
+    """用户私有 Provider 配额信息。"""
+
+    private_provider_limit: int = Field(
+        ...,
+        ge=0,
+        description="当前用户可创建的私有 Provider 数量上限（用于展示）；对无限制用户为推荐展示值。",
+    )
+    private_provider_count: int = Field(
+        ...,
+        ge=0,
+        description="当前用户已创建的私有 Provider 数量。",
+    )
+    is_unlimited: bool = Field(
+        ...,
+        description="是否在后端层面对用户的私有 Provider 数量不做硬性限制。",
+    )
+
+
 class UserProviderUpdateRequest(BaseModel):
     """更新用户私有提供商的请求模型。"""
 
@@ -501,4 +520,5 @@ __all__ = [
     "UserProviderCreateRequest",
     "UserProviderUpdateRequest",
     "UserProviderResponse",
+    "UserQuotaResponse",
 ]

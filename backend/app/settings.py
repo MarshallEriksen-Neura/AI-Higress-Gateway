@@ -156,6 +156,11 @@ class Settings(BaseSettings):
     )
 
     # Offline metrics recomputation
+    offline_metrics_enabled: bool = Field(
+        True,
+        alias="OFFLINE_METRICS_ENABLED",
+        description="是否启用离线指标重算定时任务；关闭时仅保留手动重算入口",
+    )
     offline_metrics_windows: list[int] = Field(
         default_factory=lambda: [300, 3600],
         alias="OFFLINE_METRICS_WINDOWS",
@@ -172,6 +177,12 @@ class Settings(BaseSettings):
         alias="OFFLINE_METRICS_LOOKBACK_HOURS",
         description="定时任务默认回溯的小时数",
         ge=1,
+    )
+    offline_metrics_guard_hours: int = Field(
+        0,
+        alias="OFFLINE_METRICS_GUARD_HOURS",
+        description="重算窗口向历史偏移的保护小时数，例如 2 表示不覆盖最近 2 小时",
+        ge=0,
     )
     offline_metrics_interval_seconds: int = Field(
         900,
