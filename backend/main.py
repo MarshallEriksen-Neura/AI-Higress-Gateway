@@ -12,7 +12,7 @@ def run() -> None:
     import uvicorn
 
     # Use our own logging configuration configured in app.logging_config.
-    uvicorn.run("main:app", host="0.0.0.0", port=8001, reload=True, log_config=None)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, log_config=None)
 
 
 if __name__ == "__main__":
