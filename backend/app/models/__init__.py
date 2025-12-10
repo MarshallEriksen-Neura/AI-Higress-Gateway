@@ -20,6 +20,8 @@ from .user_permission import UserPermission
 from .user_role import UserRole
 from .user import User
 from .system_gateway_config import GatewayConfig
+from .provider_audit_log import ProviderAuditLog
+from .provider_test_record import ProviderTestRecord
 
 __all__ = [
     "APIKey",
@@ -44,6 +46,8 @@ __all__ = [
     "GatewayConfig",
     "AggregateRoutingMetrics",
     "ProviderRoutingMetricsHistory",
+    "ProviderAuditLog",
+    "ProviderTestRecord",
     "RegistrationWindow",
     "RegistrationWindowStatus",
     "TimestampMixin",

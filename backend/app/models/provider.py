@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, text
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, relationship
 from uuid import UUID
@@ -50,6 +50,37 @@ class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     static_models = Column(JSONBCompat(), nullable=True)
     supported_api_styles = Column(JSONBCompat(), nullable=True)
     status: Mapped[str] = Column(String(16), nullable=False, server_default=text("'healthy'"))
+    audit_status: Mapped[str] = Column(
+        String(24),
+        nullable=False,
+        server_default=text("'pending'"),
+        default="pending",
+        doc="审核状态：pending/testing/approved/rejected/approved_limited",
+    )
+    operation_status: Mapped[str] = Column(
+        String(16),
+        nullable=False,
+        server_default=text("'active'"),
+        default="active",
+        doc="运营状态：active/paused/offline",
+    )
+    probe_enabled: Mapped[bool] = Column(
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
+        default=True,
+        doc="是否开启自动探针/巡检",
+    )
+    probe_interval_seconds: Mapped[int | None] = Column(
+        Integer,
+        nullable=True,
+        doc="自定义探针/巡检间隔（秒），为空则使用全局默认",
+    )
+    probe_model: Mapped[str | None] = Column(
+        String(100),
+        nullable=True,
+        doc="探针使用的模型 ID（可选）",
+    )
     last_check = Column(DateTime(timezone=True), nullable=True)
     metadata_json = Column("metadata", JSONBCompat(), nullable=True)
 
@@ -105,6 +136,18 @@ class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner: Mapped["User"] = relationship("User")
     preset: Mapped[ProviderPreset | None] = relationship(
         "ProviderPreset", back_populates="providers", foreign_keys=[preset_uuid]
+    )
+    audit_logs: Mapped[list["ProviderAuditLog"]] = relationship(
+        "ProviderAuditLog",
+        back_populates="provider",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    test_records: Mapped[list["ProviderTestRecord"]] = relationship(
+        "ProviderTestRecord",
+        back_populates="provider",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
     )
 
     @property

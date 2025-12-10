@@ -5,7 +5,8 @@ from typing import Any
 import httpx
 
 from app.logging_config import logger
-from app.schemas.provider_control import ProviderValidationResult
+from app.schemas.provider_control import ProviderModelValidationResult, ProviderValidationResult
+from app.settings import settings
 
 
 class ProviderValidationService:
@@ -110,6 +111,81 @@ class ProviderValidationService:
             return "google"
         return None
 
+    async def validate_models_via_chat(
+        self,
+        base_url: str,
+        api_key: str,
+        model_ids: list[str],
+        *,
+        path: str = "/v1/chat/completions",
+        sample_prompt: str = "ping",
+        timeout: float = 5.0,
+        sample_size: int = 1,
+    ) -> list[ProviderModelValidationResult]:
+        """
+        通过一次极小的 Chat 调用验证静态模型是否可用。
+
+        - 仅取前 sample_size 个模型，避免成本过高。
+        - 使用极短 prompt + max_tokens=1，减少计费。
+        - 无论成功与否都返回结果，方便管理员查看错误信息。
+        """
+        results: list[ProviderModelValidationResult] = []
+        if not model_ids:
+            return results
+
+        target_models = model_ids[:sample_size]
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            for model_id in target_models:
+                url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+                payload = {
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": sample_prompt}],
+                    "max_tokens": 1,
+                    "stream": False,
+                }
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                }
+                latency_ms: int | None = None
+                try:
+                    response = await client.post(url, json=payload, headers=headers)
+                    latency_ms = int(response.elapsed.total_seconds() * 1000)
+                    from datetime import datetime, timezone
+                    timestamp = datetime.now(timezone.utc)
+                    if response.status_code < 300:
+                        results.append(
+                            ProviderModelValidationResult(
+                                model_id=model_id,
+                                success=True,
+                                latency_ms=latency_ms,
+                                error_message=None,
+                                timestamp=timestamp,
+                            )
+                        )
+                    else:
+                        results.append(
+                            ProviderModelValidationResult(
+                                model_id=model_id,
+                                success=False,
+                                latency_ms=latency_ms,
+                                error_message=f"HTTP {response.status_code}",
+                                timestamp=timestamp,
+                            )
+                        )
+                except Exception as exc:  # pragma: no cover - 网络/超时异常
+                    logger.warning("Model validation failed for %s: %s", model_id, exc)
+                    results.append(
+                        ProviderModelValidationResult(
+                            model_id=model_id,
+                            success=False,
+                            latency_ms=latency_ms,
+                            error_message=str(exc),
+                            timestamp=None,
+                        )
+                    )
+        return results
+
 
 __all__ = ["ProviderValidationService"]
-

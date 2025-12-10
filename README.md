@@ -99,6 +99,16 @@ For detailed information about the Monorepo setup, see:
 ---
 
 
+## Database Migrations
+
+- The backend now auto-runs `alembic upgrade head` during process startup so that
+  new columns (e.g., `providers.probe_enabled`) exist before Celery/HTTP workers
+  touch the database.
+- This behaviour can be disabled by setting `AUTO_APPLY_DB_MIGRATIONS=0` and running
+  migrations manually via `alembic upgrade head` when you need full control (e.g., CI).
+- Auto migration is skipped for SQLite/ephemeral databases that are only used in tests.
+
+
 ## Testing
 
 The project uses `pytest` and `pytest-asyncio` for testing.

@@ -279,6 +279,7 @@ export interface GatewayConfig {
   max_concurrent_requests: number;
   request_timeout_ms: number;
   cache_ttl_seconds: number;
+  probe_prompt?: string | null;
 }
 
 export interface ProviderLimits {

@@ -132,6 +132,15 @@ class ProviderConfig(BaseModel):
         default=None,
         description="Explicit upstream API styles supported by this provider",
     )
+    audit_status: str | None = Field(
+        default=None, description="审核状态：pending/testing/approved/approved_limited/rejected"
+    )
+    operation_status: str | None = Field(
+        default=None, description="运营状态：active/paused/offline"
+    )
+    probe_enabled: bool | None = Field(default=None, description="是否开启自动探针")
+    probe_interval_seconds: int | None = Field(default=None, description="探针间隔（秒）")
+    probe_model: str | None = Field(default=None, description="探针使用的模型 ID")
 
     @model_validator(mode="after")
     def validate_sdk_vendor(self) -> "ProviderConfig":

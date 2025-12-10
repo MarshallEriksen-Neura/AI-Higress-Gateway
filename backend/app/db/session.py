@@ -5,9 +5,11 @@ from collections.abc import Generator
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.db.migration_runner import auto_upgrade_database
 from app.settings import settings
 
 engine = create_engine(settings.database_url, future=True)
+auto_upgrade_database()
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 

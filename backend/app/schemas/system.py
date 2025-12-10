@@ -66,6 +66,10 @@ class GatewayConfig(BaseModel):
         ge=0,
         description="推荐的缓存 TTL（秒）",
     )
+    probe_prompt: str | None = Field(
+        default=None,
+        description="探针测试使用的全局提示词（管理员配置）",
+    )
 
 
 class GatewayConfigUpdateRequest(GatewayConfig):

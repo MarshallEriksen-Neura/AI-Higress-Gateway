@@ -1,7 +1,7 @@
 import { httpClient } from './client';
 
 // 提交状态类型
-export type SubmissionStatus = 'pending' | 'approved' | 'rejected';
+export type SubmissionStatus = 'pending' | 'testing' | 'approved' | 'approved_limited' | 'rejected';
 
 // 提供商类型
 export type ProviderType = 'native' | 'aggregator';
@@ -36,7 +36,9 @@ export interface CreateSubmissionRequest {
 
 // 审核请求
 export interface ReviewSubmissionRequest {
-  approved: boolean;
+  approved?: boolean;
+  decision?: 'approved' | 'approved_limited' | 'rejected';
+  limit_qps?: number;
   review_notes?: string;
 }
 
@@ -97,9 +99,14 @@ export const providerSubmissionService = {
     submissionId: string,
     data: ReviewSubmissionRequest
   ): Promise<ProviderSubmission> => {
+    const payload = {
+      ...data,
+      // 兼容仅传 approved 的旧调用
+      decision: data.decision ?? (typeof data.approved === "boolean" ? (data.approved ? "approved" : "rejected") : undefined),
+    };
     const response = await httpClient.put(
       `/providers/submissions/${submissionId}/review`,
-      data
+      payload
     );
     return response.data;
   },

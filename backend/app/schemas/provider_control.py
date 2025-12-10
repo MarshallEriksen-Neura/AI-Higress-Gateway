@@ -288,8 +288,22 @@ class ProviderSubmissionResponse(BaseModel):
 class ProviderReviewRequest(BaseModel):
     """管理员审核共享提供商的请求模型。"""
 
-    approved: bool = Field(..., description="是否通过该提交")
+    approved: bool | None = Field(default=None, description="是否通过该提交（兼容字段）")
+    decision: Literal["approved", "approved_limited", "rejected"] | None = Field(
+        default=None, description="新版审核决策，可覆盖 approved 字段"
+    )
+    limit_qps: int | None = Field(
+        default=None,
+        gt=0,
+        description="当 decision=approved_limited 时的限速配置",
+    )
     review_notes: str | None = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def ensure_decision(self) -> "ProviderReviewRequest":
+        if self.decision is None and self.approved is None:
+            raise ValueError("必须提供 approved 或 decision")
+        return self
 
 
 class ProviderValidationResult(BaseModel):
@@ -298,6 +312,80 @@ class ProviderValidationResult(BaseModel):
     is_valid: bool
     error_message: str | None = None
     metadata: Dict[str, Any] | None = None
+
+
+class ProviderTestRequest(BaseModel):
+    """触发 Provider 探针/审核测试的请求体。"""
+
+    mode: Literal["auto", "custom", "cron"] = Field(
+        default="auto", description="测试模式：自动探针/自定义输入/巡检"
+    )
+    remark: str | None = Field(default=None, max_length=2000)
+    input_text: str | None = Field(default=None, max_length=4000)
+
+
+class ProviderTestResult(BaseModel):
+    """测试记录的标准化响应结构。"""
+
+    id: UUID
+    provider_id: str
+    mode: str
+    success: bool
+    summary: str | None = None
+    probe_results: Any | None = None
+    latency_ms: int | None = None
+    error_code: str | None = None
+    cost: float | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProviderModelValidationResult(BaseModel):
+    model_id: str
+    success: bool
+    latency_ms: int | None = None
+    error_message: str | None = None
+    timestamp: datetime
+
+
+class ProviderAuditActionRequest(BaseModel):
+    """审核/运营状态更新请求。"""
+
+    remark: str | None = Field(default=None, max_length=2000)
+    limit_qps: int | None = Field(
+        default=None,
+        gt=0,
+        description="审核限速通过时可选的 QPS 限制",
+    )
+
+
+class ProviderAuditLogResponse(BaseModel):
+    """审核/运营日志响应。"""
+
+    id: UUID
+    provider_id: str
+    action: str
+    from_status: str | None = None
+    to_status: str | None = None
+    operation_from_status: str | None = None
+    operation_to_status: str | None = None
+    operator_id: UUID | None = None
+    remark: str | None = None
+    test_record_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProviderProbeConfigUpdate(BaseModel):
+    probe_enabled: bool | None = Field(default=None, description="是否开启自动探针")
+    probe_interval_seconds: int | None = Field(default=None, ge=60, description="探针间隔（秒）")
+    probe_model: str | None = Field(default=None, max_length=100, description="探针使用的模型 ID，可选")
 
 
 class UserPermissionResponse(BaseModel):
@@ -334,6 +422,13 @@ class AdminProviderResponse(BaseModel):
     visibility: str
     owner_id: UUID | None
     status: str
+    audit_status: str
+    operation_status: str
+    latest_test_result: ProviderTestResult | None = None
+    probe_enabled: bool | None = None
+    probe_interval_seconds: int | None = None
+    probe_model: str | None = None
+    last_check: datetime | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -589,6 +684,11 @@ __all__ = [
     "ProviderReviewRequest",
     "ProviderSubmissionRequest",
     "ProviderSubmissionResponse",
+    "ProviderTestRequest",
+    "ProviderTestResult",
+    "ProviderAuditActionRequest",
+    "ProviderAuditLogResponse",
+    "ProviderProbeConfigUpdate",
     "ProviderSharedUsersResponse",
     "ProviderSharedUsersUpdateRequest",
     "ProviderValidationResult",

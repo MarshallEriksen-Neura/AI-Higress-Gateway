@@ -37,9 +37,11 @@ export function SubmissionsTable({
   const { t, language } = useI18n();
 
   const getStatusBadge = (status: SubmissionStatus) => {
-    const variants: Record<SubmissionStatus, "default" | "secondary" | "destructive"> = {
+    const variants: Record<SubmissionStatus, "default" | "secondary" | "destructive" | "outline"> = {
       pending: "default",
+      testing: "outline",
       approved: "secondary",
+      approved_limited: "secondary",
       rejected: "destructive",
     };
 

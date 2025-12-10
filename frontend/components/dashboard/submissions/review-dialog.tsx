@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { useI18n } from "@/lib/i18n-context";
 import {
   providerSubmissionService,
@@ -44,20 +45,30 @@ export function ReviewDialog({
   const {
     register,
     reset,
+    watch,
   } = useForm<ReviewSubmissionRequest>();
+
+  const reviewNotes = watch("review_notes");
+  const limitQps = watch("limit_qps");
 
   const formatDate = (dateString: string) => {
     return formatRelativeTime(dateString, language);
   };
 
-  const handleReview = async (approved: boolean) => {
+  const handleReview = async (decision: "approved" | "approved_limited" | "rejected") => {
     if (!submission) return;
+
+    if (decision === "rejected" && !reviewNotes?.trim()) {
+      toast.error(t("submissions.review_notes_required"));
+      return;
+    }
 
     setIsReviewing(true);
     try {
       const data: ReviewSubmissionRequest = {
-        approved,
-        review_notes: (document.getElementById("review_notes") as HTMLTextAreaElement)?.value || undefined,
+        decision,
+        review_notes: reviewNotes || undefined,
+        limit_qps: decision === "approved_limited" && limitQps ? Number(limitQps) : undefined,
       };
 
       await providerSubmissionService.reviewSubmission(submission.id, data);
@@ -68,7 +79,7 @@ export function ReviewDialog({
     } catch (error) {
       showError(error, {
         context: t("submissions.toast_review_error"),
-        onRetry: () => handleReview(approved),
+        onRetry: () => handleReview(decision),
       });
     } finally {
       setIsReviewing(false);
@@ -168,6 +179,18 @@ export function ReviewDialog({
               rows={4}
               {...register("review_notes")}
             />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label htmlFor="limit_qps">{t("submissions.limit_qps_optional")}</Label>
+                <Input
+                  id="limit_qps"
+                  type="number"
+                  min={1}
+                  placeholder="2"
+                  {...register("limit_qps", { valueAsNumber: true })}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -181,13 +204,20 @@ export function ReviewDialog({
           </Button>
           <Button
             variant="destructive"
-            onClick={() => handleReview(false)}
+            onClick={() => handleReview("rejected")}
             disabled={isReviewing}
           >
             {isReviewing ? t("submissions.btn_reviewing") : t("submissions.btn_reject")}
           </Button>
           <Button
-            onClick={() => handleReview(true)}
+            onClick={() => handleReview("approved_limited")}
+            variant="secondary"
+            disabled={isReviewing}
+          >
+            {isReviewing ? t("submissions.btn_reviewing") : t("submissions.btn_approve_limited")}
+          </Button>
+          <Button
+            onClick={() => handleReview("approved")}
             disabled={isReviewing}
           >
             {isReviewing ? t("submissions.btn_reviewing") : t("submissions.btn_approve")}

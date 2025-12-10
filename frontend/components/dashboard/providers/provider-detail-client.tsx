@@ -10,9 +10,26 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { ArrowLeft, CheckCircle, AlertCircle, XCircle, RefreshCw, Share2, Loader2, Key } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ArrowLeft, CheckCircle, AlertCircle, XCircle, RefreshCw, Share2, Loader2, Key, Shield, Power, Activity, PauseCircle } from "lucide-react";
 import { useProviderDetail } from "@/lib/hooks/use-provider-detail";
-import type { ProviderStatus, ProviderModelPricing, Model, ProviderVisibility } from "@/http/provider";
+import type {
+  ProviderStatus,
+  ProviderModelPricing,
+  Model,
+  ProviderVisibility,
+  ProviderAuditStatus,
+  ProviderOperationStatus,
+  ProviderTestResult,
+} from "@/http/provider";
 import { providerService } from "@/http/provider";
 import { useI18n } from "@/lib/i18n-context";
 import { providerSubmissionService } from "@/http/provider-submission";
@@ -22,6 +39,15 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 import { ModelCard } from "./model-card";
 import { ModelPricingDialog } from "./model-pricing-dialog";
 import { ModelAliasDialog } from "./model-alias-dialog";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerFooter,
+  DrawerClose,
+} from "@/components/ui/drawer";
 
 interface ProviderDetailClientProps {
   providerId: string;
@@ -85,6 +111,36 @@ interface ProviderDetailClientProps {
       successRate: string;
       p95Latency: string;
       p99Latency: string;
+    };
+    audit: {
+      title: string;
+      auditStatus: string;
+      operationStatus: string;
+      tabs: {
+        status: string;
+        probe: string;
+        history: string;
+      };
+      latestTest: string;
+      latestTestNone: string;
+      testNow: string;
+      testing: string;
+      approve: string;
+      approveLimited: string;
+      limitQps: string;
+      reject: string;
+      rejectReasonRequired: string;
+      pause: string;
+      resume: string;
+      offline: string;
+      remarkPlaceholder: string;
+      rejectPlaceholder: string;
+      latestLatency: string;
+      latestError: string;
+      latestSummary: string;
+      latestSuccess: string;
+      latestFailed: string;
+      lastRunAt: string;
     };
     visibility: {
       private: string;
@@ -180,9 +236,22 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
   const [sharedVisibility, setSharedVisibility] = useState<ProviderVisibility | null>(null);
   const [sharedLoading, setSharedLoading] = useState(false);
   const [sharedSaving, setSharedSaving] = useState(false);
+  const [auditRemark, setAuditRemark] = useState("");
+  const [rejectReason, setRejectReason] = useState("");
+  const [limitQps, setLimitQps] = useState<string>("");
+  const [auditSubmitting, setAuditSubmitting] = useState(false);
   const { provider, models, health, metrics, loading, error, refresh } = useProviderDetail({
     providerId,
   });
+  const [recentTests, setRecentTests] = useState<ProviderTestResult[]>([]);
+  const [auditLogs, setAuditLogs] = useState<any[]>([]);
+  const [probeEnabled, setProbeEnabled] = useState<boolean | null>(null);
+  const [probeInterval, setProbeInterval] = useState<string>("");
+  const [probeModel, setProbeModel] = useState<string>("");
+  const [savingProbe, setSavingProbe] = useState(false);
+  const [probeDrawerOpen, setProbeDrawerOpen] = useState(false);
+  const [validationResults, setValidationResults] = useState<any[]>([]);
+  const [validationLoading, setValidationLoading] = useState(false);
 
   // 额外检查：当前 provider 是否为「当前用户的私有 Provider」
   // /providers/{id} 返回的是 ProviderConfig，并不包含 visibility/owner_id，
@@ -217,6 +286,16 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
     };
   }, [effectiveUserId, providerId]);
 
+  // 同步探针配置
+  useEffect(() => {
+    if (!provider) return;
+    setProbeEnabled(provider.probe_enabled ?? true);
+    setProbeInterval(
+      provider.probe_interval_seconds != null ? String(provider.probe_interval_seconds) : "",
+    );
+    setProbeModel(provider.probe_model ?? "");
+  }, [provider]);
+
   // 计算汇总指标
   const summaryMetrics = useMemo(() => {
     if (!metrics?.metrics || metrics.metrics.length === 0) {
@@ -238,6 +317,53 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
       errorRate: errorRate.toFixed(2),
     };
   }, [metrics]);
+
+  // 用于共享管理的权限判断（在所有 hooks 前面定义，避免条件性调用 hook）
+  const canEditSharing = !!effectiveUserId && isUserOwnedPrivate;
+
+  const fetchSharedUsers = useCallback(async () => {
+    if (!effectiveUserId || !canEditSharing) {
+      return;
+    }
+    setSharedLoading(true);
+    try {
+      const resp = await providerService.getProviderSharedUsers(
+        effectiveUserId,
+        providerId,
+      );
+      setSharedUsersDraft((resp.shared_user_ids || []).join("\n"));
+      setSharedVisibility(resp.visibility);
+    } catch (err) {
+      showError(err, {
+        context: t("providers.sharing_error_load"),
+      });
+    } finally {
+      setSharedLoading(false);
+    }
+  }, [effectiveUserId, canEditSharing, providerId, showError, t]);
+
+  useEffect(() => {
+    if (!canEditSharing) return;
+    fetchSharedUsers();
+  }, [canEditSharing, fetchSharedUsers]);
+
+  // 管理员加载测试记录与审核日志（确保在所有早期返回之前定义）
+  useEffect(() => {
+    if (!isSuperuser || !providerId) return;
+    const load = async () => {
+      try {
+        const [tests, logs] = await Promise.all([
+          providerService.getProviderTests(providerId, { limit: 5 }),
+          providerService.getProviderAuditLogs(providerId, { limit: 10 }),
+        ]);
+        setRecentTests(tests || []);
+        setAuditLogs(logs || []);
+      } catch (err) {
+        console.warn("Failed to load audit data", err);
+      }
+    };
+    load();
+  }, [isSuperuser, providerId]);
 
   // 加载状态
   if (loading && !provider) {
@@ -294,8 +420,6 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
   const canEditModelMapping =
     isSuperuser || (!!effectiveUserId && isUserOwnedPrivate);
 
-  const canEditSharing = !!effectiveUserId && isUserOwnedPrivate;
-
   const handleShareToPool = async () => {
     if (!canShareToPool || !effectiveUserId) {
       return;
@@ -323,31 +447,7 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
     }
   };
 
-  const fetchSharedUsers = useCallback(async () => {
-    if (!effectiveUserId || !canEditSharing) {
-      return;
-    }
-    setSharedLoading(true);
-    try {
-      const resp = await providerService.getProviderSharedUsers(
-        effectiveUserId,
-        providerId,
-      );
-      setSharedUsersDraft((resp.shared_user_ids || []).join("\n"));
-      setSharedVisibility(resp.visibility);
-    } catch (err) {
-      showError(err, {
-        context: t("providers.sharing_error_load"),
-      });
-    } finally {
-      setSharedLoading(false);
-    }
-  }, [effectiveUserId, canEditSharing, providerId, showError, t]);
-
-  useEffect(() => {
-    if (!canEditSharing) return;
-    fetchSharedUsers();
-  }, [canEditSharing, fetchSharedUsers]);
+  
 
   const handleSaveSharing = async () => {
     if (!effectiveUserId || !canEditSharing) return;
@@ -458,6 +558,178 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
     }
   };
 
+  const renderAuditBadge = (status?: ProviderAuditStatus) => {
+    const map: Record<ProviderAuditStatus, { label: string; variant: "outline" | "default" | "destructive"; icon: React.ElementType; className?: string }> = {
+      pending: { label: translations.status.pending, variant: "outline", icon: AlertCircle },
+      testing: { label: translations.status.testing, variant: "outline", icon: Loader2, className: "animate-spin" },
+      approved: { label: translations.status.approved, variant: "default", icon: CheckCircle },
+      approved_limited: { label: translations.status.approved_limited, variant: "default", icon: CheckCircle },
+      rejected: { label: translations.status.rejected, variant: "destructive", icon: XCircle },
+    };
+    if (!status || !map[status]) {
+      return (
+        <Badge variant="outline" className="gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5" />
+          {translations.status.unknown}
+        </Badge>
+      );
+    }
+    const cfg = map[status];
+    const Icon = cfg.icon;
+    return (
+      <Badge variant={cfg.variant} className="gap-1.5">
+        <Icon className={`w-3.5 h-3.5 ${cfg.className ?? ""}`} />
+        {cfg.label}
+      </Badge>
+    );
+  };
+
+  const renderOperationBadge = (status?: ProviderOperationStatus) => {
+    if (!status) {
+      return (
+        <Badge variant="outline" className="gap-1.5">
+          <AlertCircle className="w-3.5 h-3.5" />
+          {translations.status.unknown}
+        </Badge>
+      );
+    }
+    const map: Record<ProviderOperationStatus, { label: string; variant: "outline" | "default" | "destructive"; icon: React.ElementType }> = {
+      active: { label: translations.status.active, variant: "default", icon: Activity },
+      paused: { label: translations.status.paused, variant: "outline", icon: PauseCircle },
+      offline: { label: translations.status.offline, variant: "destructive", icon: Power },
+    };
+    const cfg = map[status];
+    const Icon = cfg.icon;
+    return (
+      <Badge variant={cfg.variant} className="gap-1.5">
+        <Icon className="w-3.5 h-3.5" />
+        {cfg.label}
+      </Badge>
+    );
+  };
+
+  const latestTest: ProviderTestResult | null | undefined = provider.latest_test_result;
+
+  const handleAdminTest = async () => {
+    if (!providerId) return;
+    setAuditSubmitting(true);
+    try {
+      await providerService.adminTestProvider(providerId, {
+        remark: auditRemark || undefined,
+      });
+      toast.success(translations.audit.testing);
+      await refresh();
+    } catch (err) {
+      showError(err, {
+        context: translations.audit.testing,
+      });
+    } finally {
+      setAuditSubmitting(false);
+    }
+  };
+
+  const handleSaveProbeConfig = async () => {
+    if (!providerId) return;
+    setSavingProbe(true);
+    try {
+      await providerService.updateProbeConfig(providerId, {
+        probe_enabled: probeEnabled ?? false,
+        probe_interval_seconds: probeInterval ? Number(probeInterval) : null,
+        probe_model: probeModel.trim() || null,
+      });
+      toast.success(translations.audit.probeSaveSuccess);
+      await refresh();
+    } catch (err) {
+      showError(err, {
+        context: translations.audit.probeSave,
+      });
+    } finally {
+      setSavingProbe(false);
+    }
+  };
+
+  const handleValidateModels = async () => {
+    if (!providerId) return;
+    setValidationLoading(true);
+    try {
+      const result = await providerService.validateProviderModels(providerId, { limit: 1 });
+      setValidationResults(result || []);
+      toast.success(translations.audit.validateSuccess);
+    } catch (err) {
+      showError(err, {
+        context: translations.audit.validateModels,
+      });
+    } finally {
+      setValidationLoading(false);
+    }
+  };
+
+  const handleApprove = async (limited: boolean) => {
+    if (!providerId) return;
+    setAuditSubmitting(true);
+    try {
+      await providerService.approveProvider(providerId, {
+        remark: auditRemark || undefined,
+        limit_qps: limited && limitQps ? Number(limitQps) : undefined,
+        limited,
+      });
+      toast.success(limited ? translations.audit.approveLimited : translations.audit.approve);
+      await refresh();
+    } catch (err) {
+      showError(err, {
+        context: translations.audit.approve,
+      });
+    } finally {
+      setAuditSubmitting(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!providerId) return;
+    if (!rejectReason.trim()) {
+      toast.error(translations.audit.rejectReasonRequired);
+      return;
+    }
+    setAuditSubmitting(true);
+    try {
+      await providerService.rejectProvider(providerId, { remark: rejectReason });
+      toast.success(translations.audit.reject);
+      await refresh();
+    } catch (err) {
+      showError(err, {
+        context: translations.audit.reject,
+      });
+    } finally {
+      setAuditSubmitting(false);
+    }
+  };
+
+  const handleOperation = async (action: "pause" | "resume" | "offline") => {
+    if (!providerId) return;
+    setAuditSubmitting(true);
+    try {
+      await providerService.updateOperationStatus(providerId, action, {
+        remark: auditRemark || undefined,
+      });
+      toast.success(translations.audit[action === "resume" ? "resume" : action]);
+      await refresh();
+    } catch (err) {
+      showError(err, {
+        context: translations.audit.title,
+      });
+    } finally {
+      setAuditSubmitting(false);
+    }
+  };
+
+  const historyTabVisible = isSuperuser && (recentTests.length > 0 || auditLogs.length > 0);
+  const auditTabItems = [
+    { value: "status", label: translations.audit.tabs.status, hidden: false },
+    { value: "probe", label: translations.audit.tabs.probe, hidden: !isSuperuser },
+    { value: "history", label: translations.audit.tabs.history, hidden: !historyTabVisible },
+  ].filter((tab) => !tab.hidden);
+  const auditDefaultTab = auditTabItems[0]?.value ?? "status";
+
   return (
     <div className="space-y-6 max-w-7xl animate-in fade-in duration-500">
       {/* 页头 */}
@@ -517,6 +789,259 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
           </Button>
         </div>
       </div>
+
+      {/* 审核与运营状态 */}
+      <Card>
+        <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Shield className="h-4 w-4" />
+              {translations.audit.title}
+            </CardTitle>
+            <CardDescription>{translations.audit.auditStatus}</CardDescription>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {renderAuditBadge(provider.audit_status as ProviderAuditStatus | undefined)}
+            {renderOperationBadge(provider.operation_status as ProviderOperationStatus | undefined)}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <Tabs defaultValue={auditDefaultTab} className="space-y-4">
+            <TabsList className="w-full justify-start overflow-x-auto">
+              {auditTabItems.map((tab) => (
+                <TabsTrigger key={tab.value} value={tab.value} className="px-4">
+                  {tab.label}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+
+            <TabsContent value="status" className="space-y-4">
+              <div className="grid gap-4 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>{translations.audit.latestTest}</Label>
+                  {latestTest ? (
+                    <div className="rounded border p-3 space-y-1 text-sm">
+                      <div className="flex items-center gap-2">
+                        <Badge variant={latestTest.success ? "default" : "destructive"}>
+                          {latestTest.success
+                            ? translations.audit.latestSuccess
+                            : translations.audit.latestFailed}
+                        </Badge>
+                        {latestTest.summary && <span className="text-muted-foreground">{latestTest.summary}</span>}
+                      </div>
+                      <div className="text-muted-foreground">
+                        {translations.audit.lastRunAt}: {latestTest.finished_at || latestTest.created_at}
+                      </div>
+                      {latestTest.latency_ms != null && (
+                        <div className="text-muted-foreground">
+                          {translations.audit.latestLatency}: {latestTest.latency_ms} ms
+                        </div>
+                      )}
+                      {latestTest.error_code && (
+                        <div className="text-muted-foreground">
+                          {translations.audit.latestError}: {latestTest.error_code}
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{translations.audit.latestTestNone}</p>
+                  )}
+                </div>
+
+                {isSuperuser && (
+                  <div className="space-y-2">
+                    <Label>{translations.audit.remarkPlaceholder}</Label>
+                    <Textarea
+                      value={auditRemark}
+                      onChange={(e) => setAuditRemark(e.target.value)}
+                      placeholder={translations.audit.remarkPlaceholder}
+                      rows={3}
+                    />
+                  </div>
+                )}
+
+                {isSuperuser && (
+                  <div className="space-y-2">
+                    <Label>{translations.audit.limitQps}</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={limitQps}
+                      onChange={(e) => setLimitQps(e.target.value)}
+                      placeholder="e.g. 2"
+                    />
+                    <Label>{translations.audit.reject}</Label>
+                    <Textarea
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder={translations.audit.rejectPlaceholder}
+                      rows={2}
+                    />
+                  </div>
+                )}
+              </div>
+
+              {isSuperuser && (
+                <div className="flex flex-wrap gap-2">
+                  <Button size="sm" onClick={handleAdminTest} disabled={auditSubmitting}>
+                    {auditSubmitting ? (
+                      <>
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        {translations.audit.testing}
+                      </>
+                    ) : (
+                      <>
+                        <RefreshCw className="h-4 w-4 mr-2" />
+                        {translations.audit.testNow}
+                      </>
+                    )}
+                  </Button>
+                  <Button size="sm" onClick={() => handleApprove(false)} disabled={auditSubmitting}>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    {translations.audit.approve}
+                  </Button>
+                  <Button size="sm" variant="secondary" onClick={() => handleApprove(true)} disabled={auditSubmitting}>
+                    <CheckCircle className="h-4 w-4 mr-2" />
+                    {translations.audit.approveLimited}
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={handleReject} disabled={auditSubmitting}>
+                    <XCircle className="h-4 w-4 mr-2" />
+                    {translations.audit.reject}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleOperation("pause")} disabled={auditSubmitting}>
+                    <PauseCircle className="h-4 w-4 mr-2" />
+                    {translations.audit.pause}
+                  </Button>
+                  <Button size="sm" variant="outline" onClick={() => handleOperation("resume")} disabled={auditSubmitting}>
+                    <Shield className="h-4 w-4 mr-2" />
+                    {translations.audit.resume}
+                  </Button>
+                  <Button size="sm" variant="destructive" onClick={() => handleOperation("offline")} disabled={auditSubmitting}>
+                    <Power className="h-4 w-4 mr-2" />
+                    {translations.audit.offline}
+                  </Button>
+                </div>
+              )}
+            </TabsContent>
+
+            {isSuperuser && (
+              <TabsContent value="probe" className="space-y-4">
+                <div className="rounded-lg border p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Label>{translations.audit.probeTitle}</Label>
+                      <p className="text-xs text-muted-foreground">
+                        {translations.audit.probeDesc}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={probeEnabled ?? false}
+                        onCheckedChange={(checked) => setProbeEnabled(checked)}
+                      />
+                      <span className="text-sm text-muted-foreground">{translations.audit.probeToggle}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end">
+                    <Button size="sm" onClick={() => setProbeDrawerOpen(true)}>
+                      {translations.audit.probeSave}
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-1">
+                      <Label>{translations.audit.validateModels}</Label>
+                      <p className="text-xs text-muted-foreground">
+                        {translations.audit.validateHint}
+                      </p>
+                    </div>
+                    <Button size="sm" onClick={handleValidateModels} disabled={validationLoading}>
+                      {validationLoading ? (
+                        <>
+                          <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                          {translations.audit.validating}
+                        </>
+                      ) : (
+                        translations.audit.validateModels
+                      )}
+                    </Button>
+                  </div>
+                  {validationResults.length > 0 ? (
+                    <div className="rounded border divide-y">
+                      {validationResults.map((res: any) => (
+                        <div key={res.model_id} className="p-3 text-sm flex items-center justify-between">
+                          <div className="flex flex-col">
+                            <span className="font-medium">{res.model_id}</span>
+                            <span className="text-xs text-muted-foreground">
+                              {res.error_message || "-"}
+                            </span>
+                          </div>
+                          <Badge variant={res.success ? "default" : "destructive"}>
+                            {res.success ? translations.audit.validateSuccessShort : translations.audit.validateFailed}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      {translations.audit.validateEmpty}
+                    </p>
+                  )}
+                </div>
+              </TabsContent>
+            )}
+
+            {isSuperuser && historyTabVisible && (
+              <TabsContent value="history" className="space-y-4">
+                {recentTests.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>{translations.audit.recentTests}</Label>
+                    <div className="rounded border divide-y">
+                      {recentTests.map((test) => (
+                        <div key={test.id} className="p-3 text-sm flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={test.success ? "default" : "destructive"}>
+                              {test.mode}
+                            </Badge>
+                            <span className="text-muted-foreground">{test.summary || "-"}</span>
+                          </div>
+                          <div className="text-xs text-muted-foreground flex items-center gap-3">
+                            {test.latency_ms != null && (
+                              <span>{translations.audit.latestLatency}: {test.latency_ms} ms</span>
+                            )}
+                            <span>{test.finished_at || test.created_at}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {auditLogs.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>{translations.audit.auditLogs}</Label>
+                    <div className="rounded border divide-y">
+                      {auditLogs.map((log) => (
+                        <div key={log.id} className="p-3 text-sm flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline">{log.action}</Badge>
+                            {log.remark && <span className="text-muted-foreground">{log.remark}</span>}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {log.created_at}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </TabsContent>
+            )}
+          </Tabs>
+        </CardContent>
+      </Card>
 
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList>
@@ -836,6 +1361,76 @@ export function ProviderDetailClient({ providerId, currentUserId, translations }
         onSave={saveAlias}
         loading={aliasLoading}
       />
+
+      {/* 探针配置 Drawer */}
+      <Drawer open={probeDrawerOpen} onOpenChange={setProbeDrawerOpen}>
+        <DrawerContent>
+          <DrawerHeader>
+            <DrawerTitle>{translations.audit.probeTitle}</DrawerTitle>
+            <DrawerDescription>{translations.audit.probeDesc}</DrawerDescription>
+          </DrawerHeader>
+          <div className="p-4 space-y-4">
+            <div className="flex items-center justify-between">
+              <div />
+              <div className="flex items-center gap-2">
+                <Switch
+                  checked={probeEnabled ?? false}
+                  onCheckedChange={(checked) => setProbeEnabled(checked)}
+                />
+                <span className="text-sm text-muted-foreground">{translations.audit.probeToggle}</span>
+              </div>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-3">
+              <div className="space-y-2">
+                <Label>{translations.audit.probeInterval}</Label>
+                <Input
+                  type="number"
+                  min={60}
+                  placeholder={translations.audit.probeIntervalPlaceholder}
+                  value={probeInterval}
+                  onChange={(e) => setProbeInterval(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground">{translations.audit.probeIntervalHint}</p>
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label>{translations.audit.probeModel}</Label>
+                <Select value={probeModel || ""} onValueChange={(val) => setProbeModel(val === "__none" ? "" : val)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={translations.audit.probeModelPlaceholder} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">{translations.audit.probeModelPlaceholder}</SelectItem>
+                    {(models?.models || []).map((model) => (
+                      <SelectItem key={model.model_id} value={model.model_id}>
+                        {model.display_name || model.model_id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">{translations.audit.probeModelHint}</p>
+              </div>
+            </div>
+          </div>
+          <DrawerFooter>
+            <div className="flex justify-end w-full gap-2">
+              <DrawerClose>
+                <Button variant="outline" size="sm">{t("cancel") || "取消"}</Button>
+              </DrawerClose>
+              <Button size="sm" onClick={async () => { await handleSaveProbeConfig(); setProbeDrawerOpen(false); }} disabled={savingProbe}>
+                {savingProbe ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    {translations.audit.probeSaving}
+                  </>
+                ) : (
+                  translations.audit.probeSave
+                )}
+              </Button>
+            </div>
+          </DrawerFooter>
+        </DrawerContent>
+      </Drawer>
     </div>
   );
 }

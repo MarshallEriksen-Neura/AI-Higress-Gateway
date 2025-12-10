@@ -56,6 +56,14 @@ APIProxy 是一个基于 FastAPI 构建的高性能 AI 代理网关。它为上�
 ---
 
 
+## 数据库迁移
+
+- 后端进程启动时会自动执行 `alembic upgrade head`，确保诸如 `providers.probe_enabled`
+  这类新字段在 Celery/HTTP 任务访问数据库前已经创建完成。
+- 如需手动控制（例如在 CI 场景），可以设置 `AUTO_APPLY_DB_MIGRATIONS=0`
+  关闭自动迁移，再手动运行 `alembic upgrade head`。
+- 针对测试所用的 SQLite/内存数据库会自动跳过该逻辑，避免影响单元测试。
+
 
 ## 测试
 

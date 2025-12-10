@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { Database } from "lucide-react";
 import type { GatewayConfig, ProviderLimits } from "@/lib/api-types";
 import { useGatewayConfig, useProviderLimits } from "@/lib/swr";
@@ -49,7 +50,8 @@ export default function SystemAdminPage() {
   }, [limits]);
 
   const handleChange =
-    (field: keyof GatewayConfig) => (event: React.ChangeEvent<HTMLInputElement>) => {
+    (field: keyof GatewayConfig) =>
+      (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       const value = event.target.value;
 
       setForm((prev) => {
@@ -218,6 +220,21 @@ export default function SystemAdminPage() {
                 disabled={disabled}
               />
             </div>
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">
+              {t("system.config.probe_prompt")}
+            </label>
+            <Textarea
+              rows={3}
+              placeholder={t("system.config.probe_prompt_placeholder")}
+              value={form?.probe_prompt ?? ""}
+              onChange={handleChange("probe_prompt")}
+              disabled={disabled}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("system.config.probe_prompt_hint")}
+            </p>
           </div>
           <div className="flex justify-end space-x-2 pt-4">
             <Button variant="outline" onClick={handleReset} disabled={disabled}>

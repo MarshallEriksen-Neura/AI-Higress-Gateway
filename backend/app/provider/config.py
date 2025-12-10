@@ -144,6 +144,11 @@ def _build_provider_config(provider: Provider) -> ProviderConfig | None:
         "weight": provider.weight or 1.0,
         "api_keys": api_keys,
     }
+    data["audit_status"] = getattr(provider, "audit_status", None)
+    data["operation_status"] = getattr(provider, "operation_status", None)
+    data["probe_enabled"] = getattr(provider, "probe_enabled", True)
+    data["probe_interval_seconds"] = getattr(provider, "probe_interval_seconds", None)
+    data["probe_model"] = getattr(provider, "probe_model", None)
     data["api_key"] = api_keys[0].key
 
     if provider.messages_path:

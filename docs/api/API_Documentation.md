@@ -2416,7 +2416,71 @@ cost_credits = ceil(total_tokens / 1000 * CREDITS_BASE_PER_1K_TOKENS * effective
 
 ---
 
-### 17. 管理员导入提供商预设
+### 17. Provider 审核与运营（管理员）
+
+**状态字段**:  
+- `audit_status`: `pending/testing/approved/approved_limited/rejected`  
+- `operation_status`: `active/paused/offline`  
+- 管理端列表与详情的响应已补充 `latest_test_result`（最近一次测试的摘要）。
+ - 可查询最近测试与审核日志：`GET /admin/providers/{id}/tests`、`GET /admin/providers/{id}/audit-logs`（仅管理员）。
+
+**接口**: `POST /admin/providers/{provider_id}/test`  
+**描述**: 触发一次基础探针或自定义测试，立即写入测试记录并返回摘要。  
+**请求体**:
+```json
+{
+  "mode": "auto | custom | cron",
+  "remark": "可选备注",
+  "input_text": "当 mode=custom 时的测试输入，可选"
+}
+```
+**响应示例**:
+```json
+{
+  "id": "uuid",
+  "provider_id": "audit-provider",
+  "mode": "auto",
+  "success": true,
+  "summary": "基础探针完成",
+  "probe_results": [
+    {"case": "ping", "status": "success", "latency_ms": 120}
+  ],
+  "latency_ms": 120,
+  "error_code": null,
+  "cost": 0.0,
+  "started_at": "2025-12-09T08:00:00Z",
+  "finished_at": "2025-12-09T08:00:00Z",
+  "created_at": "2025-12-09T08:00:00Z",
+  "updated_at": "2025-12-09T08:00:00Z"
+}
+```
+
+**审核流转接口**:  
+- `POST /admin/providers/{provider_id}/approve`：审核通过  
+- `POST /admin/providers/{provider_id}/approve-limited`：限速通过，`limit_qps` 可选  
+- `POST /admin/providers/{provider_id}/reject`：拒绝，`remark` 必填  
+- `POST /admin/providers/{provider_id}/pause`：运营状态标记为 `paused`  
+- `POST /admin/providers/{provider_id}/resume`：恢复为 `active`  
+- `POST /admin/providers/{provider_id}/offline`：下线为 `offline`
+- `PUT /admin/providers/{provider_id}/probe-config`：更新自动探针配置（`probe_enabled`/`probe_interval_seconds`/`probe_model`）
+
+请求体（除 test 外通用）:
+```json
+{
+  "remark": "审核或运维备注，可选；拒绝时必填",
+  "limit_qps": 2
+}
+```
+
+**自动化巡检**: 系统会以较低频率自动探针（默认待审核 30 分钟一次、已上线 60 分钟一次），失败会将运营状态标记为 `paused` 并记录日志。可通过环境变量调整：
+- `PROVIDER_AUDIT_AUTO_PROBE_INTERVAL_SECONDS`（默认 1800）
+- `PROVIDER_AUDIT_CRON_INTERVAL_SECONDS`（默认 3600）
+- 管理员可按 Provider 单独关闭探针、设置自定义频率或指定测试模型，避免过于频繁占用用户上游额度。
+- 探针提示词由系统管理员在 `/system/gateway-config` 的 `probe_prompt` 配置，建议保持简短以降低成本。
+
+---
+
+### 18. 管理员导入提供商预设
 
 **接口**: `POST /admin/provider-presets/import`
 
@@ -2984,7 +3048,8 @@ cost_credits = ceil(total_tokens / 1000 * CREDITS_BASE_PER_1K_TOKENS * effective
   "api_base_url": "https://api.example.com",
   "max_concurrent_requests": 1000,
   "request_timeout_ms": 30000,
-  "cache_ttl_seconds": 3600
+  "cache_ttl_seconds": 3600,
+  "probe_prompt": "请回答一个简单问题用于健康检查。"
 }
 ```
 
@@ -3004,7 +3069,8 @@ cost_credits = ceil(total_tokens / 1000 * CREDITS_BASE_PER_1K_TOKENS * effective
   "api_base_url": "https://api.example.com",
   "max_concurrent_requests": 1000,
   "request_timeout_ms": 30000,
-  "cache_ttl_seconds": 3600
+  "cache_ttl_seconds": 3600,
+  "probe_prompt": "请回答一个简单问题用于健康检查。"
 }
 ```
 

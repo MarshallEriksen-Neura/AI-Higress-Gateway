@@ -133,12 +133,24 @@ def review_provider_submission_endpoint(
         if submission is None:
             raise not_found("提交记录不存在")
 
-        if payload.approved:
+        decision = payload.decision
+        if decision is None:
+            decision = "approved" if payload.approved else "rejected"
+
+        if decision not in ("approved", "approved_limited", "rejected"):
+            raise bad_request("不支持的审核决策")
+
+        if decision == "rejected" and not payload.review_notes:
+            raise bad_request("拒绝时请填写审核备注")
+
+        if decision.startswith("approved"):
             approve_submission(
                 db,
                 submission_id,
                 UUID(current_user.id),
                 payload.review_notes,
+                status=decision,
+                limit_qps=payload.limit_qps,
             )
         else:
             reject_submission(

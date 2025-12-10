@@ -44,6 +44,7 @@ celery_app.conf.update(
         "app.tasks.api_key_health",
         "app.tasks.session_maintenance",
         "app.tasks.credit_auto_topup",
+        "app.tasks.provider_audit",
     ),
 )
 

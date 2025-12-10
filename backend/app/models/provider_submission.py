@@ -28,7 +28,7 @@ class ProviderSubmission(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     encrypted_api_key = Column(LargeBinary, nullable=True)
     description: Mapped[str | None] = Column(Text, nullable=True)
 
-    # 审核状态：pending / approved / rejected
+    # 审核状态：pending / testing / approved / approved_limited / rejected
     approval_status: Mapped[str] = Column(String(16), nullable=False, default="pending")
     reviewed_by = Column(
         UUID(as_uuid=True),

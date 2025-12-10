@@ -57,6 +57,7 @@ def _apply_gateway_config_to_settings(row: GatewayConfigRow) -> None:
     settings.gateway_max_concurrent_requests = row.max_concurrent_requests
     settings.gateway_request_timeout_ms = row.request_timeout_ms
     settings.gateway_cache_ttl_seconds = row.cache_ttl_seconds
+    settings.probe_prompt = row.probe_prompt or settings.probe_prompt
 
     # 将毫秒级请求超时映射到内部 upstream_timeout（秒）。
     settings.upstream_timeout = row.request_timeout_ms / 1000.0
@@ -75,6 +76,7 @@ def _get_or_create_gateway_config_row(db: Session) -> GatewayConfigRow:
             max_concurrent_requests=settings.gateway_max_concurrent_requests,
             request_timeout_ms=settings.gateway_request_timeout_ms,
             cache_ttl_seconds=settings.gateway_cache_ttl_seconds,
+            probe_prompt=settings.probe_prompt,
         )
         db.add(row)
         db.commit()
@@ -284,6 +286,7 @@ def get_gateway_config(
         max_concurrent_requests=row.max_concurrent_requests,
         request_timeout_ms=row.request_timeout_ms,
         cache_ttl_seconds=row.cache_ttl_seconds,
+        probe_prompt=row.probe_prompt or settings.probe_prompt,
     )
 
 
@@ -312,6 +315,7 @@ def update_gateway_config(
     row.max_concurrent_requests = payload.max_concurrent_requests
     row.request_timeout_ms = payload.request_timeout_ms
     row.cache_ttl_seconds = payload.cache_ttl_seconds
+    row.probe_prompt = payload.probe_prompt
 
     db.add(row)
     db.commit()
@@ -325,6 +329,7 @@ def update_gateway_config(
         max_concurrent_requests=row.max_concurrent_requests,
         request_timeout_ms=row.request_timeout_ms,
         cache_ttl_seconds=row.cache_ttl_seconds,
+        probe_prompt=row.probe_prompt,
     )
 
 

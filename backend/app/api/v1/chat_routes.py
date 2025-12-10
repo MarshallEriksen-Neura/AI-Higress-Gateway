@@ -63,6 +63,9 @@ from app.services.metrics_service import (
     stream_sdk_with_metrics,
     stream_upstream_with_metrics,
 )
+from app.services.audit_service import record_audit_event
+from app.services.compliance_service import apply_content_policy, findings_to_summary
+from app.settings import settings
 from app.services.user_provider_service import get_accessible_provider_ids
 from app.storage.redis_service import get_logical_model
 from app.upstream import UpstreamStreamError, detect_request_format
@@ -70,6 +73,142 @@ from app.upstream import UpstreamStreamError, detect_request_format
 from app.services.chat_routing_service import *  # noqa: F401,F403
 
 router = APIRouter(tags=["chat"])
+
+
+def _enforce_request_moderation(
+    payload: dict[str, Any],
+    *,
+    session_id: str | None,
+    api_key: AuthenticatedAPIKey,
+    logical_model: str | None = None,
+) -> None:
+    if not settings.enable_content_moderation:
+        return
+    result = apply_content_policy(
+        payload,
+        action=settings.content_moderation_action,
+        mask_token=settings.content_moderation_mask_token,
+        mask_output=False,
+    )
+    if result.findings:
+        record_audit_event(
+            action="content_check",
+            stage="request",
+            user_id=api_key.user_id,
+            api_key_id=api_key.id,
+            logical_model=logical_model,
+            provider_id=None,
+            session_id=session_id,
+            status_code=None,
+            decision="blocked" if result.blocked else "allowed",
+            findings=result.findings,
+        )
+    if result.blocked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "CONTENT_BLOCKED",
+                "message": "请求包含敏感信息，已被内容审核阻断",
+                "findings": findings_to_summary(result.findings),
+            },
+        )
+
+
+def _apply_response_moderation(
+    content: Any,
+    *,
+    session_id: str | None,
+    api_key: AuthenticatedAPIKey,
+    logical_model: str | None,
+    provider_id: str | None,
+    status_code: int | None = None,
+) -> Any:
+    if not settings.enable_content_moderation:
+        return content
+
+    result = apply_content_policy(
+        content,
+        action=settings.content_moderation_action,
+        mask_token=settings.content_moderation_mask_token,
+        mask_output=settings.content_moderation_mask_response,
+    )
+    if result.findings:
+        record_audit_event(
+            action="content_check",
+            stage="response",
+            user_id=api_key.user_id,
+            api_key_id=api_key.id,
+            logical_model=logical_model,
+            provider_id=provider_id,
+            session_id=session_id,
+            status_code=status_code,
+            decision="blocked" if result.blocked else "allowed",
+            findings=result.findings,
+        )
+    if result.blocked:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "CONTENT_BLOCKED",
+                "message": "响应包含敏感信息，已被内容审核阻断",
+                "findings": findings_to_summary(result.findings),
+            },
+        )
+    if settings.content_moderation_mask_response and result.findings:
+        return result.redacted
+    return content
+
+
+async def _wrap_stream_with_moderation(
+    iterator: AsyncIterator[bytes],
+    *,
+    session_id: str | None,
+    api_key: AuthenticatedAPIKey,
+    logical_model: str | None,
+    provider_id: str | None,
+) -> AsyncIterator[bytes]:
+    if not settings.enable_content_moderation:
+        async for chunk in iterator:
+            yield chunk
+        return
+
+    async for chunk in iterator:
+        text = chunk.decode("utf-8", errors="ignore")
+        result = apply_content_policy(
+            text,
+            action=settings.content_moderation_action,
+            mask_token=settings.content_moderation_mask_token,
+            mask_output=settings.content_moderation_mask_stream,
+        )
+        if result.findings:
+            record_audit_event(
+                action="content_check",
+                stage="response_stream",
+                user_id=api_key.user_id,
+                api_key_id=api_key.id,
+                logical_model=logical_model,
+                provider_id=provider_id,
+                session_id=session_id,
+                status_code=None,
+                decision="blocked" if result.blocked else "allowed",
+                findings=result.findings,
+            )
+        if result.blocked:
+            error_payload = {
+                "error": {
+                    "code": "CONTENT_BLOCKED",
+                    "message": "流式响应包含敏感信息，已被阻断",
+                    "findings": findings_to_summary(result.findings),
+                }
+            }
+            yield f"data: {json.dumps(error_payload, ensure_ascii=False)}\n\n".encode(
+                "utf-8"
+            )
+            return
+        if settings.content_moderation_mask_stream and result.findings:
+            yield result.redacted.encode("utf-8")
+        else:
+            yield chunk
 
 
 @router.post("/v1/chat/completions")
@@ -140,6 +279,13 @@ async def chat_completions(
         lookup_model_id,
         stream,
         x_session_id,
+    )
+
+    _enforce_request_moderation(
+        payload,
+        session_id=x_session_id,
+        api_key=current_key,
+        logical_model=lookup_model_id if isinstance(lookup_model_id, str) else None,
     )
 
     # 在路由和上游调用之前先做积分账户校验，避免在余额不足时仍然消耗上游配额。
@@ -446,7 +592,14 @@ async def chat_completions(
                             logical_model.logical_id,
                         )
                     return JSONResponse(
-                        content=converted_payload,
+                        content=_apply_response_moderation(
+                            converted_payload,
+                            session_id=x_session_id,
+                            api_key=current_key,
+                            logical_model=logical_model.logical_id,
+                            provider_id=provider_id,
+                            status_code=status.HTTP_200_OK,
+                        ),
                         status_code=status.HTTP_200_OK,
                     )
                 try:
@@ -872,14 +1025,21 @@ async def chat_completions(
                             is_stream=False,
                         )
                     except Exception:  # pragma: no cover - 防御性日志
-                        logger.exception(
-                            "Failed to record credit usage for chat completion "
-                            "(user=%s logical_model=%s)",
-                            current_key.user_id,
-                            logical_model.logical_id,
-                        )
+                            logger.exception(
+                                "Failed to record credit usage for chat completion "
+                                "(user=%s logical_model=%s)",
+                                current_key.user_id,
+                                logical_model.logical_id,
+                            )
                     return JSONResponse(
-                        content=converted_payload,
+                        content=_apply_response_moderation(
+                            converted_payload,
+                            session_id=x_session_id,
+                            api_key=current_key,
+                            logical_model=logical_model.logical_id,
+                            provider_id=provider_id,
+                            status_code=status_code,
+                        ),
                         status_code=status_code,
                     )
 
@@ -902,9 +1062,16 @@ async def chat_completions(
                         "(user=%s logical_model=%s)",
                         current_key.user_id,
                         logical_model.logical_id,
-                    )
+                )
                 return JSONResponse(
-                    content={"raw": text},
+                    content=_apply_response_moderation(
+                        {"raw": text},
+                        session_id=x_session_id,
+                        api_key=current_key,
+                        logical_model=logical_model.logical_id,
+                        provider_id=provider_id,
+                        status_code=status_code,
+                    ),
                     status_code=status_code,
                 )
 
@@ -1290,7 +1457,16 @@ async def chat_completions(
                 logical_model.logical_id,
             )
 
-        return StreamingResponse(routed_iterator(), media_type="text/event-stream")
+        return StreamingResponse(
+            _wrap_stream_with_moderation(
+                routed_iterator(),
+                session_id=x_session_id,
+                api_key=current_key,
+                logical_model=logical_model.logical_id if logical_model else None,
+                provider_id=None,
+            ),
+            media_type="text/event-stream",
+        )
 
 
 @router.post("/v1/responses")

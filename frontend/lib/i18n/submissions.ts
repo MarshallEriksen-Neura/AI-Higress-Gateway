@@ -9,7 +9,9 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     "submissions.search_placeholder": "Search submissions...",
     "submissions.filter_all": "All Status",
     "submissions.filter_pending": "Pending",
+    "submissions.filter_testing": "Testing",
     "submissions.filter_approved": "Approved",
+    "submissions.filter_approved_limited": "Approved (Limited)",
     "submissions.filter_rejected": "Rejected",
     
     // Admin Submissions page
@@ -17,7 +19,9 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     "submissions.admin_subtitle": "Review and manage user-submitted shared providers",
     "submissions.stats_total": "Total Submissions",
     "submissions.stats_pending": "Pending Review",
+    "submissions.stats_testing": "Testing",
     "submissions.stats_approved": "Approved",
+    "submissions.stats_approved_limited": "Approved (Limited)",
     "submissions.stats_rejected": "Rejected",
     
     // Table columns
@@ -33,7 +37,9 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     
     // Status badges
     "submissions.status_pending": "Pending",
+    "submissions.status_testing": "Testing",
     "submissions.status_approved": "Approved",
+    "submissions.status_approved_limited": "Approved (Limited)",
     "submissions.status_rejected": "Rejected",
     
     // Provider types
@@ -77,8 +83,11 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     "submissions.review_description": "Description",
     "submissions.review_notes": "Review Notes",
     "submissions.review_notes_placeholder": "Add notes about your decision...",
+    "submissions.review_notes_required": "Please provide a reason when rejecting",
+    "submissions.limit_qps_optional": "Limit QPS (optional)",
     "submissions.btn_approve": "Approve",
     "submissions.btn_reject": "Reject",
+    "submissions.btn_approve_limited": "Approve (Limited)",
     "submissions.btn_reviewing": "Processing...",
     
     // Cancel dialog
@@ -112,7 +121,9 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     "submissions.search_placeholder": "搜索投稿...",
     "submissions.filter_all": "全部状态",
     "submissions.filter_pending": "待审核",
+    "submissions.filter_testing": "测试中",
     "submissions.filter_approved": "已通过",
+    "submissions.filter_approved_limited": "限速通过",
     "submissions.filter_rejected": "已拒绝",
     
     // Admin Submissions page
@@ -120,7 +131,9 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     "submissions.admin_subtitle": "审核和管理用户提交的共享提供商",
     "submissions.stats_total": "总投稿数",
     "submissions.stats_pending": "待审核",
+    "submissions.stats_testing": "测试中",
     "submissions.stats_approved": "已通过",
+    "submissions.stats_approved_limited": "限速通过",
     "submissions.stats_rejected": "已拒绝",
     
     // Table columns
@@ -136,7 +149,9 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     
     // Status badges
     "submissions.status_pending": "待审核",
+    "submissions.status_testing": "测试中",
     "submissions.status_approved": "已通过",
+    "submissions.status_approved_limited": "限速通过",
     "submissions.status_rejected": "已拒绝",
     
     // Provider types
@@ -180,8 +195,11 @@ export const submissionsTranslations: Record<Language, Record<string, string>> =
     "submissions.review_description": "描述",
     "submissions.review_notes": "审核意见",
     "submissions.review_notes_placeholder": "添加关于您决定的说明...",
+    "submissions.review_notes_required": "拒绝时请填写原因",
+    "submissions.limit_qps_optional": "限速 QPS（可选）",
     "submissions.btn_approve": "通过",
     "submissions.btn_reject": "拒绝",
+    "submissions.btn_approve_limited": "限速通过",
     "submissions.btn_reviewing": "处理中...",
     
     // Cancel dialog

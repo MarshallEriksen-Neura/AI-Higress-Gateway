@@ -64,6 +64,11 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
         description="SQLAlchemy database URL, e.g. postgresql+psycopg://user:pass@host:port/db",
     )
+    auto_apply_db_migrations: bool = Field(
+        True,
+        alias="AUTO_APPLY_DB_MIGRATIONS",
+        description="进程启动时自动执行 Alembic 升级，确保 schema 与代码一致。",
+    )
 
     # Celery task queue configuration (defaults assume local Redis; override in .env for Docker/prod).
     celery_broker_url: str = Field(
@@ -94,11 +99,28 @@ class Settings(BaseSettings):
         description="定时检测厂商健康状态的间隔（秒）",
         ge=10,
     )
+    provider_audit_auto_probe_interval_seconds: int = Field(
+        1800,
+        alias="PROVIDER_AUDIT_AUTO_PROBE_INTERVAL_SECONDS",
+        description="待审核 Provider 自动探针间隔（秒）",
+        ge=60,
+    )
+    provider_audit_cron_interval_seconds: int = Field(
+        3600,
+        alias="PROVIDER_AUDIT_CRON_INTERVAL_SECONDS",
+        description="上线 Provider 巡检间隔（秒）",
+        ge=120,
+    )
     provider_health_cache_ttl_seconds: int = Field(
         300,
         alias="PROVIDER_HEALTH_CACHE_TTL_SECONDS",
         description="厂商健康状态写入 Redis 时的缓存 TTL（秒）",
         ge=30,
+    )
+    probe_prompt: str = Field(
+        "请回答一个简单问题用于健康检查。",
+        alias="PROBE_PROMPT",
+        description="探针测试默认使用的提示词，可在系统管理页覆盖",
     )
 
     # API Key 健康巡检与异常禁用
@@ -268,6 +290,33 @@ class Settings(BaseSettings):
     )
     mask_origin: str | None = Field(None, alias="MASK_ORIGIN")
     mask_referer: str | None = Field(None, alias="MASK_REFERER")
+
+    # Content moderation / redaction
+    enable_content_moderation: bool = Field(
+        True,
+        alias="ENABLE_CONTENT_MODERATION",
+        description="是否启用请求/响应的敏感信息检测与脱敏流水线",
+    )
+    content_moderation_action: str = Field(
+        "mask",
+        alias="CONTENT_MODERATION_ACTION",
+        description="内容审核策略：log/mask/block",
+    )
+    content_moderation_mask_token: str = Field(
+        "***REDACTED***",
+        alias="CONTENT_MODERATION_MASK_TOKEN",
+        description="敏感信息打码时使用的占位符",
+    )
+    content_moderation_mask_response: bool = Field(
+        True,
+        alias="CONTENT_MODERATION_MASK_RESPONSE",
+        description="是否对返回给调用方的响应内容也做打码",
+    )
+    content_moderation_mask_stream: bool = Field(
+        True,
+        alias="CONTENT_MODERATION_MASK_STREAM",
+        description="是否在流式响应中对敏感片段做打码（若 action=mask）",
+    )
 
     # Application log level for our apiproxy logger.
     # Can be overridden via LOG_LEVEL env var, e.g. "DEBUG" while debugging.

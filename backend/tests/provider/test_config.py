@@ -48,8 +48,10 @@ def _build_provider(
 def test_load_provider_configs_reads_from_db(monkeypatch):
     provider = _build_provider()
 
-    def _fake_loader(session):
+    def _fake_loader(session, *, user_id=None, is_superuser=False):
         assert session == "fake-session"
+        assert user_id is None
+        assert is_superuser is False
         return [provider]
 
     monkeypatch.setattr("app.provider.config._load_providers_from_db", _fake_loader)
@@ -72,7 +74,9 @@ def test_load_provider_configs_reads_from_db(monkeypatch):
 def test_aggregator_provider_type_is_preserved(monkeypatch):
     provider = _build_provider(provider_type="aggregator")
 
-    def _fake_loader(session):
+    def _fake_loader(session, **kwargs):
+        assert kwargs.get("user_id") is None
+        assert kwargs.get("is_superuser") is False
         return [provider]
 
     monkeypatch.setattr("app.provider.config._load_providers_from_db", _fake_loader)
@@ -85,7 +89,8 @@ def test_invalid_provider_type_defaults_to_native(monkeypatch):
     provider = _build_provider()
     provider.provider_type = "invalid"
 
-    def _fake_loader(session):
+    def _fake_loader(session, **kwargs):
+        assert kwargs.get("user_id") is None
         return [provider]
 
     monkeypatch.setattr("app.provider.config._load_providers_from_db", _fake_loader)
@@ -97,7 +102,7 @@ def test_invalid_provider_type_defaults_to_native(monkeypatch):
 def test_provider_without_active_keys_is_skipped(monkeypatch):
     inactive = _build_provider(status="disabled")
 
-    def _fake_loader(session):
+    def _fake_loader(session, **kwargs):
         return [inactive]
 
     monkeypatch.setattr("app.provider.config._load_providers_from_db", _fake_loader)

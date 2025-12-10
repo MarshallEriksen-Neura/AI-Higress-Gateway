@@ -18,7 +18,7 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useErrorDisplay } from "@/lib/errors";
 import { ProviderPreset } from "@/http/provider-preset";
-import { CreatePrivateProviderRequest, privateProviderService, ApiStyle, SdkVendor } from "@/http/private-provider";
+import { CreatePrivateProviderRequest, ApiStyle, SdkVendor } from "@/http/private-provider";
 import { PresetSelector } from "./preset-selector";
 import { BasicProviderConfig } from "./basic-provider-config";
 import { AdvancedProviderConfig } from "./advanced-provider-config";
@@ -198,6 +198,41 @@ const providerFormDefaults: ProviderFormValues = {
     apiKey: "",
 };
 
+const buildFormValuesFromProvider = (provider: any): ProviderFormValues => ({
+    presetId: provider?.preset_id || "",
+    name: provider?.name || "",
+    providerType: provider?.provider_type || "native",
+    transport: provider?.transport || "http",
+    sdkVendor: provider?.sdk_vendor || "",
+    baseUrl: provider?.base_url || "",
+    modelsPath: provider?.models_path || "/v1/models",
+    messagesPath: provider?.messages_path || "",
+    chatCompletionsPath: provider?.chat_completions_path || "/v1/chat/completions",
+    responsesPath: provider?.responses_path || "",
+    weight:
+        provider?.weight !== undefined && provider?.weight !== null
+            ? String(provider.weight)
+            : providerFormDefaults.weight,
+    maxQps:
+        provider?.max_qps !== undefined && provider?.max_qps !== null
+            ? String(provider.max_qps)
+            : providerFormDefaults.maxQps,
+    region: provider?.region || "",
+    costInput:
+        provider?.cost_input !== undefined && provider?.cost_input !== null
+            ? String(provider.cost_input)
+            : providerFormDefaults.costInput,
+    costOutput:
+        provider?.cost_output !== undefined && provider?.cost_output !== null
+            ? String(provider.cost_output)
+            : providerFormDefaults.costOutput,
+    retryableStatusCodes: provider?.retryable_status_codes || [],
+    customHeaders: provider?.custom_headers || {},
+    staticModels: provider?.static_models || [],
+    supportedApiStyles: provider?.supported_api_styles || [],
+    apiKey: provider?.api_keys?.[0]?.key || provider?.api_key || "",
+});
+
 interface ProviderFormEnhancedProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
@@ -222,6 +257,8 @@ export function ProviderFormEnhanced({
     const [selectedPreset, setSelectedPreset] = useState<ProviderPreset | null>(null);
     const [overriddenFields, setOverriddenFields] = useState<Set<string>>(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editingProviderDetail, setEditingProviderDetail] = useState<any | null>(null);
+    const [isLoadingEditingProvider, setIsLoadingEditingProvider] = useState(false);
 
     const form = useForm<ProviderFormValues>({
         resolver: zodResolver(providerFormSchema),
@@ -232,35 +269,63 @@ export function ProviderFormEnhanced({
     const transport = form.watch("transport");
     const isSdkTransport = transport === "sdk";
 
-    // 当编辑提供商时，填充表单
+    // 编辑模式下拉取最新配置
     useEffect(() => {
-        if (editingProvider) {
-            form.reset({
-                presetId: "",
-                name: editingProvider.name || "",
-                providerType: editingProvider.provider_type || "native",
-                transport: editingProvider.transport || "http",
-                sdkVendor: editingProvider.sdk_vendor || "",
-                baseUrl: editingProvider.base_url || "",
-                modelsPath: editingProvider.models_path || "/v1/models",
-                messagesPath: editingProvider.messages_path || "",
-                chatCompletionsPath: editingProvider.chat_completions_path || "/v1/chat/completions",
-                responsesPath: editingProvider.responses_path || "",
-                weight: String(editingProvider.weight || "1"),
-                maxQps: String(editingProvider.max_qps || ""),
-                region: editingProvider.region || "",
-                costInput: String(editingProvider.cost_input || ""),
-                costOutput: String(editingProvider.cost_output || ""),
-                retryableStatusCodes: editingProvider.retryable_status_codes || [],
-                customHeaders: editingProvider.custom_headers || {},
-                staticModels: editingProvider.static_models || [],
-                supportedApiStyles: editingProvider.supported_api_styles || [],
-                apiKey: editingProvider.api_keys?.[0]?.key || "",
-            });
-        } else if (open) {
-            form.reset(providerFormDefaults);
+        let cancelled = false;
+
+        if (!editingProvider || !open) {
+            setEditingProviderDetail(null);
+            setIsLoadingEditingProvider(false);
+            return;
         }
-    }, [editingProvider, form, open]);
+
+        setEditingProviderDetail(null);
+        setIsLoadingEditingProvider(true);
+
+        const fetchProviderDetail = async () => {
+            try {
+                const { providerService } = await import("@/http/provider");
+                const detail = await providerService.getProvider(editingProvider.provider_id);
+                if (!cancelled) {
+                    setEditingProviderDetail(detail);
+                }
+            } catch (error) {
+                if (!cancelled) {
+                    showError(error, { context: "加载 Provider 详情" });
+                }
+            } finally {
+                if (!cancelled) {
+                    setIsLoadingEditingProvider(false);
+                }
+            }
+        };
+
+        fetchProviderDetail();
+
+        return () => {
+            cancelled = true;
+        };
+    }, [editingProvider, open, showError]);
+
+    // 根据当前模式回填表单
+    useEffect(() => {
+        if (!open) {
+            return;
+        }
+
+        const sourceData = editingProviderDetail || editingProvider;
+
+        if (sourceData) {
+            form.reset(buildFormValuesFromProvider(sourceData));
+            setOverriddenFields(new Set());
+            if (editingProvider) {
+                setSelectedPreset(null);
+            }
+        } else {
+            form.reset(providerFormDefaults);
+            setOverriddenFields(new Set());
+        }
+    }, [editingProviderDetail, editingProvider, form, open]);
 
     // 当选择预设时，填充表单
     useEffect(() => {
@@ -439,31 +504,43 @@ export function ProviderFormEnhanced({
 
                 <Form {...form}>
                     <form onSubmit={form.handleSubmit(handleFormSubmit)} className="space-y-6 py-4">
-                        {/* 预设选择器 */}
-                        <PresetSelector
-                            selectedPresetId={selectedPreset?.preset_id || null}
-                            onPresetSelect={setSelectedPreset}
-                            disabled={isSubmitting}
-                        />
+                        <fieldset
+                            disabled={Boolean(editingProvider && isLoadingEditingProvider)}
+                            aria-busy={editingProvider ? isLoadingEditingProvider : undefined}
+                            className="space-y-6"
+                        >
+                            {/* 预设选择器 */}
+                            <PresetSelector
+                                selectedPresetId={selectedPreset?.preset_id || null}
+                                onPresetSelect={setSelectedPreset}
+                                disabled={isSubmitting}
+                            />
 
-                        {/* 基础配置 */}
-                        <BasicProviderConfig
-                            form={form}
-                            isFieldOverridden={isFieldOverridden}
-                            markFieldAsOverridden={markFieldAsOverridden}
-                            isSdkTransport={isSdkTransport}
-                            sdkVendorOptions={sdkVendors}
-                            sdkVendorsLoading={sdkVendorsLoading}
-                        />
+                            {editingProvider && isLoadingEditingProvider && (
+                                <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                                    正在加载原始配置...
+                                </div>
+                            )}
 
-                        {/* 高级配置（可折叠） */}
-                        <AdvancedProviderConfig
-                            form={form}
-                            isFieldOverridden={isFieldOverridden}
-                            markFieldAsOverridden={markFieldAsOverridden}
-                            showAdvanced={showAdvanced}
-                            onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
-                        />
+                            {/* 基础配置 */}
+                            <BasicProviderConfig
+                                form={form}
+                                isFieldOverridden={isFieldOverridden}
+                                markFieldAsOverridden={markFieldAsOverridden}
+                                isSdkTransport={isSdkTransport}
+                                sdkVendorOptions={sdkVendors}
+                                sdkVendorsLoading={sdkVendorsLoading}
+                            />
+
+                            {/* 高级配置（可折叠） */}
+                            <AdvancedProviderConfig
+                                form={form}
+                                isFieldOverridden={isFieldOverridden}
+                                markFieldAsOverridden={markFieldAsOverridden}
+                                showAdvanced={showAdvanced}
+                                onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+                            />
+                        </fieldset>
 
                         <DialogFooter>
                             <Button
@@ -474,8 +551,21 @@ export function ProviderFormEnhanced({
                             >
                                 取消
                             </Button>
-                            <Button type="submit" disabled={isSubmitting}>
-                                {isSubmitting ? (editingProvider ? "更新中..." : "创建中...") : (editingProvider ? "更新 Provider" : "创建 Provider")}
+                            <Button
+                                type="submit"
+                                disabled={
+                                    isSubmitting || Boolean(editingProvider && isLoadingEditingProvider)
+                                }
+                            >
+                                {isSubmitting
+                                    ? editingProvider
+                                        ? "更新中..."
+                                        : "创建中..."
+                                    : editingProvider
+                                        ? isLoadingEditingProvider
+                                            ? "等待配置加载..."
+                                            : "更新 Provider"
+                                        : "创建 Provider"}
                             </Button>
                         </DialogFooter>
                     </form>

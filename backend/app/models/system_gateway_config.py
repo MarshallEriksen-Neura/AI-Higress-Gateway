@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Text
 
 from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
 
@@ -22,7 +22,7 @@ class GatewayConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     max_concurrent_requests = Column(Integer, nullable=False)
     request_timeout_ms = Column(Integer, nullable=False)
     cache_ttl_seconds = Column(Integer, nullable=False)
+    probe_prompt = Column(Text, nullable=True)
 
 
 __all__ = ["GatewayConfig"]
-

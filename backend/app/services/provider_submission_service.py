@@ -128,6 +128,8 @@ def approve_submission(
     submission_id: UUID,
     reviewer_id: UUID,
     review_notes: str | None = None,
+    status: str = "approved",
+    limit_qps: int | None = None,
 ) -> Provider:
     """审核通过一个提交并创建对应的公共 Provider。
 
@@ -145,6 +147,9 @@ def approve_submission(
         provider_type=submission.provider_type or "native",
         weight=1.0,
         visibility="public",
+        audit_status=status or "approved",
+        operation_status="active",
+        max_qps=limit_qps,
     )
     session.add(provider)
     session.flush()  # ensure provider.id
@@ -162,7 +167,7 @@ def approve_submission(
 
     # 关键：保存 Provider 关联到 Submission，用于后续取消时删除
     submission.approved_provider_uuid = provider.id
-    submission.approval_status = "approved"
+    submission.approval_status = status or "approved"
     submission.reviewed_by = reviewer_id
     submission.review_notes = review_notes
     submission.reviewed_at = datetime.now(timezone.utc)

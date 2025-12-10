@@ -76,6 +76,65 @@ export function ProvidersTableEnhanced({
     );
   };
 
+  const renderProbeBadge = (provider: Provider) => {
+    const enabled = provider.probe_enabled !== false;
+    const interval = provider.probe_interval_seconds;
+    if (!enabled) {
+      return <Badge variant="secondary">{t("providers.probe_off")}</Badge>;
+    }
+    if (interval) {
+      const minutes = Math.max(1, Math.round(interval / 60));
+      return (
+        <Badge variant="outline">
+          {t("providers.probe_on_with_interval", { minutes })}
+        </Badge>
+      );
+    }
+    return <Badge variant="outline">{t("providers.probe_on")}</Badge>;
+  };
+
+  const renderLatestTest = (provider: Provider) => {
+    const latest = provider.latest_test_result;
+    if (!latest) {
+      return <span className="text-xs text-muted-foreground">{t("providers.latest_test_none")}</span>;
+    }
+    return (
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center gap-2">
+          <Badge variant={latest.success ? "default" : "destructive"}>
+            {latest.success ? t("providers.latest_test_success") : t("providers.latest_test_failed")}
+          </Badge>
+          {latest.latency_ms != null && (
+            <span className="text-xs text-muted-foreground">{latest.latency_ms} ms</span>
+          )}
+        </div>
+        <div className="text-xs text-muted-foreground truncate">
+          {latest.summary || "--"}
+        </div>
+        <div className="text-[11px] text-muted-foreground">
+          {formatRelativeTime(latest.finished_at || latest.created_at, language)}
+        </div>
+      </div>
+    );
+  };
+
+  const renderProbeResult = (provider: Provider) => {
+    const latest = provider.latest_test_result;
+    if (!latest) {
+      return <span className="text-xs text-muted-foreground">{t("providers.latest_test_none")}</span>;
+    }
+    return (
+      <div className="flex flex-col gap-1">
+        <Badge variant={latest.success ? "default" : "destructive"}>
+          {latest.success ? t("providers.probe_result_success") : t("providers.probe_result_failed")}
+        </Badge>
+        <div className="text-xs text-muted-foreground truncate">
+          {latest.error_code || latest.summary || "--"}
+        </div>
+      </div>
+    );
+  };
+
   const renderProviderRow = (provider: Provider) => (
     <TableRow key={provider.id}>
       <TableCell className="px-4 py-3 text-sm font-mono">
@@ -135,6 +194,15 @@ export function ProvidersTableEnhanced({
           {provider.status === 'healthy' ? t("providers.status_healthy") :
            provider.status === 'degraded' ? t("providers.status_degraded") : t("providers.status_unhealthy")}
         </Badge>
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm">
+        {renderProbeBadge(provider)}
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm">
+        {renderProbeResult(provider)}
+      </TableCell>
+      <TableCell className="px-4 py-3 text-sm">
+        {renderLatestTest(provider)}
       </TableCell>
       <TableCell className="px-4 py-3 text-sm text-muted-foreground">
         {formatRelativeTime(provider.updated_at, language)}
@@ -274,6 +342,15 @@ export function ProvidersTableEnhanced({
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
               {t("providers.table_column_status")}
+            </TableHead>
+            <TableHead className="px-4 py-3 text-left text-sm font-medium">
+              {t("providers.column_probe")}
+            </TableHead>
+            <TableHead className="px-4 py-3 text-left text-sm font-medium">
+              {t("providers.column_probe_result")}
+            </TableHead>
+            <TableHead className="px-4 py-3 text-left text-sm font-medium">
+              {t("providers.column_latest_test")}
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
               {t("providers.column_updated_at")}

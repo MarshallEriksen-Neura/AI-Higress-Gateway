@@ -2,21 +2,41 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Query
+from fastapi import APIRouter, Body, Depends, Path, Query
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
-from app.errors import forbidden, not_found
+from app.errors import bad_request, forbidden, not_found
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
 from app.models import Provider, ProviderModel
+from app.provider.config import get_provider_config
 from app.schemas import (
     AdminProviderResponse,
     AdminProvidersResponse,
     ModelPricingUpdateRequest,
     ProviderModelPricingResponse,
+    ProviderAuditActionRequest,
+    ProviderTestRequest,
+    ProviderTestResult,
+    ProviderAuditLogResponse,
+    ProviderProbeConfigUpdate,
+    ProviderModelValidationResult,
     ProviderVisibilityUpdateRequest,
 )
+from app.services.provider_audit_service import (
+    ProviderAuditError,
+    ProviderNotFoundError,
+    approve_provider,
+    get_latest_test_record,
+    list_audit_logs,
+    list_test_records,
+    reject_provider,
+    trigger_provider_test,
+    update_operation_status,
+    _get_provider,
+)
+from app.services.provider_validation_service import ProviderValidationService
 
 router = APIRouter(
     tags=["admin-providers"],
@@ -27,6 +47,69 @@ router = APIRouter(
 def _ensure_admin(current_user: AuthenticatedUser) -> None:
     if not current_user.is_superuser:
         raise forbidden("需要管理员权限")
+
+
+def _to_test_result(provider: Provider, record) -> ProviderTestResult | None:
+    if record is None:
+        return None
+    return ProviderTestResult(
+        id=record.id,
+        provider_id=provider.provider_id,
+        mode=record.mode,
+        success=record.success,
+        summary=record.summary,
+        probe_results=record.probe_results,
+        latency_ms=record.latency_ms,
+        error_code=record.error_code,
+        cost=record.cost,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
+    )
+
+
+def _build_admin_provider_response(
+    db: Session,
+    provider: Provider,
+) -> AdminProviderResponse:
+    latest_test = get_latest_test_record(db, provider.id)
+    return AdminProviderResponse(
+        id=provider.id,
+        provider_id=provider.provider_id,
+        name=provider.name,
+        base_url=provider.base_url,
+        provider_type=provider.provider_type,
+        transport=provider.transport,
+        sdk_vendor=provider.sdk_vendor,
+        preset_id=provider.preset_id,
+        visibility=provider.visibility,
+        owner_id=provider.owner_id,
+        status=provider.status,
+        audit_status=provider.audit_status,
+        operation_status=provider.operation_status,
+        latest_test_result=_to_test_result(provider, latest_test),
+        probe_enabled=provider.probe_enabled,
+        probe_interval_seconds=provider.probe_interval_seconds,
+        probe_model=provider.probe_model,
+        last_check=provider.last_check,
+        created_at=provider.created_at,
+        updated_at=provider.updated_at,
+    )
+
+
+def _extract_static_model_ids(provider: Provider) -> list[str]:
+    """从 Provider 的 static_models 或 models 关系中提取模型 ID 列表。"""
+    model_ids: list[str] = []
+    if provider.static_models:
+        for item in provider.static_models:
+            if isinstance(item, dict) and item.get("id"):
+                model_ids.append(str(item["id"]))
+            elif isinstance(item, str):
+                model_ids.append(item)
+    if not model_ids and provider.models:
+        model_ids = [m.model_id for m in provider.models if m.model_id]
+    return model_ids
 
 
 @router.get(
@@ -55,7 +138,7 @@ def admin_list_providers_endpoint(
         stmt = stmt.where(Provider.owner_id == owner_id)
     providers = list(db.execute(stmt).scalars().all())
     return AdminProvidersResponse(
-        providers=[AdminProviderResponse.model_validate(p) for p in providers],
+        providers=[_build_admin_provider_response(db, p) for p in providers],
         total=len(providers),
     )
 
@@ -84,7 +167,356 @@ def update_provider_visibility_endpoint(
     db.add(provider)
     db.commit()
     db.refresh(provider)
-    return AdminProviderResponse.model_validate(provider)
+    return _build_admin_provider_response(db, provider)
+
+
+@router.put(
+    "/admin/providers/{provider_id}/probe-config",
+    response_model=AdminProviderResponse,
+)
+def update_provider_probe_config_endpoint(
+    provider_id: str,
+    payload: ProviderProbeConfigUpdate,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """更新 Provider 的探针配置（启用开关/自定义频率/指定模型）。"""
+
+    _ensure_admin(current_user)
+    stmt: Select[tuple[Provider]] = select(Provider).where(
+        Provider.provider_id == provider_id
+    )
+    provider = db.execute(stmt).scalars().first()
+    if provider is None:
+        raise not_found(f"Provider '{provider_id}' not found")
+
+    if payload.probe_enabled is not None:
+        provider.probe_enabled = payload.probe_enabled
+    if payload.probe_interval_seconds is not None:
+        provider.probe_interval_seconds = payload.probe_interval_seconds
+    if payload.probe_model is not None:
+        provider.probe_model = payload.probe_model
+
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+    return _build_admin_provider_response(db, provider)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/test",
+    response_model=ProviderTestResult,
+)
+def admin_test_provider_endpoint(
+    provider_id: str,
+    payload: ProviderTestRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> ProviderTestResult:
+    """管理员触发一次 Provider 探针测试。"""
+
+    _ensure_admin(current_user)
+    request = payload or ProviderTestRequest()
+    try:
+        record = trigger_provider_test(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            mode=request.mode,
+            remark=request.remark,
+            custom_input=request.input_text,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+
+    provider = db.execute(
+        select(Provider).where(Provider.provider_id == provider_id)
+    ).scalars().first()
+    if provider is None:
+        # 理论上不应发生（trigger_provider_test 已校验），保护性返回 404
+        raise not_found(f"Provider '{provider_id}' not found")
+    return _to_test_result(provider, record)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/validate-models",
+    response_model=list[ProviderModelValidationResult],
+)
+async def validate_provider_models_endpoint(
+    provider_id: str,
+    limit: int = Query(
+        default=1,
+        ge=1,
+        le=5,
+        description="抽样验证的模型数量，默认 1，最多 5",
+    ),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> list[ProviderModelValidationResult]:
+    """对静态模型执行一次极小的对话调用，验证模型是否可用。"""
+
+    _ensure_admin(current_user)
+    provider = db.execute(
+        select(Provider).where(Provider.provider_id == provider_id)
+    ).scalars().first()
+    if provider is None:
+        raise not_found(f"Provider '{provider_id}' not found")
+
+    cfg = get_provider_config(provider_id)
+    if cfg is None:
+        raise bad_request("未找到可用的 Provider 配置（缺少 API Key 或配置不完整）")
+    api_keys = cfg.get_api_keys()
+    if not api_keys:
+        raise bad_request("未配置 API Key，无法验证模型")
+
+    model_ids = _extract_static_model_ids(provider)
+    if not model_ids:
+        raise bad_request("未找到可验证的静态模型")
+
+    validator = ProviderValidationService()
+    results = await validator.validate_models_via_chat(
+        str(cfg.base_url),
+        api_keys[0].key,
+        model_ids,
+        path=cfg.chat_completions_path or cfg.messages_path or "/v1/chat/completions",
+        sample_size=limit,
+        timeout=5.0,
+        sample_prompt="ping",
+    )
+
+    metadata = provider.metadata_json or {}
+    metadata["model_validation"] = [r.model_dump() for r in results]
+    provider.metadata_json = metadata
+    db.add(provider)
+    db.commit()
+    db.refresh(provider)
+
+    return results
+
+
+@router.get(
+    "/admin/providers/{provider_id}/tests",
+    response_model=list[ProviderTestResult],
+)
+def admin_list_provider_tests_endpoint(
+    provider_id: str,
+    limit: int = Query(20, ge=1, le=100, description="返回最近的测试记录条数"),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> list[ProviderTestResult]:
+    """获取 Provider 最近的测试记录。"""
+
+    _ensure_admin(current_user)
+    try:
+        records = list_test_records(db, provider_id, limit=limit)
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    provider = db.execute(
+        select(Provider).where(Provider.provider_id == provider_id)
+    ).scalars().first()
+    if provider is None:
+        raise not_found(f"Provider '{provider_id}' not found")
+    return [_to_test_result(provider, r) for r in records if r is not None]
+
+
+@router.get(
+    "/admin/providers/{provider_id}/audit-logs",
+    response_model=list[ProviderAuditLogResponse],
+)
+def admin_list_provider_audit_logs_endpoint(
+    provider_id: str,
+    limit: int = Query(50, ge=1, le=200, description="返回最近的审核日志条数"),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> list[ProviderAuditLogResponse]:
+    """获取 Provider 的审核与运营日志。"""
+
+    _ensure_admin(current_user)
+    try:
+        logs = list_audit_logs(db, provider_id, limit=limit)
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    return [
+        ProviderAuditLogResponse(
+            id=log.id,
+            provider_id=provider_id,
+            action=log.action,
+            from_status=log.from_status,
+            to_status=log.to_status,
+            operation_from_status=log.operation_from_status,
+            operation_to_status=log.operation_to_status,
+            operator_id=log.operator_id,
+            remark=log.remark,
+            test_record_id=log.test_record_uuid,
+            created_at=log.created_at,
+            updated_at=log.updated_at,
+        )
+        for log in logs
+    ]
+
+
+@router.post(
+    "/admin/providers/{provider_id}/approve",
+    response_model=AdminProviderResponse,
+)
+def admin_approve_provider_endpoint(
+    provider_id: str,
+    payload: ProviderAuditActionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """审核通过 Provider。"""
+
+    _ensure_admin(current_user)
+    try:
+        provider = approve_provider(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            remark=payload.remark if payload else None,
+            limited=False,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    return _build_admin_provider_response(db, provider)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/approve-limited",
+    response_model=AdminProviderResponse,
+)
+def admin_approve_limited_provider_endpoint(
+    provider_id: str,
+    payload: ProviderAuditActionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """审核限速通过 Provider。"""
+
+    _ensure_admin(current_user)
+    try:
+        provider = approve_provider(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            remark=payload.remark if payload else None,
+            limited=True,
+            limit_qps=payload.limit_qps if payload else None,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    return _build_admin_provider_response(db, provider)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/reject",
+    response_model=AdminProviderResponse,
+)
+def admin_reject_provider_endpoint(
+    provider_id: str,
+    payload: ProviderAuditActionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """拒绝 Provider。"""
+
+    _ensure_admin(current_user)
+    if payload is None or not payload.remark:
+        raise bad_request("拒绝操作必须填写原因")
+    try:
+        provider = reject_provider(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            remark=payload.remark,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    return _build_admin_provider_response(db, provider)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/pause",
+    response_model=AdminProviderResponse,
+)
+def admin_pause_provider_endpoint(
+    provider_id: str,
+    payload: ProviderAuditActionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """暂停 Provider 运营状态。"""
+
+    _ensure_admin(current_user)
+    try:
+        provider = update_operation_status(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            "paused",
+            remark=payload.remark if payload else None,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    except ProviderAuditError as exc:
+        raise bad_request(str(exc))
+    return _build_admin_provider_response(db, provider)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/resume",
+    response_model=AdminProviderResponse,
+)
+def admin_resume_provider_endpoint(
+    provider_id: str,
+    payload: ProviderAuditActionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """恢复 Provider 运营状态到 active。"""
+
+    _ensure_admin(current_user)
+    try:
+        provider = update_operation_status(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            "active",
+            remark=payload.remark if payload else None,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    except ProviderAuditError as exc:
+        raise bad_request(str(exc))
+    return _build_admin_provider_response(db, provider)
+
+
+@router.post(
+    "/admin/providers/{provider_id}/offline",
+    response_model=AdminProviderResponse,
+)
+def admin_offline_provider_endpoint(
+    provider_id: str,
+    payload: ProviderAuditActionRequest | None = Body(default=None),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AdminProviderResponse:
+    """下线 Provider，标记运营状态为 offline。"""
+
+    _ensure_admin(current_user)
+    try:
+        provider = update_operation_status(
+            db,
+            provider_id,
+            UUID(current_user.id) if current_user.id else None,
+            "offline",
+            remark=payload.remark if payload else None,
+        )
+    except ProviderNotFoundError:
+        raise not_found(f"Provider '{provider_id}' not found")
+    except ProviderAuditError as exc:
+        raise bad_request(str(exc))
+    return _build_admin_provider_response(db, provider)
 
 
 @router.get(

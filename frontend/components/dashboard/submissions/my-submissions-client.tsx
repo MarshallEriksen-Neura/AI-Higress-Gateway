@@ -81,7 +81,9 @@ export function MySubmissionsClient() {
     return {
       total: submissions.length,
       pending: submissions.filter((s) => s.approval_status === "pending").length,
+      testing: submissions.filter((s) => s.approval_status === "testing").length,
       approved: submissions.filter((s) => s.approval_status === "approved").length,
+      approvedLimited: submissions.filter((s) => s.approval_status === "approved_limited").length,
       rejected: submissions.filter((s) => s.approval_status === "rejected").length,
     };
   }, [submissions]);
@@ -142,7 +144,7 @@ export function MySubmissionsClient() {
       </div>
 
       {/* 统计卡片 */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
         <Card>
           <CardHeader className="pb-3">
             <CardDescription>{t("submissions.stats_total")}</CardDescription>
@@ -157,8 +159,20 @@ export function MySubmissionsClient() {
         </Card>
         <Card>
           <CardHeader className="pb-3">
+            <CardDescription>{t("submissions.stats_testing")}</CardDescription>
+            <CardTitle className="text-3xl">{stats.testing}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
             <CardDescription>{t("submissions.stats_approved")}</CardDescription>
             <CardTitle className="text-3xl">{stats.approved}</CardTitle>
+          </CardHeader>
+        </Card>
+        <Card>
+          <CardHeader className="pb-3">
+            <CardDescription>{t("submissions.stats_approved_limited")}</CardDescription>
+            <CardTitle className="text-3xl">{stats.approvedLimited}</CardTitle>
           </CardHeader>
         </Card>
         <Card>
@@ -181,7 +195,9 @@ export function MySubmissionsClient() {
           <SelectContent>
             <SelectItem value="all">{t("submissions.filter_all")}</SelectItem>
             <SelectItem value="pending">{t("submissions.filter_pending")}</SelectItem>
+            <SelectItem value="testing">{t("submissions.filter_testing")}</SelectItem>
             <SelectItem value="approved">{t("submissions.filter_approved")}</SelectItem>
+            <SelectItem value="approved_limited">{t("submissions.filter_approved_limited")}</SelectItem>
             <SelectItem value="rejected">{t("submissions.filter_rejected")}</SelectItem>
           </SelectContent>
         </Select>

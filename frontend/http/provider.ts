@@ -6,6 +6,8 @@ export type ProviderType = 'native' | 'aggregator';
 export type TransportType = 'http' | 'sdk';
 export type SdkVendor = string;
 export type ProviderStatus = 'healthy' | 'degraded' | 'down';
+export type ProviderAuditStatus = 'pending' | 'testing' | 'approved' | 'approved_limited' | 'rejected';
+export type ProviderOperationStatus = 'active' | 'paused' | 'offline';
 
 // API Key 接口
 export interface ProviderApiKey {
@@ -43,8 +45,66 @@ export interface Provider {
   static_models: any[] | null;
   shared_user_ids?: string[] | null;
   api_keys?: ProviderApiKey[];
+  audit_status?: ProviderAuditStatus;
+  operation_status?: ProviderOperationStatus;
+  latest_test_result?: ProviderTestResult | null;
+  probe_enabled?: boolean | null;
+  probe_interval_seconds?: number | null;
+  probe_model?: string | null;
+  last_check?: number | string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface ProviderTestRequest {
+  mode?: 'auto' | 'custom' | 'cron';
+  remark?: string | null;
+  input_text?: string | null;
+}
+
+export interface ProviderTestResult {
+  id: string;
+  provider_id: string;
+  mode: string;
+  success: boolean;
+  summary?: string | null;
+  probe_results?: any;
+  latency_ms?: number | null;
+  error_code?: string | null;
+  cost?: number | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProviderAuditLog {
+  id: string;
+  provider_id: string;
+  action: string;
+  from_status?: string | null;
+  to_status?: string | null;
+  operation_from_status?: string | null;
+  operation_to_status?: string | null;
+  operator_id?: string | null;
+  remark?: string | null;
+  test_record_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateProbeConfigRequest {
+  probe_enabled?: boolean;
+  probe_interval_seconds?: number | null;
+  probe_model?: string | null;
+}
+
+export interface ProviderModelValidationResult {
+  model_id: string;
+  success: boolean;
+  latency_ms?: number | null;
+  error_message?: string | null;
+  timestamp?: string | null;
 }
 
 // Provider 模型接口（来自 `/providers/{id}/models`）
@@ -377,6 +437,122 @@ export const providerService = {
    */
   getSdkVendors: async (): Promise<SDKVendorsResponse> => {
     const response = await httpClient.get('/providers/sdk-vendors');
+    return response.data;
+  },
+
+  /**
+   * 管理员触发 Provider 测试
+   */
+  adminTestProvider: async (
+    providerId: string,
+    payload?: ProviderTestRequest
+  ): Promise<ProviderTestResult> => {
+    const response = await httpClient.post(
+      `/admin/providers/${providerId}/test`,
+      payload ?? {}
+    );
+    return response.data;
+  },
+
+  /**
+   * 审核通过/限速通过 Provider
+   */
+  approveProvider: async (
+    providerId: string,
+    payload?: { remark?: string; limit_qps?: number | null; limited?: boolean }
+  ): Promise<Provider> => {
+    const path = payload?.limited ? "approve-limited" : "approve";
+    const { limited: _omitted, ...body } = payload ?? {};
+    const response = await httpClient.post(
+      `/admin/providers/${providerId}/${path}`,
+      body ?? {}
+    );
+    return response.data;
+  },
+
+  /**
+   * 审核拒绝 Provider（remark 必填）
+   */
+  rejectProvider: async (
+    providerId: string,
+    payload: { remark: string }
+  ): Promise<Provider> => {
+    const response = await httpClient.post(
+      `/admin/providers/${providerId}/reject`,
+      payload
+    );
+    return response.data;
+  },
+
+  /**
+   * 更新运营状态：暂停/恢复/下线
+   */
+  updateOperationStatus: async (
+    providerId: string,
+    action: 'pause' | 'resume' | 'offline',
+    payload?: { remark?: string | null }
+  ): Promise<Provider> => {
+    const response = await httpClient.post(
+      `/admin/providers/${providerId}/${action}`,
+      payload ?? {}
+    );
+    return response.data;
+  },
+
+  /**
+   * 管理员查看测试记录
+   */
+  getProviderTests: async (
+    providerId: string,
+    params?: { limit?: number }
+  ): Promise<ProviderTestResult[]> => {
+    const response = await httpClient.get(
+      `/admin/providers/${providerId}/tests`,
+      { params }
+    );
+    return response.data;
+  },
+
+  /**
+   * 管理员查看审核日志
+   */
+  getProviderAuditLogs: async (
+    providerId: string,
+    params?: { limit?: number }
+  ): Promise<ProviderAuditLog[]> => {
+    const response = await httpClient.get(
+      `/admin/providers/${providerId}/audit-logs`,
+      { params }
+    );
+    return response.data;
+  },
+
+  /**
+   * 更新探针配置（启停/频率/模型）
+   */
+  updateProbeConfig: async (
+    providerId: string,
+    payload: UpdateProbeConfigRequest
+  ): Promise<Provider> => {
+    const response = await httpClient.put(
+      `/admin/providers/${providerId}/probe-config`,
+      payload
+    );
+    return response.data;
+  },
+
+  /**
+   * 验证静态模型可用性（轻量 chat 调用）
+   */
+  validateProviderModels: async (
+    providerId: string,
+    params?: { limit?: number }
+  ): Promise<ProviderModelValidationResult[]> => {
+    const response = await httpClient.post(
+      `/admin/providers/${providerId}/validate-models`,
+      null,
+      { params }
+    );
     return response.data;
   },
 };
