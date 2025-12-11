@@ -19,18 +19,24 @@ function formatSuccessRate(rate: number): string {
 
 function getStatusKey(successRate: number, latencyP95Ms: number | null): string {
   const latency = latencyP95Ms ?? 0;
-  // 简单规则：高成功率且延迟较低视为“健康”，否则视为“性能下降”
+  // 简单规则：高成功率且延迟较低视为"健康"，否则视为"性能下降"
   if (successRate >= 0.98 && latency <= 800) {
     return "overview.status_healthy";
   }
   return "overview.status_degraded";
 }
 
-export function ActiveProviders() {
+import { OverviewTimeRange } from "@/lib/swr/use-overview-metrics";
+
+interface ActiveProvidersProps {
+  timeRange?: OverviewTimeRange;
+}
+
+export function ActiveProviders({ timeRange = "today" }: ActiveProvidersProps) {
   const { t } = useI18n();
-  // 概览页展示“今天”的活跃 Provider
+  // 根据传入的时间范围获取活跃 Provider 数据
   const { data, loading } = useActiveProvidersOverview({
-    time_range: "today",
+    time_range: timeRange,
   });
 
   const providers = useMemo(() => {

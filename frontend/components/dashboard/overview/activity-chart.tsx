@@ -1,5 +1,6 @@
 "use client";
 
+import { useI18n } from "@/lib/i18n-context";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -22,6 +23,8 @@ interface ActivityChartProps {
 }
 
 export function ActivityChart({ data }: ActivityChartProps) {
+  const { t } = useI18n();
+
   return (
     <div className="h-64">
       <ResponsiveContainer width="100%" height="100%">
@@ -45,13 +48,13 @@ export function ActivityChart({ data }: ActivityChartProps) {
             }}
             formatter={(value, name) => {
               if (name === "total") {
-                return [value, "Requests"];
+                return [value, t("chart.requests")];
               }
               if (name === "errors") {
-                return [value, "Errors"];
+                return [value, t("chart.errors")];
               }
               if (name === "successRate") {
-                return [`${(Number(value) * 100).toFixed(1)}%`, "Success"];
+                return [`${(Number(value) * 100).toFixed(1)}%`, t("chart.success_rate")];
               }
               return [value, name];
             }}

@@ -31,6 +31,14 @@ class CreditTransactionResponse(BaseModel):
     reason: str = Field(..., description="变动原因，如 usage / stream_estimate / admin_topup 等")
     description: str | None = None
     model_name: str | None = None
+    provider_id: str | None = Field(
+        default=None,
+        description="本次流水涉及的 Provider ID，用于前端做聚合统计",
+    )
+    provider_model_id: str | None = Field(
+        default=None,
+        description="Provider 侧的模型 ID（若可用）",
+    )
     input_tokens: int | None = None
     output_tokens: int | None = None
     total_tokens: int | None = None
@@ -107,6 +115,63 @@ class CreditAutoTopupBatchResponse(BaseModel):
     )
 
 
+class CreditConsumptionSummary(BaseModel):
+    """
+    仪表盘概览页使用的积分消耗概要信息。
+    """
+
+    time_range: str
+    start_at: datetime | None
+    end_at: datetime
+    spent_credits: int = Field(..., description="统计窗口内总消耗积分")
+    spent_credits_prev: int | None = Field(
+        None,
+        description="上一对比周期的积分消耗（若可用）",
+    )
+    transactions: int = Field(..., description="统计窗口内的消耗类流水数量")
+    avg_daily_spent: float = Field(
+        ...,
+        description="按窗口长度折算的日均消耗；无记录时为 0",
+    )
+    balance: int = Field(..., description="当前积分余额")
+    projected_days_left: float | None = Field(
+        None,
+        description="若保持当前日均消耗，预计剩余可用天数；日均为 0 时返回 null",
+    )
+
+
+class CreditProviderUsageItem(BaseModel):
+    provider_id: str
+    provider_name: str | None = None
+    total_spent: int = Field(..., description="该 Provider 对应的积分消耗")
+    transaction_count: int = Field(..., description="命中的流水条数")
+    percentage: float = Field(
+        ...,
+        description="相对于统计窗口总消耗的占比，范围 [0,1]",
+    )
+    last_transaction_at: datetime | None = Field(
+        None,
+        description="最近一次涉及该 Provider 的消费时间",
+    )
+
+
+class CreditProviderUsageResponse(BaseModel):
+    time_range: str
+    total_spent: int
+    items: List[CreditProviderUsageItem] = Field(default_factory=list)
+
+
+class CreditUsageTimeseriesPoint(BaseModel):
+    window_start: datetime
+    spent_credits: int
+
+
+class CreditUsageTimeseriesResponse(BaseModel):
+    time_range: str
+    bucket: str
+    points: List[CreditUsageTimeseriesPoint] = Field(default_factory=list)
+
+
 __all__ = [
     "CreditAccountResponse",
     "CreditTopupRequest",
@@ -115,4 +180,9 @@ __all__ = [
     "CreditAutoTopupConfigResponse",
     "CreditAutoTopupBatchRequest",
     "CreditAutoTopupBatchResponse",
+    "CreditConsumptionSummary",
+    "CreditProviderUsageItem",
+    "CreditProviderUsageResponse",
+    "CreditUsageTimeseriesPoint",
+    "CreditUsageTimeseriesResponse",
 ]

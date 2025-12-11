@@ -21,10 +21,16 @@ function formatTimeLabel(iso: string): string {
   return `${hours}:${minutes}`;
 }
 
-export function RecentActivity() {
+import { OverviewTimeRange } from "@/lib/swr/use-overview-metrics";
+
+interface RecentActivityProps {
+  timeRange?: OverviewTimeRange;
+}
+
+export function RecentActivity({ timeRange = "today" }: RecentActivityProps) {
   const { t } = useI18n();
   const { activity, loading } = useOverviewActivity({
-    time_range: "today",
+    time_range: timeRange,
   });
 
   const chartData = useMemo(() => {
@@ -85,13 +91,13 @@ export function RecentActivity() {
                   }}
                   formatter={(value, name) => {
                     if (name === "total") {
-                      return [value, "Requests"];
+                      return [value, t("chart.requests")];
                     }
                     if (name === "errors") {
-                      return [value, "Errors"];
+                      return [value, t("chart.errors")];
                     }
                     if (name === "successRate") {
-                      return [`${(Number(value) * 100).toFixed(1)}%`, "Success"];
+                      return [`${(Number(value) * 100).toFixed(1)}%`, t("chart.success_rate")];
                     }
                     return [value, name];
                   }}

@@ -192,3 +192,49 @@
   - timeseries：`metrics:overview:timeseries:{time_range}:{transport}:{is_stream}:{bucket}`
 - 缓存 miss 或 Redis 异常时，均回退到数据库聚合查询，不影响接口可用性。
 
+
+
+---
+
+## 4. 与积分消耗 API 的关系
+
+概览页同时使用 `/metrics/overview/*` 和 `/v1/credits/me/*` 两类 API：
+
+### 指标类 API（/metrics/overview/*)
+- 用于展示**运营指标**：请求量、成功率、活跃 Provider 等
+- 数据来源：`provider_routing_metrics_history` 表
+- 适用场景：整体系统健康度、性能趋势分析
+
+### 积分类 API（/v1/credits/me/*)
+- 用于展示**成本指标**：积分消耗、余额、预算等
+- 数据来源：`credit_transactions` 表
+- 适用场景：成本管理、预算告警、充值提醒
+
+### 前端集成示例
+
+```typescript
+// 同时获取运营指标和成本指标
+const { summary: metrics } = useOverviewMetrics({ timeRange: '7d' });
+const { consumption: credits } = useCreditConsumptionSummary({ timeRange: '7d' });
+
+// 在概览页顶部并排展示
+<div className="grid grid-cols-2 gap-4">
+  <MetricsCard data={metrics} />
+  <CreditCard data={credits} />
+</div>
+```
+
+---
+
+## 5. 前端 SWR Hook 映射表
+
+| Hook 名称 | API 端点 | 缓存策略 | 用途 |
+|---------|---------|--------|------|
+| `useOverviewMetrics` | `GET /metrics/overview/summary` | static (60s) | 整体指标汇总 |
+| `useActiveProviders` | `GET /metrics/overview/providers` | static (60s) | 活跃 Provider 列表 |
+| `useOverviewActivity` | `GET /metrics/overview/timeseries` | frequent (30s) | 近期活动时间序列 |
+| `useCreditConsumptionSummary` | `GET /v1/credits/me/consumption/summary` | static (60s) | 积分消耗汇总 |
+| `useCreditProviderConsumption` | `GET /v1/credits/me/consumption/providers` | static (60s) | Provider 维度消耗 |
+| `useCreditConsumptionTimeseries` | `GET /v1/credits/me/consumption/timeseries` | static (60s) | 积分消耗时间序列 |
+
+

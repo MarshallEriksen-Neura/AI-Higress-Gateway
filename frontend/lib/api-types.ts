@@ -114,6 +114,7 @@ export interface TransactionQueryParams {
   offset?: number;
   start_date?: string;
   end_date?: string;
+  reason?: string;
 }
 
 // ============= 厂商密钥相关 =============
@@ -398,4 +399,69 @@ export interface NotificationQueryParams {
   status?: 'all' | 'unread';
   limit?: number;
   offset?: number;
+}
+
+// ============= 仪表盘概览页相关 =============
+
+export interface CreditConsumptionSummary {
+  time_range: string;
+  total_consumption: number;
+  daily_average: number;
+  projected_days_left: number;
+  current_balance: number;
+  daily_limit?: number;
+  warning_threshold: number; // 预警阈值（天数）
+}
+
+export interface ProviderConsumption {
+  provider_id: string;
+  provider_name: string;
+  total_consumption: number;
+  request_count: number;
+  success_rate: number;
+  latency_p95_ms?: number;
+  percentage_of_total: number;
+}
+
+export interface SuccessRateTrend {
+  timestamp: string;
+  overall_success_rate: number;
+  provider_success_rates: {
+    provider_id: string;
+    success_rate: number;
+  }[];
+}
+
+export interface ActiveModel {
+  model_id: string;
+  model_name: string;
+  call_count: number;
+  success_rate: number;
+  failure_count?: number;
+}
+
+export interface OverviewEvent {
+  id: string;
+  event_type: 'rate_limit' | 'error' | 'warning' | 'info';
+  title: string;
+  description: string;
+  timestamp: string;
+  provider_id?: string;
+  model_id?: string;
+}
+
+export interface CreditConsumptionProvidersResponse {
+  time_range: string;
+  providers: ProviderConsumption[];
+  total_consumption: number;
+}
+
+export interface ActiveModelsResponse {
+  most_called: ActiveModel[];
+  most_failed: ActiveModel[];
+}
+
+export interface OverviewEventsResponse {
+  events: OverviewEvent[];
+  total_count: number;
 }

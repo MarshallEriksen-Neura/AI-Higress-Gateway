@@ -39,6 +39,27 @@ def _get_single_user(session: Session) -> User:
     return session.query(User).first()
 
 
+def _create_priced_provider_model(
+    session: Session,
+    *,
+    provider: Provider,
+    model_id: str,
+    pricing: dict[str, float],
+) -> ProviderModel:
+    model = ProviderModel(
+        provider_id=provider.id,
+        model_id=model_id,
+        family="test-family",
+        display_name=f"{model_id}-display",
+        context_length=8192,
+        capabilities=["chat"],
+        pricing=pricing,
+    )
+    session.add(model)
+    session.commit()
+    return model
+
+
 def test_credit_endpoints_basic_flow(monkeypatch):
     """
     验证积分相关 REST 接口的基本链路：
@@ -153,7 +174,14 @@ def test_provider_billing_factor_affects_cost(monkeypatch):
         account.balance = 10_000
         session.commit()
 
-        payload = {"usage": {"total_tokens": 1000}}
+        _create_priced_provider_model(
+            session,
+            provider=provider,
+            model_id="test-model",
+            pricing={"input": 1.0, "output": 1.0},
+        )
+
+        payload = {"usage": {"prompt_tokens": 1000, "completion_tokens": 1000}}
 
         # baseline：billing_factor=1.0
         before = account.balance
@@ -271,6 +299,163 @@ def test_provider_model_pricing_overrides_legacy_pricing(monkeypatch):
         assert cost == 15
 
 
+def test_credit_consumption_api_and_provider_breakdown(monkeypatch):
+    """
+    新增的积分消耗分析接口应返回汇总、Provider 排行以及时间序列数据。
+    """
+    app = create_app()
+    SessionLocal = install_inmemory_db(app)
+    with SessionLocal() as session:
+        user = _get_single_user(session)
+        user_id = user.id
+        headers = jwt_auth_headers(str(user_id))
+
+        provider_a = Provider(
+            provider_id="provider-a",
+            name="Provider A",
+            base_url="https://a.local",
+            transport="http",
+        )
+        provider_b = Provider(
+            provider_id="provider-b",
+            name="Provider B",
+            base_url="https://b.local",
+            transport="http",
+        )
+        session.add_all([provider_a, provider_b])
+        session.commit()
+
+        _create_priced_provider_model(
+            session,
+            provider=provider_a,
+            model_id="model-a",
+            pricing={"input": 1.0, "output": 1.0},
+        )
+        _create_priced_provider_model(
+            session,
+            provider=provider_b,
+            model_id="model-b",
+            pricing={"input": 1.0, "output": 1.0},
+        )
+
+        account = get_or_create_account_for_user(session, user_id)
+        account.balance = 1_000
+        session.commit()
+
+        payload = {"usage": {"total_tokens": 1000}}
+        record_chat_completion_usage(
+            session,
+            user_id=user_id,
+            api_key_id=None,
+            logical_model_name="logic-a",
+            provider_id="provider-a",
+            provider_model_id="model-a",
+            response_payload=payload,
+        )
+        payload_large = {"usage": {"total_tokens": 2000}}
+        record_chat_completion_usage(
+            session,
+            user_id=user_id,
+            api_key_id=None,
+            logical_model_name="logic-a",
+            provider_id="provider-a",
+            provider_model_id="model-a",
+            response_payload=payload_large,
+        )
+        payload_small = {"usage": {"total_tokens": 500}}
+        record_chat_completion_usage(
+            session,
+            user_id=user_id,
+            api_key_id=None,
+            logical_model_name="logic-b",
+            provider_id="provider-b",
+            provider_model_id="model-b",
+            response_payload=payload_small,
+        )
+
+        session.commit()
+
+    with TestClient(app=app, base_url="http://testserver") as client:
+        summary_resp = client.get(
+            "/v1/credits/me/consumption/summary",
+            params={"time_range": "7d"},
+            headers=headers,
+        )
+        assert summary_resp.status_code == 200
+        summary = summary_resp.json()
+        assert summary["spent_credits"] == 4
+        assert summary["transactions"] == 3
+        assert summary["avg_daily_spent"] > 0
+        assert summary["projected_days_left"] is not None
+
+        provider_resp = client.get(
+            "/v1/credits/me/consumption/providers",
+            params={"time_range": "7d"},
+            headers=headers,
+        )
+        assert provider_resp.status_code == 200
+        provider_data = provider_resp.json()
+        assert provider_data["total_spent"] == 4
+        assert len(provider_data["items"]) == 2
+        assert provider_data["items"][0]["provider_id"] == "provider-a"
+        assert provider_data["items"][0]["total_spent"] == 3
+        assert provider_data["items"][1]["provider_id"] == "provider-b"
+        assert provider_data["items"][1]["total_spent"] == 1
+
+        series_resp = client.get(
+            "/v1/credits/me/consumption/timeseries",
+            params={"time_range": "7d"},
+            headers=headers,
+        )
+        assert series_resp.status_code == 200
+        series = series_resp.json()
+        assert series["bucket"] == "day"
+        assert series["points"], "应至少返回 1 个时间点"
+        total_points_spent = sum(point["spent_credits"] for point in series["points"])
+        assert total_points_spent == 4
+
+
+def test_record_usage_skips_without_provider_pricing():
+    """
+    未在 ProviderModel.pricing 中设置单价时，应跳过积分扣费，仅记录 usage。
+    """
+    app = create_app()
+    SessionLocal = install_inmemory_db(app)
+
+    with SessionLocal() as session:
+        user = _get_single_user(session)
+        user_id = user.id
+
+        provider = Provider(
+            provider_id="provider-no-price",
+            name="Provider No Price",
+            base_url="https://noprice.local",
+            transport="http",
+        )
+        session.add(provider)
+        session.commit()
+
+        account = get_or_create_account_for_user(session, user_id)
+        account.balance = 500
+        session.commit()
+
+        payload = {"usage": {"total_tokens": 1000}}
+        before = account.balance
+        cost = record_chat_completion_usage(
+            session,
+            user_id=user_id,
+            api_key_id=None,
+            logical_model_name="logic-np",
+            provider_id="provider-no-price",
+            provider_model_id="missing-model",
+            response_payload=payload,
+        )
+        session.refresh(account)
+
+        assert cost == 0
+        assert account.balance == before
+
+
 def test_auto_topup_rule_and_daily_task(monkeypatch):
     """
     验证自动充值规则与定时任务执行逻辑：
@@ -346,3 +531,114 @@ def test_auto_topup_rule_and_daily_task(monkeypatch):
             rule = get_auto_topup_rule_for_user(session, user_id)
             assert rule is not None
             assert rule.is_active is False
+
+
+def test_transaction_filtering_by_reason_and_date(monkeypatch):
+    """
+    验证 /v1/credits/me/transactions 端点的过滤功能：
+    - 按 reason（原因）过滤
+    - 按日期范围过滤
+    """
+    from datetime import datetime, timedelta
+    
+    app = create_app()
+    SessionLocal = install_inmemory_db(app)
+
+    # 取出种子用户（默认是超级管理员）
+    with SessionLocal() as session:
+        user = _get_single_user(session)
+        user_id = user.id
+
+    headers = jwt_auth_headers(str(user_id))
+
+    with TestClient(app=app, base_url="http://testserver") as client:
+        # 1) 初始化账户
+        resp = client.get("/v1/credits/me", headers=headers)
+        assert resp.status_code == 200
+
+        # 2) 创建多笔不同 reason 的流水
+        # 充值一次
+        resp = client.post(
+            f"/v1/credits/admin/users/{user_id}/topup",
+            headers=headers,
+            json={"amount": 100, "description": "test topup 1"},
+        )
+        assert resp.status_code == 200
+
+        # 再充值一次（产生第二条admin_topup记录）
+        resp = client.post(
+            f"/v1/credits/admin/users/{user_id}/topup",
+            headers=headers,
+            json={"amount": 50, "description": "test topup 2"},
+        )
+        assert resp.status_code == 200
+
+        # 3) 查询所有流水
+        resp = client.get("/v1/credits/me/transactions", headers=headers)
+        assert resp.status_code == 200
+        all_transactions = resp.json()
+        assert len(all_transactions) >= 2
+
+        # 4) 按 reason 过滤：只查询 admin_topup
+        resp = client.get(
+            "/v1/credits/me/transactions",
+            headers=headers,
+            params={"reason": "admin_topup"},
+        )
+        assert resp.status_code == 200
+        admin_topup_transactions = resp.json()
+        assert len(admin_topup_transactions) >= 2
+        # 验证都是 admin_topup
+        for tx in admin_topup_transactions:
+            assert tx["reason"] == "admin_topup"
+
+        # 5) 按 reason 过滤：查询不存在的reason（应返回空列表）
+        resp = client.get(
+            "/v1/credits/me/transactions",
+            headers=headers,
+            params={"reason": "nonexistent_reason"},
+        )
+        assert resp.status_code == 200
+        empty_transactions = resp.json()
+        assert len(empty_transactions) == 0
+
+        # 6) 按日期范围过滤：获取 ISO 格式的日期
+        now = datetime.utcnow()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        future_date = (now + timedelta(days=1)).isoformat()
+
+        resp = client.get(
+            "/v1/credits/me/transactions",
+            headers=headers,
+            params={
+                "start_date": today_start.isoformat(),
+                "end_date": future_date,
+            },
+        )
+        assert resp.status_code == 200
+        today_transactions = resp.json()
+        assert len(today_transactions) >= 2
+
+        # 7) 组合过滤：按日期和reason都过滤
+        resp = client.get(
+            "/v1/credits/me/transactions",
+            headers=headers,
+            params={
+                "reason": "admin_topup",
+                "start_date": today_start.isoformat(),
+                "end_date": future_date,
+            },
+        )
+        assert resp.status_code == 200
+        filtered_transactions = resp.json()
+        assert len(filtered_transactions) >= 2
+        for tx in filtered_transactions:
+            assert tx["reason"] == "admin_topup"
+
+        # 8) 测试无效日期格式
+        resp = client.get(
+            "/v1/credits/me/transactions",
+            headers=headers,
+            params={"start_date": "invalid-date"},
+        )
+        assert resp.status_code == 400

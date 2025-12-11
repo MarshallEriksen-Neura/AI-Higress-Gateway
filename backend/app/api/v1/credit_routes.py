@@ -1,24 +1,28 @@
 """
-积分账户与流水相关路由。
+积分账户、流水与消费洞察相关路由。
 
 设计目标：
 - 普通用户可以查询自己的积分余额与近期流水；
 - 管理员可以为指定用户充值/调整积分；
+- 仪表盘可通过新增的消费洞察接口展示消费趋势与 Provider 贡献度；
 - 具体扣费逻辑在 app.services.credit_service 中实现，路由层只做薄封装。
 """
 
 from __future__ import annotations
 
-from typing import List
+import datetime as dt
+import math
+from typing import List, Literal, Tuple
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
 from app.errors import bad_request, forbidden
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
-from app.models import CreditAccount, CreditTransaction
+from app.models import CreditAccount, CreditTransaction, Provider
 from app.schemas import (
     CreditAccountResponse,
     CreditAutoTopupConfig,
@@ -27,6 +31,11 @@ from app.schemas import (
     CreditAutoTopupBatchResponse,
     CreditTopupRequest,
     CreditTransactionResponse,
+    CreditConsumptionSummary,
+    CreditProviderUsageItem,
+    CreditProviderUsageResponse,
+    CreditUsageTimeseriesPoint,
+    CreditUsageTimeseriesResponse,
 )
 from app.services.credit_service import (
     apply_manual_delta,
@@ -41,6 +50,104 @@ router = APIRouter(
     prefix="/v1/credits",
     dependencies=[Depends(require_jwt_token)],
 )
+
+USAGE_REASONS: Tuple[str, ...] = ("usage", "stream_usage", "stream_estimate")
+
+
+def _resolve_time_range(
+    time_range: Literal["today", "7d", "30d", "90d", "all"],
+) -> tuple[dt.datetime | None, dt.datetime]:
+    now = dt.datetime.now(dt.timezone.utc)
+
+    if time_range == "today":
+        return (
+            now.replace(hour=0, minute=0, second=0, microsecond=0),
+            now,
+        )
+    if time_range == "7d":
+        return now - dt.timedelta(days=7), now
+    if time_range == "30d":
+        return now - dt.timedelta(days=30), now
+    if time_range == "90d":
+        return now - dt.timedelta(days=90), now
+    if time_range == "all":
+        return None, now
+    # 默认回退到 30 天
+    return now - dt.timedelta(days=30), now
+
+
+def _compute_prev_window(
+    start_at: dt.datetime | None,
+    end_at: dt.datetime,
+) -> tuple[dt.datetime, dt.datetime] | None:
+    if start_at is None:
+        return None
+    window = end_at - start_at
+    if window.total_seconds() <= 0:
+        return None
+    prev_end = start_at
+    prev_start = prev_end - window
+    return prev_start, prev_end
+
+
+def _usage_base_query(
+    db: Session,
+    *,
+    user_id: UUID,
+    start_at: dt.datetime | None,
+    end_at: dt.datetime | None,
+):
+    q = (
+        db.query(CreditTransaction)
+        .filter(CreditTransaction.user_id == user_id)
+        .filter(CreditTransaction.amount < 0)
+        .filter(CreditTransaction.reason.in_(USAGE_REASONS))
+    )
+    if start_at is not None:
+        q = q.filter(CreditTransaction.created_at >= start_at)
+    if end_at is not None:
+        q = q.filter(CreditTransaction.created_at < end_at)
+    return q
+
+
+def _usage_stats(
+    db: Session,
+    *,
+    user_id: UUID,
+    start_at: dt.datetime | None,
+    end_at: dt.datetime | None,
+) -> tuple[int, int]:
+    q = _usage_base_query(db, user_id=user_id, start_at=start_at, end_at=end_at)
+    row = q.with_entities(
+        func.coalesce(func.sum(-CreditTransaction.amount), 0).label("spent"),
+        func.coalesce(func.count(CreditTransaction.id), 0).label("count"),
+    ).one()
+    spent = int(row.spent or 0)
+    return spent, int(row.count or 0)
+
+
+def _window_days(
+    db: Session,
+    *,
+    user_id: UUID,
+    start_at: dt.datetime | None,
+    end_at: dt.datetime,
+) -> int:
+    if start_at is not None:
+        delta = end_at - start_at
+        return max(1, math.ceil(delta.total_seconds() / 86400))
+
+    earliest = (
+        _usage_base_query(db, user_id=user_id, start_at=None, end_at=None)
+        .with_entities(CreditTransaction.created_at)
+        .order_by(CreditTransaction.created_at.asc())
+        .limit(1)
+        .scalar()
+    )
+    if earliest is None:
+        return 1
+    delta = end_at - earliest
+    return max(1, math.ceil(delta.total_seconds() / 86400))
 
 
 @router.get("/me", response_model=CreditAccountResponse)
@@ -61,23 +168,267 @@ def get_my_credit_account(
 def list_my_transactions(
     limit: int = Query(50, ge=1, le=100, description="返回的最大记录数"),
     offset: int = Query(0, ge=0, description="起始偏移量"),
+    start_date: str | None = Query(None, description="开始日期（ISO 8601格式）"),
+    end_date: str | None = Query(None, description="结束日期（ISO 8601格式）"),
+    reason: str | None = Query(None, description="流水原因过滤（如：usage、stream_estimate、admin_topup 等）"),
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_jwt_token),
 ) -> List[CreditTransactionResponse]:
     """
     分页返回当前用户的积分流水记录（按时间倒序）。
+    
+    支持按日期范围和原因过滤：
+    - start_date, end_date: ISO 8601格式的日期范围
+    - reason: 流水原因（usage、stream_estimate、admin_topup、adjust 等）
     """
+    from datetime import datetime
+    
     # 通过 user_id 维度过滤，避免暴露其他用户数据。
     q = (
         db.query(CreditTransaction)
         .join(CreditAccount, CreditTransaction.account_id == CreditAccount.id)
         .filter(CreditAccount.user_id == UUID(current_user.id))
-        .order_by(CreditTransaction.created_at.desc())
-        .offset(offset)
-        .limit(limit)
     )
+    
+    # 按日期范围过滤
+    if start_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            q = q.filter(CreditTransaction.created_at >= start_dt)
+        except ValueError:
+            raise bad_request(f"无效的 start_date 格式：{start_date}")
+    
+    if end_date:
+        try:
+            end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            q = q.filter(CreditTransaction.created_at <= end_dt)
+        except ValueError:
+            raise bad_request(f"无效的 end_date 格式：{end_date}")
+    
+    # 按原因过滤
+    if reason:
+        q = q.filter(CreditTransaction.reason == reason)
+    
+    q = q.order_by(CreditTransaction.created_at.desc()).offset(offset).limit(limit)
     items = q.all()
     return [CreditTransactionResponse.model_validate(item) for item in items]
+
+
+@router.get(
+    "/me/consumption/summary",
+    response_model=CreditConsumptionSummary,
+    summary="当前用户积分消耗概览（按时间范围聚合）",
+)
+def get_my_consumption_summary(
+    time_range: Literal["today", "7d", "30d", "90d", "all"] = Query(
+        "30d",
+        description="统计窗口：today/7d/30d/90d/all",
+    ),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> CreditConsumptionSummary:
+    """
+    返回当前用户在指定时间范围内的积分消耗合计、交易次数、环比以及余额预测。
+    """
+    user_id = UUID(current_user.id)
+    start_at, end_at = _resolve_time_range(time_range)
+    prev_window = _compute_prev_window(start_at, end_at)
+
+    spent, tx_count = _usage_stats(
+        db,
+        user_id=user_id,
+        start_at=start_at,
+        end_at=end_at,
+    )
+
+    if prev_window is not None:
+        spent_prev, _ = _usage_stats(
+            db,
+            user_id=user_id,
+            start_at=prev_window[0],
+            end_at=prev_window[1],
+        )
+    else:
+        spent_prev = None
+
+    account = get_or_create_account_for_user(db, user_id)
+    balance = int(account.balance)
+
+    window_days = _window_days(
+        db,
+        user_id=user_id,
+        start_at=start_at,
+        end_at=end_at,
+    )
+    avg_daily_spent = spent / window_days if window_days > 0 else 0
+    if avg_daily_spent > 0:
+        projected_days_left = balance / avg_daily_spent
+    else:
+        projected_days_left = None
+
+    return CreditConsumptionSummary(
+        time_range=time_range,
+        start_at=start_at,
+        end_at=end_at,
+        spent_credits=spent,
+        spent_credits_prev=spent_prev,
+        transactions=tx_count,
+        avg_daily_spent=avg_daily_spent,
+        balance=balance,
+        projected_days_left=projected_days_left,
+    )
+
+
+@router.get(
+    "/me/consumption/providers",
+    response_model=CreditProviderUsageResponse,
+    summary="按 Provider 聚合的积分消耗列表",
+)
+def get_my_provider_consumption(
+    time_range: Literal["today", "7d", "30d", "90d", "all"] = Query(
+        "30d",
+        description="统计窗口：today/7d/30d/90d/all",
+    ),
+    limit: int = Query(
+        6,
+        ge=1,
+        le=50,
+        description="返回的 Provider 数量（按消耗降序）",
+    ),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> CreditProviderUsageResponse:
+    """
+    返回当前用户在指定时间范围内，各 Provider 的积分消耗排名。
+    """
+    user_id = UUID(current_user.id)
+    start_at, end_at = _resolve_time_range(time_range)
+    total_spent, _ = _usage_stats(
+        db,
+        user_id=user_id,
+        start_at=start_at,
+        end_at=end_at,
+    )
+
+    q = (
+        _usage_base_query(db, user_id=user_id, start_at=start_at, end_at=end_at)
+        .filter(CreditTransaction.provider_id.isnot(None))
+        .with_entities(
+            CreditTransaction.provider_id,
+            func.sum(-CreditTransaction.amount).label("spent"),
+            func.count(CreditTransaction.id).label("tx_count"),
+            func.max(CreditTransaction.created_at).label("last_tx"),
+        )
+        .join(
+            Provider,
+            Provider.provider_id == CreditTransaction.provider_id,
+            isouter=True,
+        )
+        .add_columns(Provider.name.label("provider_name"))
+        .group_by(CreditTransaction.provider_id, Provider.name)
+        .order_by(func.sum(-CreditTransaction.amount).desc())
+        .limit(limit)
+    )
+
+    rows = q.all()
+
+    items: list[CreditProviderUsageItem] = []
+    for row in rows:
+        spent = int(row.spent or 0)
+        percentage = (spent / total_spent) if total_spent > 0 else 0.0
+        items.append(
+            CreditProviderUsageItem(
+                provider_id=row.provider_id,
+                provider_name=row.provider_name,
+                total_spent=spent,
+                transaction_count=int(row.tx_count or 0),
+                percentage=percentage,
+                last_transaction_at=row.last_tx,
+            )
+        )
+
+    return CreditProviderUsageResponse(
+        time_range=time_range,
+        total_spent=total_spent,
+        items=items,
+    )
+
+
+@router.get(
+    "/me/consumption/timeseries",
+    response_model=CreditUsageTimeseriesResponse,
+    summary="积分消耗时间序列（按日聚合）",
+)
+def get_my_consumption_timeseries(
+    time_range: Literal["today", "7d", "30d", "90d", "all"] = Query(
+        "30d",
+        description="统计窗口：today/7d/30d/90d/all",
+    ),
+    bucket: Literal["day"] = Query(
+        "day",
+        description="聚合粒度，目前仅支持 day",
+    ),
+    max_points: int = Query(
+        90,
+        ge=10,
+        le=365,
+        description="最多返回的点数量，避免一次性返回过多数据",
+    ),
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> CreditUsageTimeseriesResponse:
+    """
+    返回按日期聚合的积分消耗时间序列，用于折线/柱状图。
+    """
+    if bucket != "day":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅支持 bucket=day",
+        )
+
+    user_id = UUID(current_user.id)
+    start_at, end_at = _resolve_time_range(time_range)
+
+    bucket_expr = func.date(CreditTransaction.created_at)
+    q = (
+        _usage_base_query(db, user_id=user_id, start_at=start_at, end_at=end_at)
+        .with_entities(
+            bucket_expr.label("bucket_start"),
+            func.sum(-CreditTransaction.amount).label("spent"),
+        )
+        .group_by(bucket_expr)
+        .order_by(bucket_expr.desc())
+        .limit(max_points)
+    )
+
+    rows = q.all()
+    rows.reverse()
+    points: list[CreditUsageTimeseriesPoint] = []
+    for row in rows:
+        bucket_start = row.bucket_start
+        if isinstance(bucket_start, dt.date) and not isinstance(bucket_start, dt.datetime):
+            bucket_dt = dt.datetime.combine(
+                bucket_start,
+                dt.time.min,
+                tzinfo=dt.timezone.utc,
+            )
+        elif isinstance(bucket_start, dt.datetime):
+            bucket_dt = bucket_start
+        else:
+            bucket_dt = dt.datetime.now(dt.timezone.utc)
+
+        points.append(
+            CreditUsageTimeseriesPoint(
+                window_start=bucket_dt,
+                spent_credits=int(row.spent or 0),
+            )
+        )
+
+    return CreditUsageTimeseriesResponse(
+        time_range=time_range,
+        bucket=bucket,
+        points=points,
+    )
 
 
 @router.post(

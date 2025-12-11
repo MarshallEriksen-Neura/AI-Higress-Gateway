@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback } from "react";
 import { CreditBalanceCard } from "@/components/dashboard/credits/credit-balance-card";
 import { CreditTransactionsTable } from "@/components/dashboard/credits/credit-transactions-table";
 import { DateRangeFilter, getDateRangeFromPreset, type DateRangePreset } from "@/components/dashboard/credits/date-range-filter";
+import { ReasonFilter, type TransactionReason } from "@/components/dashboard/credits/reason-filter";
 import { useCreditBalance, useCreditTransactions } from "@/lib/swr/use-credits";
 import { useI18n } from "@/lib/i18n-context";
 
@@ -13,6 +14,7 @@ export function CreditsClient() {
   // 状态管理
   const [currentPage, setCurrentPage] = useState(1);
   const [dateRange, setDateRange] = useState<DateRangePreset>('30days');
+  const [reason, setReason] = useState<TransactionReason>('all');
   const pageSize = 50;
 
   // 计算日期范围参数 - 使用 useMemo 避免重复计算
@@ -25,9 +27,10 @@ export function CreditsClient() {
     return {
       limit: pageSize,
       offset: (currentPage - 1) * pageSize,
-      ...dateRangeParams
+      ...dateRangeParams,
+      ...(reason !== 'all' && { reason })
     };
-  }, [currentPage, pageSize, dateRangeParams]);
+  }, [currentPage, pageSize, dateRangeParams, reason]);
 
   // 获取积分余额 - 使用 frequent 缓存策略
   const { balance, loading: balanceLoading, refresh: refreshBalance } = useCreditBalance();
@@ -50,6 +53,12 @@ export function CreditsClient() {
     setCurrentPage(1); // 重置到第一页
   }, []);
 
+  // 处理原因过滤变化
+  const handleReasonChange = useCallback((newReason: TransactionReason) => {
+    setReason(newReason);
+    setCurrentPage(1); // 重置到第一页
+  }, []);
+
   // 处理刷新
   const handleRefresh = useCallback(() => {
     refreshBalance();
@@ -58,12 +67,19 @@ export function CreditsClient() {
 
   // 筛选器组件
   const filterComponent = useMemo(() => (
-    <DateRangeFilter
-      value={dateRange}
-      onChange={handleDateRangeChange}
-      disabled={transactionsLoading}
-    />
-  ), [dateRange, handleDateRangeChange, transactionsLoading]);
+    <div className="flex gap-2">
+      <DateRangeFilter
+        value={dateRange}
+        onChange={handleDateRangeChange}
+        disabled={transactionsLoading}
+      />
+      <ReasonFilter
+        value={reason}
+        onChange={handleReasonChange}
+        disabled={transactionsLoading}
+      />
+    </div>
+  ), [dateRange, handleDateRangeChange, reason, handleReasonChange, transactionsLoading]);
 
   // 估算总记录数（实际应该从API返回）
   // 这里简化处理：如果返回了满页数据，假设还有更多

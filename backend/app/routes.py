@@ -70,11 +70,16 @@ async def handle_unexpected_error(request: Request, exc: Exception):
 async def lifespan(app: FastAPI):
     """
     应用生命周期管理：
-    - startup: 确保初始管理员账号存在
+    - startup: 执行数据库迁移、确保初始管理员账号存在
     - shutdown: 目前无额外清理逻辑
     """
+    from app.db.migration_runner import auto_upgrade_database
+    
     session = SessionLocal()
     try:
+        # 执行数据库迁移（仅在显式启用时）
+        auto_upgrade_database()
+        # 确保初始管理员账号存在
         ensure_initial_admin(session)
     finally:
         session.close()
@@ -233,13 +238,8 @@ def create_app() -> FastAPI:
         )
         try:
             response = await call_next(request)
-        except Exception:
-            logger.exception(
-                "Unhandled error while processing %s %s",
-                request.method,
-                request.url.path,
-            )
-            raise
+        except Exception as exc:  # pragma: no cover - exercised via tests
+            response = await handle_unexpected_error(request, exc)
         logger.info(
             "HTTP %s %s -> %s",
             request.method,

@@ -94,7 +94,7 @@ class Settings(BaseSettings):
 
     # Provider health-check intervals and cache TTL
     provider_health_check_interval_seconds: int = Field(
-        60,
+        3600,
         alias="PROVIDER_HEALTH_CHECK_INTERVAL_SECONDS",
         description="定时检测厂商健康状态的间隔（秒）",
         ge=10,
@@ -361,7 +361,7 @@ class Settings(BaseSettings):
     credits_base_per_1k_tokens: int = Field(
         10,
         alias="CREDITS_BASE_PER_1K_TOKENS",
-        description="基础计费单价：1x 模型每 1000 tokens 消耗的积分数",
+        description="（Legacy）旧版基础计费单价，当前计费统一由 ProviderModel.pricing 决定",
         ge=0,
     )
     initial_user_credits: int = Field(
@@ -380,6 +380,11 @@ class Settings(BaseSettings):
         alias="STREAMING_MIN_TOKENS",
         description="流式请求在无法获取 usage 时用于预估扣费的最小 token 数",
         ge=0,
+    )
+    enable_streaming_precharge: bool = Field(
+        False,
+        alias="ENABLE_STREAMING_PRECHARGE",
+        description="是否在流式请求开始前做积分预扣（默认关闭）",
     )
     credits_auto_topup_interval_seconds: int = Field(
         24 * 60 * 60,

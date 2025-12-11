@@ -16,8 +16,12 @@ _MIGRATION_APPLIED = False
 def _should_auto_apply() -> bool:
     """
     仅在 Postgres 数据库上自动执行迁移，避免在测试用的 SQLite/内存库上运行。
+    需要显式设置环境变量 ENABLE_AUTO_MIGRATION=true 才会执行，避免循环导入。
     """
+    import os
     if not settings.auto_apply_db_migrations:
+        return False
+    if not os.getenv("ENABLE_AUTO_MIGRATION", "").lower() == "true":
         return False
     url = settings.database_url.lower()
     if url.startswith("sqlite"):

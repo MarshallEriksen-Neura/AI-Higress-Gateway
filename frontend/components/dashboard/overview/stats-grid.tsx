@@ -34,9 +34,15 @@ function computeChange(
   return { text: `${sign}${percent}%`, trend };
 }
 
-export function StatsGrid() {
-  // 概览页聚焦“今天”的运行情况
-  const { overview } = useOverviewMetrics({ time_range: "today" });
+import { OverviewTimeRange } from "@/lib/swr/use-overview-metrics";
+
+interface StatsGridProps {
+  timeRange?: OverviewTimeRange;
+}
+
+export function StatsGrid({ timeRange = "today" }: StatsGridProps) {
+  // 根据传入的时间范围获取数据
+  const { overview } = useOverviewMetrics({ time_range: timeRange });
 
   const cards = useMemo(() => {
     if (!overview) {

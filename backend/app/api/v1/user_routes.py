@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, File, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
@@ -234,7 +234,10 @@ def search_users_endpoint(
     """供前端分享/指派等场景使用的轻量级用户搜索接口。"""
 
     if (q is None or not q.strip()) and not ids:
-        raise bad_request("请输入关键字或提供用户 ID")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="请输入关键字或提供用户 ID",
+        )
 
     stmt: Select[tuple[User]] = select(User)
 

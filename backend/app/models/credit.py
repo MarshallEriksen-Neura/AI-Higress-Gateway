@@ -91,6 +91,13 @@ class CreditTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
     description: Mapped[str | None] = Column(String(255), nullable=True)
     model_name: Mapped[str | None] = Column(String(100), nullable=True)
+    provider_id: Mapped[str | None] = Column(
+        String(50),
+        ForeignKey("providers.provider_id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    provider_model_id: Mapped[str | None] = Column(String(100), nullable=True)
 
     # 可选：记录本次调用的 token 统计，便于后续报表和排查。
     input_tokens: Mapped[int | None] = Column(Integer, nullable=True)
@@ -110,7 +117,8 @@ class ModelBillingConfig(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     逻辑模型计费配置。
 
     - model_name 一般对应 logical_model.logical_id 或客户端使用的 model 名；
-    - multiplier 为倍率系数，基础单价由配置项 CREDITS_BASE_PER_1K_TOKENS 控制。
+    - multiplier 为倍率系数，会与 ProviderModel.pricing（input/output 单价）
+      以及 Provider.billing_factor 一同决定最终扣费金额。
     """
 
     __tablename__ = "model_billing_configs"

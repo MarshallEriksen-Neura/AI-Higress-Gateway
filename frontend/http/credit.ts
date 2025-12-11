@@ -25,7 +25,7 @@ export const creditService = {
 
   /**
    * 获取当前用户的积分流水记录
-   * @param params 查询参数（分页、时间范围等）
+   * @param params 查询参数（分页、时间范围、原因等）
    * @returns 积分流水记录数组
    */
   getMyTransactions: async (
@@ -37,6 +37,7 @@ export const creditService = {
         offset: params.offset || 0,
         ...(params.start_date && { start_date: params.start_date }),
         ...(params.end_date && { end_date: params.end_date }),
+        ...(params.reason && { reason: params.reason }),
       }
     });
     return response.data;

@@ -180,30 +180,6 @@ def _load_provider_factor(db: Session, provider_id: str | None) -> float:
         return 1.0
 
 
-def _compute_cost_credits(
-    *,
-    db: Session,
-    model_name: str | None,
-    total_tokens: int | None,
-    provider_id: str | None,
-) -> int:
-    """
-    按「基础单价 × 模型倍率 × Provider 结算系数 × token 数」计算应扣积分。
-    """
-    base_per_1k = int(getattr(settings, "credits_base_per_1k_tokens", 0))
-    if base_per_1k <= 0:
-        return 0
-    if total_tokens is None or total_tokens <= 0:
-        return 0
-
-    model_multiplier = _load_multiplier_for_model(db, model_name)
-    provider_factor = _load_provider_factor(db, provider_id)
-    raw_cost = (total_tokens / 1000.0) * base_per_1k * model_multiplier * provider_factor
-    cost = int(math.ceil(raw_cost))
-    if cost <= 0:
-        cost = 1
-    return cost
-
 
 def _create_transaction(
     db: Session,
@@ -211,6 +187,8 @@ def _create_transaction(
     account: CreditAccount,
     user_id: UUID,
     api_key_id: UUID | None,
+    provider_id: str | None,
+    provider_model_id: str | None,
     amount: int,
     reason: str,
     description: str | None,
@@ -223,6 +201,8 @@ def _create_transaction(
         account_id=account.id,
         user_id=user_id,
         api_key_id=api_key_id,
+        provider_id=provider_id,
+        provider_model_id=provider_model_id,
         amount=amount,
         reason=reason,
         description=description,
@@ -259,6 +239,8 @@ def apply_manual_delta(
         account=account,
         user_id=user_id,
         api_key_id=api_key_id,
+        provider_id=None,
+        provider_model_id=None,
         amount=amount,
         reason=reason,
         description=description,
@@ -480,63 +462,50 @@ def record_chat_completion_usage(
     if total_tokens is None:
         return 0
 
-    account = get_or_create_account_for_user(db, user_id)
-    # 1) 优先尝试使用 provider+model 维度的定价（如果已在 provider_models.pricing 中配置）。
-    #
-    # 约定：
-    # - pricing.input / pricing.output 表示每 1000 tokens 扣除的积分数；
-    # - 若任一价格存在并且 usage 中有对应 token 统计，则使用明细价计算；
-    # - 仍然会叠加 ModelBillingConfig.multiplier 与 Provider.billing_factor，方便做全局调整。
     input_price, output_price = _load_provider_model_pricing(
         db, provider_id=provider_id, model_name=provider_model_id
     )
 
-    cost: int
-    if input_price is not None or output_price is not None:
-        try:
-            # 逻辑模型倍率始终按 logical_model_name 维度配置，避免与 Provider 模型 ID 混淆。
-            model_multiplier = _load_multiplier_for_model(db, logical_model_name)
-            provider_factor = _load_provider_factor(db, provider_id)
-
-            raw_cost = 0.0
-            if input_tokens is not None or output_tokens is not None:
-                # 具备输入 / 输出拆分的 usage 时，分别按 input/output 单价计费。
-                if input_tokens is not None and input_price is not None:
-                    raw_cost += (int(input_tokens) / 1000.0) * input_price
-                if output_tokens is not None and output_price is not None:
-                    raw_cost += (int(output_tokens) / 1000.0) * output_price
-            else:
-                # 仅有总 token 数（例如基于请求 max_tokens 估算）时，
-                # 为简单且偏保守，整体按 output 单价计费；若只配置了 input 单价则退回 input。
-                per_1k = output_price if output_price is not None else input_price
-                raw_cost = (int(total_tokens) / 1000.0) * per_1k
-
-            raw_cost *= model_multiplier * provider_factor
-            cost = int(math.ceil(raw_cost))
-        except Exception:  # pragma: no cover - 防御性日志
-            logger.exception(
-                "Failed to compute credit cost with ProviderModel.pricing "
-                "for provider=%r model=%r; falling back to legacy pricing",
-                provider_id,
-                provider_model_id,
-            )
-            cost = _compute_cost_credits(
-                db=db,
-                model_name=logical_model_name,
-                total_tokens=int(total_tokens),
-                provider_id=provider_id,
-            )
-    else:
-        # 2) 未配置单独价格时，退回到以逻辑模型维度为主的旧计费规则。
-        cost = _compute_cost_credits(
-            db=db,
-            model_name=logical_model_name,
-            total_tokens=int(total_tokens),
-            provider_id=provider_id,
+    if input_price is None and output_price is None:
+        logger.info(
+            "Skip credit deduction due to missing provider pricing: provider=%r model=%r",
+            provider_id,
+            provider_model_id,
         )
+        return 0
+
+    try:
+        # 逻辑模型倍率始终按 logical_model_name 维度配置，避免与 Provider 模型 ID 混淆。
+        model_multiplier = _load_multiplier_for_model(db, logical_model_name)
+        provider_factor = _load_provider_factor(db, provider_id)
+
+        raw_cost = 0.0
+        if input_tokens is not None or output_tokens is not None:
+            # 具备输入 / 输出拆分的 usage 时，分别按 input/output 单价计费。
+            if input_tokens is not None and input_price is not None:
+                raw_cost += (int(input_tokens) / 1000.0) * input_price
+            if output_tokens is not None and output_price is not None:
+                raw_cost += (int(output_tokens) / 1000.0) * output_price
+        else:
+            # 仅有总 token 数（例如基于请求 max_tokens 估算）时，
+            # 为简单且偏保守，整体按 output 单价计费；若只配置了 input 单价则退回 input。
+            per_1k = output_price if output_price is not None else input_price
+            raw_cost = (int(total_tokens) / 1000.0) * per_1k
+
+        raw_cost *= model_multiplier * provider_factor
+        cost = int(math.ceil(raw_cost))
+    except Exception:  # pragma: no cover - 防御性日志
+        logger.exception(
+            "Failed to compute credit cost with ProviderModel.pricing for provider=%r model=%r",
+            provider_id,
+            provider_model_id,
+        )
+        return 0
 
     if cost <= 0:
         return 0
+
+    account = get_or_create_account_for_user(db, user_id)
 
     account.balance = int(account.balance) - cost
     tx_reason = reason or ("stream_usage" if is_stream else "usage")
@@ -545,6 +514,8 @@ def record_chat_completion_usage(
         account=account,
         user_id=user_id,
         api_key_id=api_key_id,
+        provider_id=provider_id,
+        provider_model_id=provider_model_id,
         amount=-cost,
         reason=tx_reason,
         description=None,
@@ -581,6 +552,10 @@ def record_streaming_request(
     - 优先使用 max_tokens / max_tokens_to_sample / max_output_tokens；
     - 若没有，则使用 STREAMING_MIN_TOKENS 作为近似 token 数。
     """
+    if not getattr(settings, "enable_streaming_precharge", False):
+        # 预扣开关关闭时（默认），直接跳过，等待最终 usage 才扣费。
+        return 0
+
     approx_tokens: int | None = None
     for key in ("max_tokens", "max_tokens_to_sample", "max_output_tokens"):
         value = payload.get(key)
@@ -594,53 +569,48 @@ def record_streaming_request(
     if approx_tokens <= 0:
         return 0
 
-    account = get_or_create_account_for_user(db, user_id)
-
     # 优先尝试使用 provider+model 维度的定价。
     input_price, output_price = _load_provider_model_pricing(
         db, provider_id=provider_id, model_name=provider_model_id
     )
 
-    cost: int
-    if input_price is not None or output_price is not None:
-        try:
-            # 流式场景下倍率同样按逻辑模型维度配置。
-            model_multiplier = _load_multiplier_for_model(db, logical_model_name)
-            provider_factor = _load_provider_factor(db, provider_id)
-            # 流式场景只有一个预估 token 数，缺少输入/输出拆分；
-            # 为了简单且偏保守，这里全部按 output 单价计费，若只配置了 input 单价则退回 input。
-            per_1k = output_price if output_price is not None else input_price
-            raw_cost = (approx_tokens / 1000.0) * per_1k * model_multiplier * provider_factor
-            cost = int(math.ceil(raw_cost))
-        except Exception:  # pragma: no cover - 防御性日志
-            logger.exception(
-                "Failed to compute streaming credit cost with ProviderModel.pricing "
-                "for provider=%r model=%r; falling back to legacy pricing",
-                provider_id,
-                provider_model_id,
-            )
-            cost = _compute_cost_credits(
-                db=db,
-                model_name=logical_model_name,
-                total_tokens=approx_tokens,
-                provider_id=provider_id,
-            )
-    else:
-        cost = _compute_cost_credits(
-            db=db,
-            model_name=logical_model_name,
-            total_tokens=approx_tokens,
-            provider_id=provider_id,
+    if input_price is None and output_price is None:
+        logger.info(
+            "Skip streaming credit precharge due to missing provider pricing: provider=%r model=%r",
+            provider_id,
+            provider_model_id,
         )
+        return 0
+
+    try:
+        # 流式场景下倍率同样按逻辑模型维度配置。
+        model_multiplier = _load_multiplier_for_model(db, logical_model_name)
+        provider_factor = _load_provider_factor(db, provider_id)
+        # 流式场景只有一个预估 token 数，缺少输入/输出拆分；
+        # 为了简单且偏保守，这里全部按 output 单价计费，若只配置了 input 单价则退回 input。
+        per_1k = output_price if output_price is not None else input_price
+        raw_cost = (approx_tokens / 1000.0) * per_1k * model_multiplier * provider_factor
+        cost = int(math.ceil(raw_cost))
+    except Exception:  # pragma: no cover - 防御性日志
+        logger.exception(
+            "Failed to compute streaming credit cost with ProviderModel.pricing for provider=%r model=%r",
+            provider_id,
+            provider_model_id,
+        )
+        return 0
+
     if cost <= 0:
         return 0
 
+    account = get_or_create_account_for_user(db, user_id)
     account.balance = int(account.balance) - cost
     _create_transaction(
         db,
         account=account,
         user_id=user_id,
         api_key_id=api_key_id,
+        provider_id=provider_id,
+        provider_model_id=provider_model_id,
         amount=-cost,
         reason="stream_estimate",
         description="流式请求预估扣费",

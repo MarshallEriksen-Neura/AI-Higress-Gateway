@@ -1148,7 +1148,9 @@
 
 网关在记录一次 LLM 调用的 usage 时，会根据 token 用量和配置计算本次应扣的积分：
 
-- 基础单价：`CREDITS_BASE_PER_1K_TOKENS`（环境变量），表示“1x 模型每 1000 tokens 消耗多少积分”；  
+- Provider 模型单价：`provider_models.pricing` JSON 中的 `input`/`output`（单位：每 1000 tokens 所需积分）。  
+  - 只有配置了对应 Provider + 模型的价格，系统才会扣费；  
+  - 未设置价格时视为该模型暂不计费，只记录调用流水。  
 - 模型倍率：`ModelBillingConfig.multiplier`，按模型或逻辑模型 ID 设置，例如：
   - `gpt-4o-mini` = 0.5  
   - `gpt-4o` = 2.0  
@@ -1157,14 +1159,26 @@
   - >1.0 表示该 Provider 更贵（同模型下会多扣积分）；
   - <1.0 表示该 Provider 更便宜或只收少量服务费（例如用户自建 Provider）。
 
-综合起来，单次调用的积分消耗近似为：
+综合起来，单次调用的积分消耗为：
 
 ```text
-effective_multiplier = model_multiplier * billing_factor
-cost_credits = ceil(total_tokens / 1000 * CREDITS_BASE_PER_1K_TOKENS * effective_multiplier)
+input_cost = (prompt_tokens / 1000) * pricing.input
+output_cost = (completion_tokens / 1000) * pricing.output
+fallback_cost = (total_tokens / 1000) * (pricing.output or pricing.input)
+raw_cost = (input_cost + output_cost) if usage 拆分了输入/输出 else fallback_cost
+cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_factor)
 ```
 
-因此，同一个模型在不同 Provider 下，实际扣除的积分可以不同，用于反映不同厂商或不同渠道的成本差异。
+> 注：平台不再按照 `CREDITS_BASE_PER_1K_TOKENS` 做统一折算，也不会在未配置价格时扣积分。
+
+#### 流式请求预扣（可选）
+
+默认情况下系统不会对流式调用做预扣费（`ENABLE_STREAMING_PRECHARGE=false`），
+只会在收到上游 usage 后才生成 `usage`/`stream_usage` 流水。
+若希望在流式响应开始前先按 `max_tokens` 或 `STREAMING_MIN_TOKENS`
+估算一笔 `stream_estimate` 扣费，可在环境变量中将
+`ENABLE_STREAMING_PRECHARGE` 设为 `true`。预扣同样依赖 `provider_models.pricing`
+（若未配置单价则跳过），并继续叠加模型倍率和 Provider 结算系数。
 
 ### 1. 查询当前用户积分
 
@@ -1205,6 +1219,8 @@ cost_credits = ceil(total_tokens / 1000 * CREDITS_BASE_PER_1K_TOKENS * effective
     "reason": "usage",
     "description": null,
     "model_name": "gpt-4o-mini",
+    "provider_id": "openai",
+    "provider_model_id": "gpt-4o-mini",
     "input_tokens": 500,
     "output_tokens": 300,
     "total_tokens": 800,
@@ -1212,6 +1228,98 @@ cost_credits = ceil(total_tokens / 1000 * CREDITS_BASE_PER_1K_TOKENS * effective
   }
 ]
 ```
+
+### 2.1 查询积分消耗概览
+
+**接口**: `GET /v1/credits/me/consumption/summary`  
+**认证**: JWT 令牌  
+**描述**: 针对当前用户在指定时间范围内的积分消耗做聚合分析，方便仪表盘展示「本期总消耗」「环比」「预计可用天数」等指标。
+
+**查询参数**:
+- `time_range` (`today`/`7d`/`30d`/`90d`/`all`，默认 `30d`)
+
+**响应示例**:
+```json
+{
+  "time_range": "30d",
+  "start_at": "2025-01-01T00:00:00Z",
+  "end_at": "2025-01-31T23:59:59Z",
+  "spent_credits": 420,
+  "spent_credits_prev": 300,
+  "transactions": 58,
+  "avg_daily_spent": 14,
+  "balance": 1280,
+  "projected_days_left": 91.4
+}
+```
+
+字段说明：
+- `spent_credits`：统计窗口内扣除的积分总和（仅统计 `usage`/`stream_usage`/`stream_estimate` 等消费型流水）；
+- `spent_credits_prev`：上一对比周期的消耗（`time_range=all` 时为 `null`）；
+- `avg_daily_spent`：按窗口长度折算的日均消耗；
+- `projected_days_left`：若保持当前日均消耗，预计可用天数，适合做“余额可用 X 天”提示。
+
+### 2.2 查询 Provider 消耗排行
+
+**接口**: `GET /v1/credits/me/consumption/providers`  
+**认证**: JWT 令牌  
+**描述**: 统计当前用户在不同 Provider 上的积分消耗，帮助识别哪些上游占用了最多预算。
+
+**查询参数**:
+- `time_range`（同上，默认 `30d`）
+- `limit`（默认 6，范围 1-50）：返回的 Provider 数量，按消耗降序。
+
+**响应示例**:
+```json
+{
+  "time_range": "30d",
+  "total_spent": 420,
+  "items": [
+    {
+      "provider_id": "openai",
+      "provider_name": "OpenAI",
+      "total_spent": 300,
+      "transaction_count": 40,
+      "percentage": 0.714,
+      "last_transaction_at": "2025-01-31T20:10:00Z"
+    },
+    {
+      "provider_id": "anthropic",
+      "provider_name": "Anthropic",
+      "total_spent": 120,
+      "transaction_count": 18,
+      "percentage": 0.286,
+      "last_transaction_at": "2025-01-29T18:02:00Z"
+    }
+  ]
+}
+```
+
+### 2.3 查询积分消耗时间序列
+
+**接口**: `GET /v1/credits/me/consumption/timeseries`  
+**认证**: JWT 令牌  
+**描述**: 以日期为粒度返回积分消耗时间序列，可用于概览页折线图 / 柱状图。
+
+**查询参数**:
+- `time_range`（同上，默认 `30d`）
+- `bucket`（目前仅支持 `day`）
+- `max_points`（默认 90，范围 10-365）：限制返回的最大点数。
+
+**响应示例**:
+```json
+{
+  "time_range": "30d",
+  "bucket": "day",
+  "points": [
+    { "window_start": "2025-01-29T00:00:00Z", "spent_credits": 40 },
+    { "window_start": "2025-01-30T00:00:00Z", "spent_credits": 55 },
+    { "window_start": "2025-01-31T00:00:00Z", "spent_credits": 38 }
+  ]
+}
+```
+
+---
 
 ### 3. 管理员为用户充值积分
 

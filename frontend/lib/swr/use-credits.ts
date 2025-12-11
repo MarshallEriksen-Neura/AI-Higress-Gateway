@@ -14,6 +14,8 @@ import type {
   CreditAutoTopupBatchResponse,
   CreditAutoTopupConfig,
   CreditAutoTopupConfigInput,
+  CreditConsumptionSummary,
+  CreditConsumptionProvidersResponse,
 } from '@/lib/api-types';
 
 /**
@@ -198,5 +200,71 @@ export const useAdminUserAutoTopup = (userId?: string | null) => {
     saving,
     disabling,
     isSuperUser,
+  };
+};
+
+/**
+ * 获取积分消耗汇总（概览页）
+ * @param timeRange 时间范围：today / 7d / 30d / 90d / all
+ */
+export const useCreditConsumptionSummary = (timeRange: string = '7d') => {
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<CreditConsumptionSummary>(
+    '/v1/credits/me/consumption/summary',
+    {
+      strategy: 'static',
+      params: {
+        time_range: timeRange,
+      },
+    }
+  );
+
+  const consumption = useMemo(() => data, [data]);
+
+  return {
+    consumption,
+    error,
+    loading,
+    validating,
+    refresh,
+  };
+};
+
+/**
+ * 获取按 Provider 聚合的积分消耗（概览页）
+ * @param timeRange 时间范围：today / 7d / 30d / 90d / all
+ */
+export const useCreditProviderConsumption = (timeRange: string = '7d') => {
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<CreditConsumptionProvidersResponse>(
+    '/v1/credits/me/consumption/providers',
+    {
+      strategy: 'static',
+      params: {
+        time_range: timeRange,
+      },
+    }
+  );
+
+  const providers = useMemo(() => data?.providers || [], [data]);
+  const totalConsumption = useMemo(() => data?.total_consumption || 0, [data]);
+
+  return {
+    providers,
+    totalConsumption,
+    error,
+    loading,
+    validating,
+    refresh,
   };
 };

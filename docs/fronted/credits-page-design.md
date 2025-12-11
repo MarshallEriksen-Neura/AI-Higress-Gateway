@@ -17,6 +17,13 @@
 - `GET /v1/credits/me/transactions` - 查询积分流水（支持分页）
 - `POST /v1/credits/admin/users/{user_id}/topup` - 管理员充值（需超级用户权限）
 
+### 2.3 概览&洞察新增 API
+为了支撑积分概览、Provider 洞察与趋势卡片，新增以下接口：
+- `GET /v1/credits/me/consumption/summary` - 返回指定时间范围内的积分消耗合计、日均消耗、剩余天数预测；
+- `GET /v1/credits/me/consumption/providers` - 返回当前用户各 Provider 的积分消耗榜单（含交易次数、占比）；
+- `GET /v1/credits/me/consumption/timeseries` - 返回按天聚合的积分消耗时间序列（用于 Micro-sparkline）。  
+此外，可以复用现有 `/metrics/overview/*` 系列接口提取 Provider 成功率、延迟等运营指标。
+
 ## 三、技术架构
 
 ### 3.1 技术栈
@@ -45,6 +52,25 @@ frontend/
 ```
 
 ## 四、组件设计
+
+### 4.0 仪表盘概览模块
+
+新版概览页在顶端增加多个「概览卡片 + 趋势」模块，对应用户反馈中的数据洞察诉求：
+
+| 模块 | 说明 | 数据来源 |
+| ---- | ---- | ---- |
+| 积分消费概览卡片 | 显示所选时间范围（默认本月）内的消耗积分、剩余积分、平均单次消耗；底部放置近 7/30 天的 Micro-sparkline。 | `/v1/credits/me/consumption/summary` + `/v1/credits/me` + `/v1/credits/me/consumption/timeseries` |
+| Provider 消耗排行榜 | 以表格/条形图列出各 Provider 的积分消耗、请求量、成功率、平均延迟，支持时间维度筛选。 | `/v1/credits/me/consumption/providers` + `/metrics/overview/providers` |
+| 请求成功率 & 异常趋势 | 对比不同 Provider 的成功率、延迟，并标注异常峰值或错误码热点。 | `/metrics/overview/providers` + `/metrics/providers/timeseries` |
+| 积分预警 / 预算模块 | 展示 Projected Burn（预计耗尽日期）、余额阈值提示及 CTA（跳转积分管理/充值）。 | `/v1/credits/me/consumption/summary` |
+| 活跃模型 & 特殊事件 | 列出调用最多/失败最多的模型，提示限流或错误事件。 | `/metrics/overview/providers` + 未来的模型事件 API |
+| 时间选择器/筛选器 | 支持日/周/月快捷切换，或按 Provider / 模型过滤数据，统一驱动上述模块。 | 组件级 `useState` + 相关 API 参数 |
+| 快捷操作区 | 入口按钮：积分充值、Provider 管理、路由配置等高频任务。 | UI 快捷跳转 |
+
+> 实现提示：  
+> - 概览卡片采用 `@/components/ui/card` + `@/components/ui/chart`（或自定义 sparkline）封装，保证可复用。  
+> - 时间筛选器与 `/v1/credits/me/consumption/*` 的 `time_range` 参数保持一致（支持 `today/7d/30d/90d/all`）。  
+> - Provider 榜单可与 `OverviewActiveProviders` 数据结构整合，统一排序逻辑。
 
 ### 4.1 页面主组件 (page.tsx)
 

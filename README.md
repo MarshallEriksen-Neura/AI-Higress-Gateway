@@ -101,12 +101,13 @@ For detailed information about the Monorepo setup, see:
 
 ## Database Migrations
 
-- The backend now auto-runs `alembic upgrade head` during process startup so that
-  new columns (e.g., `providers.probe_enabled`) exist before Celery/HTTP workers
-  touch the database.
-- This behaviour can be disabled by setting `AUTO_APPLY_DB_MIGRATIONS=0` and running
-  migrations manually via `alembic upgrade head` when you need full control (e.g., CI).
-- Auto migration is skipped for SQLite/ephemeral databases that are only used in tests.
+The backend handles database schema upgrades via Alembic. See [MIGRATION_DEPLOYMENT_GUIDE.md](MIGRATION_DEPLOYMENT_GUIDE.md) for detailed deployment scenarios.
+
+**Quick Start:**
+- **Local development**: Set `ENABLE_AUTO_MIGRATION=true` and the app auto-executes migrations at startup.
+- **Production**: Use `alembic upgrade head` CLI to migrate, then disable auto-migration with `ENABLE_AUTO_MIGRATION=false`.
+
+Auto migration is skipped for SQLite/ephemeral databases (tests only).
 
 
 ## Testing

@@ -5,6 +5,7 @@ export * from "./cache";
 export * from "./hooks";
 export * from "./use-routing";
 export * from "./use-overview-metrics";
+export * from "./use-credits";
 export * from "./use-system-config";
 export * from "./use-logical-models";
 export * from "./use-registration-windows";

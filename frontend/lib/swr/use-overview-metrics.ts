@@ -5,6 +5,8 @@ import type {
   OverviewActiveProviders,
   OverviewMetricsSummary,
   OverviewMetricsTimeSeries,
+  ActiveModelsResponse,
+  OverviewEventsResponse,
 } from "@/lib/api-types";
 import { useApiGet } from "./hooks";
 
@@ -138,3 +140,135 @@ export function useOverviewActivity(
     refresh,
   };
 }
+
+export type UseOverviewActivityResult = ReturnType<typeof useOverviewActivity>;
+
+/**
+ * 获取活跃模型列表（调用最多、失败最多）
+ */
+export function useActiveModels(
+  params: UseOverviewMetricsParams = {}
+) {
+  const {
+    time_range = "7d",
+    transport = "all",
+    is_stream = "all",
+  } = params;
+
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<ActiveModelsResponse>(
+    "/metrics/overview/active-models",
+    {
+      strategy: "static",
+      params: {
+        time_range,
+        transport,
+        is_stream,
+      },
+    }
+  );
+
+  const models = useMemo(() => data, [data]);
+
+  return {
+    models,
+    error,
+    loading,
+    validating,
+    refresh,
+  };
+}
+
+export type UseActiveModelsResult = ReturnType<typeof useActiveModels>;
+
+/**
+ * 获取事件流（限流、错误等关键事件）
+ */
+export function useOverviewEvents(
+  params: UseOverviewMetricsParams = {}
+) {
+  const {
+    time_range = "7d",
+    transport = "all",
+    is_stream = "all",
+  } = params;
+
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<OverviewEventsResponse>(
+    "/metrics/overview/events",
+    {
+      strategy: "frequent",
+      params: {
+        time_range,
+        transport,
+        is_stream,
+      },
+    }
+  );
+
+  const events = useMemo(() => data?.events || [], [data]);
+
+  return {
+    events,
+    error,
+    loading,
+    validating,
+    refresh,
+  };
+}
+
+export type UseOverviewEventsResult = ReturnType<typeof useOverviewEvents>;
+
+/**
+ * 获取成功率趋势数据（按时间序列和 Provider 维度）
+ */
+export function useSuccessRateTrend(
+  params: UseOverviewMetricsParams = {}
+) {
+  const {
+    time_range = "7d",
+    transport = "all",
+    is_stream = "all",
+  } = params;
+
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<OverviewMetricsTimeSeries>(
+    "/metrics/overview/success-rate-trend",
+    {
+      strategy: "static",
+      params: {
+        time_range,
+        transport,
+        is_stream,
+        bucket: "day",
+      },
+    }
+  );
+
+  const trend = useMemo(() => data, [data]);
+
+  return {
+    trend,
+    error,
+    loading,
+    validating,
+    refresh,
+  };
+}
+
+export type UseSuccessRateTrendResult = ReturnType<typeof useSuccessRateTrend>;
