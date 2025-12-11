@@ -243,6 +243,23 @@ class TestRequestValidatorMiddleware:
             response = client.get(pattern)
             assert response.status_code == 403
 
+    def test_command_injection_blocked(self, app_with_request_validator):
+        """命令注入符号出现在参数值时应被拦截。"""
+        client = TestClient(app_with_request_validator)
+
+        response = client.get("/test?cmd=1|ls")
+
+        assert response.status_code == 403
+        assert response.json()["reason"] == "command_injection_in_query"
+
+    def test_normal_query_not_blocked_by_command_injection(self, app_with_request_validator):
+        """正常多参数查询不应因为 & 分隔符被误判。"""
+        client = TestClient(app_with_request_validator)
+
+        response = client.get("/test?time_range=7d&transport=all&is_stream=all")
+
+        assert response.status_code == 200
+
     def test_sql_injection_in_body_blocked(self, app_with_request_validator_body_and_ban):
         """Test that SQL injection payloads in request body are blocked."""
         client = TestClient(app_with_request_validator_body_and_ban)

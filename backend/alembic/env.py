@@ -6,6 +6,7 @@ import sys
 from alembic import context
 from alembic.config import Config as AlembicConfig
 from sqlalchemy import engine_from_config, pool
+import sqlalchemy as sa
 
 BASE_DIR = pathlib.Path(__file__).resolve().parents[1]
 if str(BASE_DIR) not in sys.path:
@@ -37,6 +38,9 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
+        version_table="alembic_version",
+        version_column="version_num",
+        version_column_type=sa.String(length=128),
     )
 
     with context.begin_transaction():
@@ -54,7 +58,13 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            version_table="alembic_version",
+            version_column="version_num",
+            version_column_type=sa.String(length=128),
+        )
 
         with context.begin_transaction():
             context.run_migrations()

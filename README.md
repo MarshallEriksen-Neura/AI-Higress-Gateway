@@ -65,9 +65,9 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e backend/
 ```
-3) Start Redis (dev):
+3) Local dev (hot-reload):
 ```bash
-docker-compose up -d
+docker compose up -d  # uses docker-compose.yml, .env.local
 ```
 4) Run API gateway (dev):
 ```bash
@@ -102,11 +102,13 @@ cd backend
 pytest
 ```
 
-### 🐳 Docker Compose
+### 🐳 Docker Compose (dev vs deploy)
+- Dev: `docker compose up -d` (uses `docker-compose.yml`, env from `backend/.env.local`, mounts code, `--reload`).
+- Deploy: use `docker-compose-deploy.yml` + your `.env`/`.env.deploy`, with prebuilt image `marshalleriksen/apiproxy-api:<tag>` (see GitHub Actions workflow `Publish Backend Image`). Run:
 ```bash
-docker-compose up -d  # backend + redis
+IMAGE_TAG=latest docker compose -f docker-compose-deploy.yml --env-file .env up -d
 ```
-Adjust volumes/ports in `docker-compose.yml` for production; run `alembic upgrade head` in CI before rollout.
+Alembic migrations auto-run when `AUTO_APPLY_DB_MIGRATIONS=true` (default in `.env.example`); existing DBs should already have `alembic_version.version_num` widened to 128.
 
 ### 🗺️ API Surface (high-level)
 - OpenAI-compatible gateway: `/v1/chat/completions`, `/v1/responses`, `/models`.

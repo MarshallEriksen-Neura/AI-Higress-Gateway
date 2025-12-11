@@ -225,26 +225,18 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
     def _collect_query_candidates(self, request: Request) -> set[str]:
         """
         收集用于 Query 检测的候选字符串：
-        - URL 对象中的 query
-        - scope 中的原始 query_string
+        - query 参数的 key / value
         - 各自的 URL 解码版本（处理 %xx 与 + 空格）
         """
         candidates: set[str] = set()
 
-        raw_query = str(request.url.query or "")
-        if raw_query:
-            candidates.add(raw_query)
-
-        query_bytes = request.scope.get("query_string", b"")
-        if isinstance(query_bytes, (bytes, bytearray)):
-            raw_query_scope = query_bytes.decode(errors="ignore")
-        else:
-            raw_query_scope = query_bytes or ""
-        if raw_query_scope:
-            candidates.add(raw_query_scope)
-
-        decoded_candidates = {unquote_plus(q) for q in candidates}
-        candidates.update(decoded_candidates)
+        for key, value in request.query_params.multi_items():
+            if key:
+                candidates.add(key)
+                candidates.add(unquote_plus(key))
+            if value:
+                candidates.add(value)
+                candidates.add(unquote_plus(value))
 
         return {c for c in candidates if c}
 
