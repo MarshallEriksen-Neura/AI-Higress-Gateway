@@ -1,35 +1,11 @@
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 
-// 需要认证的路由前缀（仅用于文档说明，不再强制重定向）
-const protectedRoutes = [
-  '/dashboard',
-  '/profile',
-  '/system',
-];
-
-// 公开路由（不需要认证）
-const publicRoutes = [
-  '/login',
-  '/register',
-  '/',
-];
-
-// 检查路径是否需要认证
-function isProtectedRoute(pathname: string): boolean {
-  return protectedRoutes.some(route => pathname.startsWith(route));
-}
-
-// 检查路径是否是公开路由
-function isPublicRoute(pathname: string): boolean {
-  return publicRoutes.some(route => pathname === route || pathname.startsWith(route));
-}
-
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   
-  // 从 cookie 获取 token
-  const accessToken = request.cookies.get('access_token')?.value;
+  // 从 cookie 获取 refresh_token 来判断是否已登录
+  // (access_token 存储在 localStorage 中，middleware 无法访问)
   const refreshToken = request.cookies.get('refresh_token')?.value;
   
   // 不再在 middleware 中强制重定向到 /login
@@ -37,7 +13,7 @@ export function proxy(request: NextRequest) {
   // 当 API 请求返回 401 时，会自动打开登录对话框
   
   // 如果已登录用户访问登录页，重定向到 dashboard
-  if (pathname === '/login' && accessToken) {
+  if (pathname === '/login' && refreshToken) {
     return NextResponse.redirect(new URL('/dashboard/overview', request.url));
   }
   

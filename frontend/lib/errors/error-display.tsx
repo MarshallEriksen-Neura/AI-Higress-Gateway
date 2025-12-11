@@ -8,7 +8,7 @@
 
 import { toast } from 'sonner';
 import { AlertCircle, AlertTriangle, Info, XCircle } from 'lucide-react';
-import { StandardError, ErrorSeverity } from './types';
+import { ErrorSeverity } from './types';
 import { ErrorHandler } from './error-handler';
 import { useI18n } from '@/lib/i18n-context';
 import { useCallback } from 'react';

@@ -9,16 +9,12 @@ import type {
   CreditAccount,
   CreditTransaction,
   Notification,
-  Provider,
-  ProviderSubmission,
-  ProviderPreset,
-  Role,
-  Permission,
   UserInfo,
-  Model,
-  ProviderTestResult,
-  ProviderAuditLog,
 } from './api-types';
+import type { Role, Permission } from '@/http/admin';
+import type { Provider, ProviderTestResult, ProviderAuditLog, Model } from '@/http/provider';
+import type { ProviderPreset } from '@/http/provider-preset';
+import type { ProviderSubmission } from '@/http/provider-submission';
 
 // ============= 通用组件 Props =============
 

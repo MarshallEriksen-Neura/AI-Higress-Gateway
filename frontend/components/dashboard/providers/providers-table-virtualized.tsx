@@ -12,7 +12,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Edit, Trash2, Settings, Lock, Globe, Eye, Database, Key, Users } from "lucide-react";
-import { formatRelativeTime } from "@/lib/date-utils";
 import { useI18n } from "@/lib/i18n-context";
 import { useRouter } from "next/navigation";
 import {
@@ -51,7 +50,7 @@ export function ProvidersTableVirtualized({
   onViewModels,
   currentUserId,
 }: ProvidersTableVirtualizedProps) {
-  const { t, language } = useI18n();
+  const { t } = useI18n();
   const router = useRouter();
   const parentRef = useRef<HTMLDivElement>(null);
 
@@ -94,23 +93,6 @@ export function ProvidersTableVirtualized({
       );
     }
     return <Badge variant="outline">{t("providers.probe_on")}</Badge>;
-  };
-
-  const renderProbeResult = (provider: Provider) => {
-    const latest = provider.latest_test_result;
-    if (!latest) {
-      return <span className="text-xs text-muted-foreground">{t("providers.latest_test_none")}</span>;
-    }
-    return (
-      <div className="flex flex-col gap-1">
-        <Badge variant={latest.success ? "default" : "destructive"}>
-          {latest.success ? t("providers.probe_result_success") : t("providers.probe_result_failed")}
-        </Badge>
-        <div className="text-xs text-muted-foreground truncate">
-          {latest.error_code || latest.summary || "--"}
-        </div>
-      </div>
-    );
   };
 
   if (isLoading) {
@@ -162,6 +144,9 @@ export function ProvidersTableVirtualized({
         >
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const provider = providers[virtualRow.index];
+            if (!provider) {
+              return null;
+            }
             return (
               <div
                 key={virtualRow.key}

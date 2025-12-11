@@ -19,7 +19,10 @@ export function UserMenu() {
 
   if (!user) return null;
 
-  const userInitial = user.display_name?.[0]?.toUpperCase() || user.email[0].toUpperCase();
+  const userInitial =
+    user.display_name?.[0]?.toUpperCase() ??
+    user.email?.[0]?.toUpperCase() ??
+    "";
 
   const handleLogout = async () => {
     await logout();

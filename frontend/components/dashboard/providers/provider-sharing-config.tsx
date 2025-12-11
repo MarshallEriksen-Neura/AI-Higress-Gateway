@@ -12,7 +12,8 @@ import { providerService } from "@/http/provider";
 import { useErrorDisplay } from "@/lib/errors";
 import { useUserSearch } from "@/lib/hooks/use-user-search";
 import { useI18n } from "@/lib/i18n-context";
-import type { UserLookup, ProviderVisibility } from "@/lib/api-types";
+import type { ProviderVisibility } from "@/http/provider";
+import type { UserLookup } from "@/http/user";
 
 interface ProviderSharingConfigProps {
   providerId: string;

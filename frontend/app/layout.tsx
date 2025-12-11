@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Suspense } from "react";
 import { ThemeProvider } from "@/components/theme-provider";
 import { I18nProvider } from "@/lib/i18n-context";
 import { AuthProvider } from "@/components/providers/auth-provider";
@@ -56,7 +57,9 @@ export default function RootLayout({
               <AuthProvider>
                 {children}
                 {/* 全局登录对话框 - 由 Zustand 状态控制显示 */}
-                <AuthDialog />
+                <Suspense fallback={null}>
+                  <AuthDialog />
+                </Suspense>
                 {/* PWA 安装提示 */}
                 <PWAInstallPrompt />
                 {/* 性能监控 */}

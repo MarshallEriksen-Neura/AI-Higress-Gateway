@@ -1,7 +1,7 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import type { ModelsResponse } from "@/lib/api-types";
+import type { ModelsResponse } from "@/http/provider";
 import { ModelCard } from "./model-card";
 
 interface ProviderModelsTabProps {

@@ -41,6 +41,9 @@ export function TypewriterSuffixes({
   useEffect(() => {
     if (!normalizedSuffixes.length) return;
     const current = normalizedSuffixes[currentIndex % normalizedSuffixes.length];
+    if (!current) {
+      return;
+    }
     let timer: ReturnType<typeof setTimeout>;
 
     if (phase === "typing") {
@@ -67,7 +70,12 @@ export function TypewriterSuffixes({
     return null;
   }
 
-  const current = normalizedSuffixes[currentIndex % normalizedSuffixes.length];
+  const current =
+    normalizedSuffixes[currentIndex % normalizedSuffixes.length] ??
+    normalizedSuffixes[0];
+  if (!current) {
+    return null;
+  }
 
   return (
     <Tooltip>

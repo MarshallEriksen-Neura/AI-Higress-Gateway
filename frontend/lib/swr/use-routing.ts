@@ -56,22 +56,11 @@ export const useDeleteSession = () => {
   const { trigger, submitting } = useApiDelete('/routing/sessions');
   
   const deleteSession = async (conversationId: string) => {
-    // 构建完整的URL
-    await trigger();
-    // 注意：由于useApiDelete的实现，我们需要传递完整URL
-    // 这里可能需要调整实现方式
+    await trigger(`/routing/sessions/${conversationId}`);
   };
   
   return {
-    deleteSession: async (conversationId: string) => {
-      // 直接使用完整路径
-      const response = await fetch(`/api/routing/sessions/${conversationId}`, {
-        method: 'DELETE',
-      });
-      if (!response.ok) {
-        throw new Error('Failed to delete session');
-      }
-    },
+    deleteSession,
     deleting: submitting,
   };
 };

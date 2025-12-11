@@ -13,7 +13,7 @@
  * bun run scripts/analyze-server-components.ts
  */
 
-import { readdir, readFile } from 'fs/promises';
+import { readdir, readFile, writeFile } from 'fs/promises';
 import { join, relative } from 'path';
 
 interface PageAnalysis {
@@ -328,7 +328,7 @@ async function main() {
   
   // 保存报告到文件
   const reportPath = join(baseDir, 'server-components-analysis-report.md');
-  await Bun.write(reportPath, report);
+  await writeFile(reportPath, report, 'utf-8');
   console.log(`✅ 报告已保存到: ${reportPath}\n`);
   
   // 在控制台输出报告

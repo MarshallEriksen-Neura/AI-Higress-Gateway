@@ -180,10 +180,8 @@ export function UserResourceManagementExample() {
   const {
     data: users,
     createResource,
-    updateResource,
     deleteResource,
     creating,
-    updating,
     deleting
   } = useResource<User, CreateUserRequest>('/users');
   

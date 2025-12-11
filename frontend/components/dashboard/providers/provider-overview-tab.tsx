@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Provider, MetricsResponse } from "@/http/provider";
 
@@ -32,7 +33,7 @@ export const ProviderOverviewTab = ({
   children 
 }: ProviderOverviewTabProps) => {
   // 计算汇总指标
-  const summaryMetrics = React.useMemo(() => {
+  const summaryMetrics = useMemo(() => {
     if (!metrics?.metrics || metrics.metrics.length === 0) {
       return {
         totalRequests: 0,

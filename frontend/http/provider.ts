@@ -211,8 +211,9 @@ export interface UserAvailableProvidersResponse {
 
 // 创建私有提供商请求
 export interface CreatePrivateProviderRequest {
-  name: string;
-  base_url: string;
+  preset_id?: string;
+  name?: string;
+  base_url?: string;
   api_key: string;
   provider_type?: ProviderType;
   transport?: TransportType;

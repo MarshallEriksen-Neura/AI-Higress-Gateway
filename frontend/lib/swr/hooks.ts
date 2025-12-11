@@ -1,7 +1,7 @@
 "use client";
 
 import useSWR, { SWRConfiguration } from 'swr';
-import useSWRMutation from 'swr/mutation';
+import useSWRMutation, { SWRMutationConfiguration } from 'swr/mutation';
 import { useState, useCallback } from 'react';
 import { swrFetcher } from './fetcher';
 import { useCacheStrategy } from './cache';
@@ -50,7 +50,7 @@ export const useApiGet = <T = any>(
 // POST 请求 Mutation Hook
 export const useApiPost = <T = any, P = any>(
   url: string,
-  options: SWRConfiguration = {}
+  options: SWRMutationConfiguration<T, any, string, P> = {}
 ) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -69,16 +69,18 @@ export const useApiPost = <T = any, P = any>(
     options
   );
 
+  const typedTrigger = trigger as unknown as (arg: P) => Promise<T>;
+
   const wrappedTrigger = useCallback(async (arg: P) => {
     try {
-      const result = await trigger(arg);
+      const result = await typedTrigger(arg);
       setIsSubmitting(false);
       return result;
     } catch (err) {
       setIsSubmitting(false);
       throw err;
     }
-  }, [trigger]);
+  }, [typedTrigger]);
 
   return {
     trigger: wrappedTrigger,
@@ -92,7 +94,7 @@ export const useApiPost = <T = any, P = any>(
 // PUT 请求 Mutation Hook
 export const useApiPut = <T = any, P = any>(
   url: string,
-  options: SWRConfiguration = {}
+  options: SWRMutationConfiguration<T, any, string, P> = {}
 ) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -104,23 +106,35 @@ export const useApiPut = <T = any, P = any>(
     reset,
   } = useSWRMutation<T, any, string, P>(
     url,
-    (url: string, { arg }: { arg: P }) => {
+    (baseUrl: string, { arg }: { arg: P }) => {
       setIsSubmitting(true);
-      return swrFetcher.put(url, arg);
+      const hasIdAndData =
+        typeof arg === "object" &&
+        arg !== null &&
+        "id" in (arg as Record<string, any>) &&
+        "data" in (arg as Record<string, any>);
+      if (hasIdAndData) {
+        const { id, data } = arg as Record<string, any>;
+        const targetUrl = `${baseUrl}/${id}`;
+        return swrFetcher.put(targetUrl, data);
+      }
+      return swrFetcher.put(baseUrl, arg);
     },
     options
   );
 
+  const typedTrigger = trigger as unknown as (arg: P) => Promise<T>;
+
   const wrappedTrigger = useCallback(async (arg: P) => {
     try {
-      const result = await trigger(arg);
+      const result = await typedTrigger(arg);
       setIsSubmitting(false);
       return result;
     } catch (err) {
       setIsSubmitting(false);
       throw err;
     }
-  }, [trigger]);
+  }, [typedTrigger]);
 
   return {
     trigger: wrappedTrigger,
@@ -132,9 +146,9 @@ export const useApiPut = <T = any, P = any>(
 };
 
 // DELETE 请求 Mutation Hook
-export const useApiDelete = <T = any>(
+export const useApiDelete = <T = any, P = string | undefined>(
   url: string,
-  options: SWRConfiguration = {}
+  options: SWRMutationConfiguration<T, any, string, P> = {}
 ) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -144,25 +158,29 @@ export const useApiDelete = <T = any>(
     error,
     isMutating,
     reset,
-  } = useSWRMutation<T, any>(
+  } = useSWRMutation<T, any, string, P>(
     url,
-    (url: string) => {
+    (baseUrl: string, { arg }: { arg: P }) => {
       setIsSubmitting(true);
-      return swrFetcher.delete(url);
+      const target =
+        typeof arg === "string" && arg ? arg : baseUrl;
+      return swrFetcher.delete(target);
     },
     options
   );
 
-  const wrappedTrigger = useCallback(async () => {
+  const typedTrigger = trigger as unknown as (arg: P) => Promise<T>;
+
+  const wrappedTrigger = useCallback(async (arg: P) => {
     try {
-      const result = await trigger();
+      const result = await typedTrigger(arg);
       setIsSubmitting(false);
       return result;
     } catch (err) {
       setIsSubmitting(false);
       throw err;
     }
-  }, [trigger]);
+  }, [typedTrigger]);
 
   return {
     trigger: wrappedTrigger,
@@ -176,7 +194,7 @@ export const useApiDelete = <T = any>(
 // PATCH 请求 Mutation Hook
 export const useApiPatch = <T = any, P = any>(
   url: string,
-  options: SWRConfiguration = {}
+  options: SWRMutationConfiguration<T, any, string, P> = {}
 ) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -195,16 +213,18 @@ export const useApiPatch = <T = any, P = any>(
     options
   );
 
+  const typedTrigger = trigger as unknown as (arg: P) => Promise<T>;
+
   const wrappedTrigger = useCallback(async (arg: P) => {
     try {
-      const result = await trigger(arg);
+      const result = await typedTrigger(arg);
       setIsSubmitting(false);
       return result;
     } catch (err) {
       setIsSubmitting(false);
       throw err;
     }
-  }, [trigger]);
+  }, [typedTrigger]);
 
   return {
     trigger: wrappedTrigger,
@@ -223,7 +243,7 @@ export const usePaginatedData = <T = any>(
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   
-  const { params, ...restOptions } = options;
+  const { params } = options;
   const fullParams = {
     ...params,
     page,
@@ -268,7 +288,7 @@ export const useSearchData = <T = any>(
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedSearchTerm, setDebouncedSearchTerm] = useState('');
   
-  const { params, ...restOptions } = options;
+  const { params } = options;
   const fullParams = {
     ...params,
     search: debouncedSearchTerm,
@@ -312,22 +332,21 @@ export const useSearchData = <T = any>(
 // 资源管理 Hook (CRUD 操作)
 export const useResource = <T = any, P = any>(
   resourceUrl: string,
-  options: SWRConfiguration = {}
+  options: UseSWROptions = {}
 ) => {
   // 获取资源列表
   const getResource = useApiGet<T[]>(resourceUrl, options);
   
   // 创建资源
-  const createResource = useApiPost<T, P>(resourceUrl, options);
+  const createResource = useApiPost<T, P>(resourceUrl);
   
   // 更新资源
   const updateResource = useApiPut<T, { id: string; data: Partial<P> }>(
-    resourceUrl,
-    options
+    resourceUrl
   );
   
   // 删除资源
-  const deleteResource = useApiDelete<T>(resourceUrl, options);
+  const deleteResource = useApiDelete<T>(resourceUrl);
 
   // 创建资源的包装函数
   const handleCreate = useCallback(async (data: P) => {

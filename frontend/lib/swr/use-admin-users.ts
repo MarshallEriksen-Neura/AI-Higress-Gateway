@@ -1,7 +1,8 @@
 "use client";
 
 import useSWR from "swr";
-import { adminService, type UserInfo } from "@/http/admin";
+import { adminService } from "@/http/admin";
+import type { UserInfo } from "@/lib/api-types";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
 /**

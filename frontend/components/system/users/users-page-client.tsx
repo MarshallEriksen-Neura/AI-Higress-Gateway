@@ -147,7 +147,7 @@ export function UsersPageClient() {
                 </div>
             </div>
 
-            {isSuperUser && <RegistrationWindowCard onRefresh={fetchData} />}
+            {isSuperUser && <RegistrationWindowCard />}
 
             <UsersTable
                 users={users}

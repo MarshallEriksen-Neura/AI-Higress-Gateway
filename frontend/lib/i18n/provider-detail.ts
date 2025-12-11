@@ -257,4 +257,5 @@ export const providerDetailTranslations = {
   },
 } as const;
 
-export type ProviderDetailTranslations = typeof providerDetailTranslations["zh-CN"];
+export type ProviderDetailTranslations =
+  (typeof providerDetailTranslations)[keyof typeof providerDetailTranslations];

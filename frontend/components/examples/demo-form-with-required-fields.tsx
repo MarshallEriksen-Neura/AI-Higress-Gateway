@@ -25,9 +25,7 @@ import {
 const formSchema = z.object({
   name: z.string().min(2, "名称至少2个字符").max(100, "名称最多100个字符"),
   email: z.string().email("请输入有效的邮箱地址"),
-  category: z.string({
-    required_error: "请选择一个类别",
-  }),
+  category: z.string().nonempty("请选择一个类别"),
   description: z.string().optional(),
 });
 

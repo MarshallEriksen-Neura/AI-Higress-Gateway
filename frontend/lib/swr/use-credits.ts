@@ -89,7 +89,6 @@ export const useAdminTopup = () => {
         throw new Error(t("common.error_superuser_required"));
       }
 
-      const url = `/v1/credits/admin/users/${userId}/topup`;
       return await creditService.adminTopup(userId, data);
     },
     [isSuperUser, t]
@@ -185,7 +184,7 @@ export const useAdminUserAutoTopup = (userId?: string | null) => {
     if (!url) {
       throw new Error(t('credits.auto_topup_load_error'));
     }
-    await disableTrigger();
+    await disableTrigger(url);
     await refresh();
   }, [disableTrigger, isSuperUser, refresh, t, url]);
 

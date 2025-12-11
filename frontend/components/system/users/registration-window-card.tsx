@@ -9,16 +9,11 @@ import { useI18n } from "@/lib/i18n-context";
 import { toast } from "sonner";
 import {
     useActiveRegistrationWindow,
-    useCreateRegistrationWindow,
     useCloseRegistrationWindow,
 } from "@/lib/swr/use-registration-windows";
 import { RegistrationWindowDialog } from "@/components/system/users/registration-window-dialog";
 
-interface RegistrationWindowCardProps {
-    onRefresh: () => void;
-}
-
-export function RegistrationWindowCard({ onRefresh }: RegistrationWindowCardProps) {
+export function RegistrationWindowCard() {
     const { t } = useI18n();
     const { window: activeWindow, loading: registrationLoading, refresh: refreshRegistrationWindow } = useActiveRegistrationWindow();
     const { closeWindow, closing: closingWindow } = useCloseRegistrationWindow();

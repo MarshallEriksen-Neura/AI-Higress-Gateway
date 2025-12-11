@@ -47,7 +47,7 @@ export const usePrivateProviders = (options: UsePrivateProvidersOptions) => {
   );
 
   // 更新私有提供商
-  const updateMutation = useApiPut<Provider, UpdatePrivateProviderRequest>(
+  const updateMutation = useApiPut<Provider, { id: string; data: UpdatePrivateProviderRequest }>(
     userId ? `/users/${userId}/private-providers` : ""
   );
 
@@ -67,7 +67,7 @@ export const usePrivateProviders = (options: UsePrivateProvidersOptions) => {
   // 更新提供商的包装函数
   const updateProvider = async (providerId: string, data: UpdatePrivateProviderRequest) => {
     if (!userId) throw new Error("User ID is required");
-    const result = await updateMutation.trigger(data);
+    const result = await updateMutation.trigger({ id: providerId, data });
     // 更新成功后刷新列表
     await refresh();
     return result;
@@ -76,7 +76,9 @@ export const usePrivateProviders = (options: UsePrivateProvidersOptions) => {
   // 删除提供商的包装函数
   const deleteProvider = async (providerId: string) => {
     if (!userId) throw new Error("User ID is required");
-    const result = await deleteMutation.trigger();
+    const result = await deleteMutation.trigger(
+      `/users/${userId}/private-providers/${providerId}`
+    );
     // 删除成功后刷新列表
     await refresh();
     return result;

@@ -1,8 +1,8 @@
 "use client";
 
 import { Cache } from 'swr';
-import { useState, useCallback } from 'react';
-import useSWR, { useSWRConfig, mutate } from 'swr';
+import { useCallback } from 'react';
+import { useSWRConfig, mutate } from 'swr';
 
 // 缓存管理工具类
 export class SWRCacheManager {
@@ -29,12 +29,24 @@ export class SWRCacheManager {
 
   // 删除缓存
   deleteKey(key: string): boolean {
-    return this.cache.delete(key);
+    const cacheWithHas = this.cache as Cache<any> & { has?: (key: string) => boolean };
+    const existed = typeof cacheWithHas.has === 'function'
+      ? cacheWithHas.has(key)
+      : this.cache.get(key) !== undefined;
+    this.cache.delete(key);
+    return !!existed;
   }
 
   // 清空所有缓存
   clear(): void {
-    this.cache.clear();
+    const cacheAny = this.cache as Cache<any> & { clear?: () => void };
+    if (typeof cacheAny.clear === 'function') {
+      cacheAny.clear();
+      return;
+    }
+    this.getKeys().forEach(key => {
+      this.cache.delete(key);
+    });
   }
 
   // 根据模式匹配缓存键

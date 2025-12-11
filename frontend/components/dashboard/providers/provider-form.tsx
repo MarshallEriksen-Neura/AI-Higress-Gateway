@@ -18,7 +18,8 @@ import { Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { useErrorDisplay } from "@/lib/errors";
 import { ProviderPreset } from "@/http/provider-preset";
-import { CreatePrivateProviderRequest, ApiStyle, SdkVendor } from "@/http/private-provider";
+import type { CreatePrivateProviderRequest } from "@/http/provider";
+import { ApiStyle, SdkVendor } from "@/http/private-provider";
 import { PresetSelector } from "./preset-selector";
 import { BasicProviderConfig } from "./basic-provider-config";
 import { AdvancedProviderConfig } from "./advanced-provider-config";
@@ -173,7 +174,7 @@ const createProviderFormSchema = (sdkVendorOptions: string[]) =>
     });
 
 type ProviderFormSchema = ReturnType<typeof createProviderFormSchema>;
-type ProviderFormValues = z.infer<ProviderFormSchema>;
+type ProviderFormValues = z.input<ProviderFormSchema>;
 
 const providerFormDefaults: ProviderFormValues = {
     presetId: "",
@@ -414,16 +415,13 @@ export function ProviderFormEnhanced({
                 // 创建模式
                 const createPayload: CreatePrivateProviderRequest = {
                     preset_id: values.presetId || undefined,
-                    name: values.name.trim(),
+                    name: values.name.trim() || undefined,
+                    base_url: values.baseUrl?.trim() || undefined,
+                    api_key: values.apiKey.trim(),
                     provider_type: values.providerType,
                     transport: values.transport,
                     weight: Number(values.weight),
                 };
-
-                // Base URL（所有模式下都需要）
-                if (values.baseUrl?.trim()) {
-                    createPayload.base_url = values.baseUrl.trim();
-                }
 
                 // SDK 模式下显式传递 sdk_vendor
                 if (values.transport === "sdk" && values.sdkVendor) {
@@ -441,8 +439,9 @@ export function ProviderFormEnhanced({
                 if (values.maxQps?.trim()) createPayload.max_qps = Number(values.maxQps);
                 if (values.costInput?.trim()) createPayload.cost_input = Number(values.costInput);
                 if (values.costOutput?.trim()) createPayload.cost_output = Number(values.costOutput);
-                if (values.apiKey?.trim()) createPayload.api_key = values.apiKey.trim();
-
+                if (!createPayload.base_url) {
+                    createPayload.base_url = values.baseUrl?.trim();
+                }
                 // 高级配置
                 if (values.retryableStatusCodes.length > 0) {
                     createPayload.retryable_status_codes = values.retryableStatusCodes;

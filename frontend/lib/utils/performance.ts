@@ -203,3 +203,57 @@ export function getPerformanceSummary() {
   
   return summary;
 }
+
+/**
+ * 创建性能标记
+ */
+export function mark(name: string) {
+  if (typeof performance === 'undefined' || typeof performance.mark !== 'function') {
+    return;
+  }
+  try {
+    performance.mark(name);
+  } catch (error) {
+    console.error('Failed to mark performance entry:', error);
+  }
+}
+
+/**
+ * 测量两个标记之间的时间
+ */
+export function measure(name: string, startMark: string, endMark: string): number | null {
+  if (typeof performance === 'undefined' || typeof performance.measure !== 'function') {
+    return null;
+  }
+  try {
+    performance.measure(name, startMark, endMark);
+    const entries = performance.getEntriesByName(name);
+    const duration = entries.at(-1)?.duration ?? null;
+    performance.clearMeasures(name);
+    performance.clearMarks(startMark);
+    performance.clearMarks(endMark);
+    return duration;
+  } catch (error) {
+    console.error('Failed to measure performance:', error);
+    return null;
+  }
+}
+
+/**
+ * 记录组件渲染时间
+ */
+export function logComponentRender(componentName: string) {
+  const startMark = `${componentName}-render-start-${Date.now()}`;
+  const endMark = `${componentName}-render-end-${Date.now()}`;
+  mark(startMark);
+
+  return () => {
+    mark(endMark);
+    const duration = measure(`${componentName}-render`, startMark, endMark);
+    if (duration !== null && process.env.NODE_ENV === 'development') {
+      console.log(
+        `[Performance] ${componentName} rendered in ${duration.toFixed(2)}ms`,
+      );
+    }
+  };
+}

@@ -41,7 +41,6 @@ export const useApiKeys = () => {
 
   const updateApiKey = useCallback(async (keyId: string, data: UpdateApiKeyRequest) => {
     if (!userId) throw new Error('用户未登录');
-    const url = `/users/${userId}/api-keys/${keyId}`;
     const result = await apiKeyService.updateApiKey(userId, keyId, data);
     await refresh();
     return result;
