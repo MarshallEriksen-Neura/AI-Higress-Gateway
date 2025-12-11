@@ -137,7 +137,7 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
         enable_user_agent_check: bool = True,
         log_suspicious_requests: bool = True,
         inspect_body: bool = False,
-        inspect_body_max_length: int = 10_240,
+        inspect_body_max_length: int | None = None,
         allowed_body_content_types: tuple[str, ...] = (
             "application/json",
             "application/x-www-form-urlencoded",
@@ -317,7 +317,11 @@ class RequestValidatorMiddleware(BaseHTTPMiddleware):
     async def _get_body_text(self, request: Request) -> tuple[str, Request | None]:
         body = await request.body()
 
-        if self.inspect_body_max_length and len(body) > self.inspect_body_max_length:
+        if (
+            self.inspect_body_max_length
+            and self.inspect_body_max_length > 0
+            and len(body) > self.inspect_body_max_length
+        ):
             return "__payload_too_large__", None
 
         async def receive() -> dict[str, bytes | bool]:

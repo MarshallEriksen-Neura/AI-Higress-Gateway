@@ -1,6 +1,5 @@
 "use client";
 
-
 import { ProviderPreset } from "@/http/provider-preset";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -33,7 +32,7 @@ export function ProviderPresetTable({
     return (
       <div className="rounded-md border">
         <div className="p-8 text-center text-muted-foreground">
-          加载中...
+          {t("provider_presets.loading")}
         </div>
       </div>
     );
@@ -44,10 +43,10 @@ export function ProviderPresetTable({
       <div className="rounded-md border">
         <div className="p-12 text-center">
           <p className="text-lg font-medium text-muted-foreground mb-2">
-            暂无提供商预设
+            {t("provider_presets.empty_title")}
           </p>
           <p className="text-sm text-muted-foreground">
-            点击"创建预设"按钮添加第一个提供商预设
+            {t("provider_presets.empty_description")}
           </p>
         </div>
       </div>
@@ -60,25 +59,25 @@ export function ProviderPresetTable({
         <TableHeader>
           <TableRow className="bg-muted/50">
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
-              预设ID
+              {t("provider_presets.table_preset_id")}
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
-              显示名称
+              {t("provider_presets.table_display_name")}
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
-              基础URL
+              {t("provider_presets.table_base_url")}
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
-              提供商类型
+              {t("provider_presets.table_provider_type")}
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
-              传输方式
+              {t("provider_presets.table_transport")}
             </TableHead>
             <TableHead className="px-4 py-3 text-left text-sm font-medium">
-              创建时间
+              {t("provider_presets.table_created_at")}
             </TableHead>
             <TableHead className="px-4 py-3 text-right text-sm font-medium">
-              操作
+              {t("provider_presets.table_actions")}
             </TableHead>
           </TableRow>
         </TableHeader>
@@ -114,7 +113,9 @@ export function ProviderPresetTable({
                       : "secondary"
                   }
                 >
-                  {preset.provider_type === "native" ? "原生" : "聚合"}
+                  {preset.provider_type === "native"
+                    ? t("provider_presets.provider_type_native")
+                    : t("provider_presets.provider_type_aggregate")}
                 </Badge>
               </TableCell>
               <TableCell className="px-4 py-3 text-sm">

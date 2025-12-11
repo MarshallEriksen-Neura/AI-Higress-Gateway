@@ -83,7 +83,7 @@ app.add_middleware(
     enable_command_injection_check=True,
     log_suspicious_requests=True,
     inspect_body=True,  # 解析并扫描 JSON/表单请求体
-    inspect_body_max_length=10_240,  # 请求体扫描大小上限（字节），超出直接拒绝
+    inspect_body_max_length=None,  # 可选：设置上限后超出直接拒绝；默认为无限制
     ban_ip_on_detection=True,  # 命中规则后自动封禁 IP
     ban_ttl_seconds=900,  # 封禁 15 分钟，可通过 Redis 共享
     allowed_ips={"10.0.0.9"},  # 可选：跳过校验的白名单 IP（如内网健康检查）

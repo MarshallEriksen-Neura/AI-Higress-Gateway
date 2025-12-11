@@ -314,6 +314,18 @@ class TestRequestValidatorMiddleware:
         assert response.status_code == 200
         assert response.json()["message"] == "ok"
 
+    def test_large_body_allowed_without_limit(self, app_with_request_validator_body_and_ban):
+        """When no body limit is configured, large payloads should pass."""
+        client = TestClient(app_with_request_validator_body_and_ban)
+
+        response = client.post(
+            "/submit",
+            json={"data": "x" * 50_000},
+        )
+
+        assert response.status_code == 200
+        assert response.json()["data"].startswith("x")
+
     def test_large_body_rejected_during_inspection(self, app_with_request_validator_body_limit):
         """Oversized bodies should be rejected before inspection to avoid DoS."""
         client = TestClient(app_with_request_validator_body_limit)
