@@ -142,7 +142,8 @@ def create_app() -> FastAPI:
             enable_command_injection_check=True,
             enable_user_agent_check=True,
             log_suspicious_requests=True,
-            inspect_body=True,
+            # 暂时关闭请求体扫描，避免大包体/文件上传被误判，后续按需再开启
+            inspect_body=False,
             ban_ip_on_detection=True,
             ban_ttl_seconds=900,
         )

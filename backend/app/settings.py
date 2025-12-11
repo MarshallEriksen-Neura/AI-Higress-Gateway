@@ -76,6 +76,11 @@ class Settings(BaseSettings):
         alias="APP_ENV",
         description="当前运行环境，例如 development / production；默认 development",
     )
+    security_middleware_override: bool | None = Field(
+        default=None,
+        alias="ENABLE_SECURITY_MIDDLEWARE",
+        description="显式控制是否启用安全中间件栈：true 强制开启，false 强制关闭；默认根据 APP_ENV=production 判断",
+    )
     # 初始管理员
     default_admin_username: str = Field(
         "admin",
@@ -453,8 +458,10 @@ class Settings(BaseSettings):
     def enable_security_middleware(self) -> bool:
         """
         是否启用安全相关中间件栈。
-        默认仅在 APP_ENV=production 时开启。
+        默认仅在 APP_ENV=production 时开启，可通过 ENABLE_SECURITY_MIDDLEWARE 显式覆盖。
         """
+        if self.security_middleware_override is not None:
+            return self.security_middleware_override
         return self.environment.lower() == "production"
 
 settings = Settings()  # Reads from environment if available

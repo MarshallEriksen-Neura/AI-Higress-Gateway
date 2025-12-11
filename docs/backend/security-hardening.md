@@ -78,7 +78,8 @@ app.add_middleware(
     enable_command_injection_check=True,
     enable_user_agent_check=True,
     log_suspicious_requests=True,
-    inspect_body=True,  # 启用后会解析 JSON/表单请求体并做规则匹配
+    # 生产环境建议开启请求体扫描；当前默认关闭以避免大包体/文件上传误判
+    inspect_body=False,
     inspect_body_max_length=None,  # 可选：设置上限后超出直接拒绝；默认不限制
     ban_ip_on_detection=True,  # 命中恶意规则后自动封禁来源 IP
     ban_ttl_seconds=900,  # 封禁 15 分钟（结合 Redis 可跨实例共享）
@@ -99,6 +100,7 @@ app.add_middleware(
 - 长期追踪：若需要审计或拉黑高风险来源，可将命中记录追加到数据库/日志管道，由离线任务决定是否写入持久化黑名单表；
 - 业务白名单：为健康检查、可信代理等来源 IP 或路径预留白名单，避免因规则误伤产生全局封禁；
 - DoS 防护：如果担心大包体 DoS，可按需配置 `inspect_body_max_length`，仅解析文本类 Content-Type；默认不做体积限制。
+- 全局开关：可通过环境变量 `ENABLE_SECURITY_MIDDLEWARE` 显式控制安全中间件栈（true 强制开启，false 关闭；默认跟随 `APP_ENV=production`）。
 
 ### 2. 容器化安全
 

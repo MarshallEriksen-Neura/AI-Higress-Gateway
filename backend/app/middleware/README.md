@@ -82,7 +82,8 @@ app.add_middleware(
     enable_path_traversal_check=True,
     enable_command_injection_check=True,
     log_suspicious_requests=True,
-    inspect_body=True,  # 解析并扫描 JSON/表单请求体
+    # 生产环境建议按需开启请求体扫描，当前默认关闭以避免大包体/文件上传误判
+    inspect_body=False,
     inspect_body_max_length=None,  # 可选：设置上限后超出直接拒绝；默认为无限制
     ban_ip_on_detection=True,  # 命中规则后自动封禁 IP
     ban_ttl_seconds=900,  # 封禁 15 分钟，可通过 Redis 共享
@@ -95,6 +96,7 @@ app.add_middleware(
 - 支持命中规则后自动封禁来源 IP，默认使用内存存储，可传入 Redis 客户端以共享封禁名单；
 - 返回体中追加 `reason` 字段，便于定位阻断原因（如 `sql_injection_in_body`、`ip_blocked`）。
 - 支持白名单 IP / 路径前缀跳过检测；扫描请求体时可限制最大大小并仅处理文本类 Content-Type，降低 DoS 风险。
+- 可通过环境变量 `ENABLE_SECURITY_MIDDLEWARE` 显式开启/关闭整组安全中间件（默认跟随 `APP_ENV=production`）。
 
 ## 测试
 
