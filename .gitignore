@@ -27,6 +27,7 @@ backend/.env
 
 # Root environment (for Docker Compose)
 .env
+.env.deploy
 
 # Celery Beat scheduler database
 backend/celerybeat-schedule

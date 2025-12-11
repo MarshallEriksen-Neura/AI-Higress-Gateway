@@ -1,26 +1,36 @@
 
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 from pydantic import Field
 
-try:
-    # Prefer real pydantic-settings when available.
-    from pydantic_settings import BaseSettings, SettingsConfigDict
-except ModuleNotFoundError:  # pragma: no cover - lightweight fallback for tests
-    class BaseSettings:  # type: ignore[misc]
-        """
-        Minimal stand-in for pydantic_settings.BaseSettings used when the
-        dependency is not installed (e.g., in constrained test environments).
+# 只在实际运行时导入，类型检查时跳过
+if not TYPE_CHECKING:
+    try:
+        # Prefer real pydantic-settings when available.
+        from pydantic_settings import BaseSettings, SettingsConfigDict
+    except ModuleNotFoundError:  # pragma: no cover - lightweight fallback for tests
+        class BaseSettings:  # type: ignore[misc]
+            """
+            Minimal stand-in for pydantic_settings.BaseSettings used when the
+            dependency is not installed (e.g., in constrained test environments).
 
-        It behaves like a simple object with attribute defaults.
-        """
+            It behaves like a simple object with attribute defaults.
+            """
 
-        def __init__(self, **data):
-            for k, v in data.items():
-                setattr(self, k, v)
+            def __init__(self, **data: Any) -> None:
+                for k, v in data.items():
+                    setattr(self, k, v)
 
-    class SettingsConfigDict(dict):  # type: ignore[misc]
+        class SettingsConfigDict(dict):  # type: ignore[misc]
+            pass
+else:
+    # 类型检查时使用的简化版本
+    class BaseSettings:  # type: ignore[no-redef]
+        pass
+    
+    class SettingsConfigDict(dict):  # type: ignore[no-redef]
         pass
 
 
@@ -33,6 +43,31 @@ class Settings(BaseSettings):
         env_file=str(_project_root / ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
+    )
+
+    # CORS 配置
+    cors_allow_origins: str = Field(
+        "http://localhost:3000",
+        alias="CORS_ALLOW_ORIGINS",
+        description="允许的跨域来源，多个来源用逗号分隔"
+    )
+    
+    cors_allow_credentials: bool = Field(
+        True,
+        alias="CORS_ALLOW_CREDENTIALS",
+        description="是否允许跨域请求携带凭证"
+    )
+    
+    cors_allow_methods: str = Field(
+        "*",
+        alias="CORS_ALLOW_METHODS",
+        description="允许的跨域请求方法，多个方法用逗号分隔，* 表示所有方法"
+    )
+    
+    cors_allow_headers: str = Field(
+        "*",
+        alias="CORS_ALLOW_HEADERS",
+        description="允许的跨域请求头，多个头用逗号分隔，* 表示所有头"
     )
 
     # Environment / mode

@@ -37,7 +37,9 @@ const nextConfig: NextConfig = {
   // Turbopack 配置（开发模式）
   turbopack: {},
   
-  allowedDevOrigins: ["192.168.31.145"],
+  allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS 
+    ? process.env.ALLOWED_DEV_ORIGINS.split(',') 
+    : ["192.168.31.145"],
   
   // 图片优化配置
   images: {
@@ -58,17 +60,34 @@ const nextConfig: NextConfig = {
         pathname: '/media/**',
       },
       {
-        protocol: 'http',
-        hostname: 'localhost',
-        port: '8001',
-        pathname: '/media/**',
-      },
-      {
         protocol: 'https',
         hostname: '**',
         pathname: '/media/**',
       },
     ],
+  },
+  
+  // 安全头部配置
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          {
+            key: 'X-Frame-Options',
+            value: 'DENY'
+          },
+          {
+            key: 'X-Content-Type-Options',
+            value: 'nosniff'
+          },
+          {
+            key: 'Referrer-Policy',
+            value: 'strict-origin-when-cross-origin'
+          }
+        ]
+      }
+    ];
   },
   
   // 生产构建输出配置

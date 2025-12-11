@@ -42,6 +42,7 @@ from .api.v1.user_routes import router as user_router
 from .db import SessionLocal
 from .logging_config import logger
 from .services.bootstrap_admin import ensure_initial_admin
+from .services.avatar_service import ensure_avatar_storage_dir
 
 
 async def handle_unexpected_error(request: Request, exc: Exception):
@@ -99,7 +100,11 @@ def create_app() -> FastAPI:
         RequestValidatorMiddleware,
         SecurityHeadersMiddleware,
     )
-    from app.services.avatar_service import ensure_avatar_storage_dir
+
+    # 解析 CORS 配置
+    cors_origins = [origin.strip() for origin in settings.cors_allow_origins.split(",")] if settings.cors_allow_origins else []
+    cors_methods = [method.strip() for method in settings.cors_allow_methods.split(",")] if settings.cors_allow_methods != "*" else ["*"]
+    cors_headers = [header.strip() for header in settings.cors_allow_headers.split(",")] if settings.cors_allow_headers != "*" else ["*"]
 
     # 使用 lifespan 替代 on_event("startup")
     app = FastAPI(title="AI Gateway", version="0.1.0", lifespan=lifespan)
@@ -151,14 +156,10 @@ def create_app() -> FastAPI:
     # CORS
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=[
-            "http://localhost:3000",
-            "http://localhost:3001",
-            "http://192.168.31.145:3000",
-        ],
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_origins=cors_origins,
+        allow_credentials=settings.cors_allow_credentials,
+        allow_methods=cors_methods,
+        allow_headers=cors_headers,
     )
 
     # 用户头像等本地静态文件挂载

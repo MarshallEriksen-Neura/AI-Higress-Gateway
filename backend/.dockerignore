@@ -1,0 +1,33 @@
+# VCS / IDE
+.git
+.gitignore
+.vscode
+.idea
+
+# Python caches / tools
+__pycache__
+*.py[cod]
+.pytest_cache
+.mypy_cache
+ruff_cache
+.pyre
+.pytype
+.uv
+.uv-cache
+.venv
+.coverage
+coverage.xml
+htmlcov
+
+# Env / secrets / local data
+.env
+.env.*
+*.log
+logs/
+media/
+tmp.db
+celerybeat-schedule*
+*.sqlite*
+
+# Tests and local artefacts not needed in runtime image
+tests/
