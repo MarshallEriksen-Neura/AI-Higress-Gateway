@@ -1838,23 +1838,19 @@ async def test_build_provider_headers_openai_style():
     """
     测试 _build_provider_headers 对 OpenAI 风格使用 Authorization: Bearer 头
     """
-    from app.provider.key_pool import ProviderKeyPool
-    from tests.utils import InMemoryRedis
-    
-    fake_redis = InMemoryRedis()
+    from app.provider.key_pool import reset_key_pool
+
     provider_cfg = ProviderConfig(
-        provider_id="test-openai",
+        id="test-openai",
+        name="Test OpenAI",
         base_url="https://api.openai.com",
-        api_keys=["sk-test-key-123"],
+        api_key="sk-test-key-123",
     )
-    
-    # 初始化 key pool
-    pool = ProviderKeyPool(provider_cfg.provider_id, provider_cfg.api_keys)
-    await pool.initialize(fake_redis)
+    reset_key_pool(provider_cfg.id)
     
     # 测试 OpenAI 风格（默认）
     headers, key_selection = await _build_provider_headers(
-        provider_cfg, fake_redis, api_style="openai"
+        provider_cfg, redis=None, api_style="openai"
     )
     
     assert "Authorization" in headers
@@ -1868,23 +1864,19 @@ async def test_build_provider_headers_claude_style():
     """
     测试 _build_provider_headers 对 Claude 风格使用 x-api-key 头
     """
-    from app.provider.key_pool import ProviderKeyPool
-    from tests.utils import InMemoryRedis
-    
-    fake_redis = InMemoryRedis()
+    from app.provider.key_pool import reset_key_pool
+
     provider_cfg = ProviderConfig(
-        provider_id="test-claude",
+        id="test-claude",
+        name="Test Claude",
         base_url="https://api.anthropic.com",
-        api_keys=["sk-ant-test-key-456"],
+        api_key="sk-ant-test-key-456",
     )
-    
-    # 初始化 key pool
-    pool = ProviderKeyPool(provider_cfg.provider_id, provider_cfg.api_keys)
-    await pool.initialize(fake_redis)
+    reset_key_pool(provider_cfg.id)
     
     # 测试 Claude 风格
     headers, key_selection = await _build_provider_headers(
-        provider_cfg, fake_redis, api_style="claude"
+        provider_cfg, redis=None, api_style="claude"
     )
     
     assert "x-api-key" in headers
@@ -1898,23 +1890,19 @@ async def test_build_provider_headers_default_to_openai():
     """
     测试 _build_provider_headers 默认使用 OpenAI 风格
     """
-    from app.provider.key_pool import ProviderKeyPool
-    from tests.utils import InMemoryRedis
-    
-    fake_redis = InMemoryRedis()
+    from app.provider.key_pool import reset_key_pool
+
     provider_cfg = ProviderConfig(
-        provider_id="test-default",
+        id="test-default",
+        name="Test Default",
         base_url="https://api.example.com",
-        api_keys=["sk-default-key-789"],
+        api_key="sk-default-key-789",
     )
-    
-    # 初始化 key pool
-    pool = ProviderKeyPool(provider_cfg.provider_id, provider_cfg.api_keys)
-    await pool.initialize(fake_redis)
+    reset_key_pool(provider_cfg.id)
     
     # 不传 api_style，应该默认为 openai
     headers, key_selection = await _build_provider_headers(
-        provider_cfg, fake_redis
+        provider_cfg, redis=None
     )
     
     assert "Authorization" in headers

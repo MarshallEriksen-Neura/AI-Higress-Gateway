@@ -240,14 +240,14 @@ async def _build_provider_headers(
         headers["x-api-key"] = key_selection.key
         logger.debug(
             "build_provider_headers: using Claude auth format (x-api-key) for provider=%s",
-            provider_cfg.provider_id,
+            provider_cfg.id,
         )
     else:
         # OpenAI and most other APIs use Authorization: Bearer
         headers["Authorization"] = f"Bearer {key_selection.key}"
         logger.debug(
             "build_provider_headers: using OpenAI auth format (Authorization: Bearer) for provider=%s",
-            provider_cfg.provider_id,
+            provider_cfg.id,
         )
 
     # Optional browser-mimic behaviour.
