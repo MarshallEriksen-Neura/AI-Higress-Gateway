@@ -7,7 +7,6 @@ import { useI18n } from "@/lib/i18n-context";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import {
     LayoutDashboard,
-    Server,
     Cpu,
     Key,
     Coins,
@@ -30,11 +29,6 @@ const navItems = [
         titleKey: "nav.overview",
         href: "/dashboard/overview",
         icon: LayoutDashboard,
-    },
-    {
-        titleKey: "nav.providers",
-        href: "/dashboard/providers",
-        icon: Server,
     },
     {
         titleKey: "nav.my_providers",

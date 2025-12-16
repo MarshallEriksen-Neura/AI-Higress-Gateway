@@ -10,8 +10,9 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - type placeholder when redis is missing
     Redis = object  # type: ignore[misc,assignment]
 
-from app.deps import get_db, get_redis
+from app.deps import get_db, get_http_client, get_redis
 from app.errors import bad_request, forbidden, not_found
+from app.http_client import CurlCffiClient
 from app.logging_config import logger
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
 from app.schemas import (
@@ -23,6 +24,10 @@ from app.schemas import (
     UserQuotaResponse,
     ProviderSharedUsersResponse,
     ProviderSharedUsersUpdateRequest,
+    UserProbeRunResponse,
+    UserProbeTaskCreateRequest,
+    UserProbeTaskResponse,
+    UserProbeTaskUpdateRequest,
 )
 from app.services.encryption import decrypt_secret
 from app.services.provider_submission_service import (
@@ -41,6 +46,18 @@ from app.services.user_provider_service import (
     update_private_provider,
     update_provider_shared_users,
 )
+from app.services.user_probe_service import (
+    UserProbeConflictError,
+    UserProbeNotFoundError,
+    UserProbeServiceError,
+    create_user_probe_task,
+    delete_user_probe_task,
+    get_user_probe_task,
+    list_user_probe_runs,
+    list_user_probe_tasks,
+    run_user_probe_task_once,
+    update_user_probe_task,
+)
 from app.settings import settings
 
 router = APIRouter(
@@ -54,6 +71,50 @@ def _ensure_can_manage_user(current: AuthenticatedUser, target_user_id: UUID) ->
         return
     if current.id != str(target_user_id):
         raise forbidden("无权管理其他用户的私有提供商")
+
+
+def _run_to_response(run, *, provider_id: str) -> UserProbeRunResponse:
+    return UserProbeRunResponse(
+        id=run.id,
+        task_id=run.task_uuid,
+        user_id=run.user_id,
+        provider_id=provider_id,
+        model_id=run.model_id,
+        api_style=run.api_style,
+        success=run.success,
+        status_code=run.status_code,
+        latency_ms=run.latency_ms,
+        error_message=run.error_message,
+        response_text=run.response_text,
+        response_excerpt=run.response_excerpt,
+        response_json=run.response_json,
+        started_at=run.started_at,
+        finished_at=run.finished_at,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+
+
+def _task_to_response(task, *, provider_id: str) -> UserProbeTaskResponse:
+    last_run = getattr(task, "last_run", None)
+    return UserProbeTaskResponse(
+        id=task.id,
+        user_id=task.user_id,
+        provider_id=provider_id,
+        name=task.name,
+        model_id=task.model_id,
+        prompt=task.prompt,
+        interval_seconds=task.interval_seconds,
+        max_tokens=task.max_tokens,
+        api_style=task.api_style,
+        enabled=task.enabled,
+        in_progress=task.in_progress,
+        last_run_at=task.last_run_at,
+        next_run_at=task.next_run_at,
+        last_run=_run_to_response(last_run, provider_id=provider_id) if last_run else None,
+        created_at=task.created_at,
+        updated_at=task.updated_at,
+    )
 
 
 @router.get(
@@ -321,6 +382,199 @@ async def submit_private_provider_to_shared_pool_endpoint(
         raise bad_request(str(exc))
 
     return ProviderSubmissionResponse.model_validate(submission)
+
+
+@router.get(
+    "/users/{user_id}/private-providers/{provider_id}/probe-tasks",
+    response_model=list[UserProbeTaskResponse],
+)
+def list_user_probe_tasks_endpoint(
+    user_id: UUID,
+    provider_id: str,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> list[UserProbeTaskResponse]:
+    """列出当前用户在该私有 Provider 下创建的探针任务。"""
+    _ensure_can_manage_user(current_user, user_id)
+    provider = get_private_provider_by_id(db, user_id, provider_id)
+    if provider is None:
+        raise not_found(f"私有提供商 '{provider_id}' 不存在")
+
+    tasks = list_user_probe_tasks(db, user_id=user_id, provider=provider)
+    return [_task_to_response(t, provider_id=provider_id) for t in tasks]
+
+
+@router.post(
+    "/users/{user_id}/private-providers/{provider_id}/probe-tasks",
+    response_model=UserProbeTaskResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_user_probe_task_endpoint(
+    user_id: UUID,
+    provider_id: str,
+    payload: UserProbeTaskCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> UserProbeTaskResponse:
+    """为指定私有 Provider 创建一个用户探针任务。"""
+    _ensure_can_manage_user(current_user, user_id)
+    provider = get_private_provider_by_id(db, user_id, provider_id)
+    if provider is None:
+        raise not_found(f"私有提供商 '{provider_id}' 不存在")
+
+    try:
+        task = create_user_probe_task(
+            db,
+            user_id=user_id,
+            provider=provider,
+            name=payload.name,
+            model_id=payload.model_id,
+            prompt=payload.prompt,
+            interval_seconds=payload.interval_seconds,
+            max_tokens=payload.max_tokens,
+            api_style=payload.api_style,
+            enabled=payload.enabled,
+        )
+    except UserProbeServiceError as exc:
+        raise bad_request(str(exc))
+
+    return _task_to_response(task, provider_id=provider_id)
+
+
+@router.put(
+    "/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}",
+    response_model=UserProbeTaskResponse,
+)
+def update_user_probe_task_endpoint(
+    user_id: UUID,
+    provider_id: str,
+    task_id: UUID,
+    payload: UserProbeTaskUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> UserProbeTaskResponse:
+    """更新一个用户探针任务的配置（启用/频率/模型/prompt 等）。"""
+    _ensure_can_manage_user(current_user, user_id)
+    provider = get_private_provider_by_id(db, user_id, provider_id)
+    if provider is None:
+        raise not_found(f"私有提供商 '{provider_id}' 不存在")
+
+    try:
+        task = get_user_probe_task(db, user_id=user_id, provider=provider, task_id=task_id)
+        task = update_user_probe_task(
+            db,
+            task=task,
+            name=payload.name,
+            model_id=payload.model_id,
+            prompt=payload.prompt,
+            interval_seconds=payload.interval_seconds,
+            max_tokens=payload.max_tokens,
+            api_style=payload.api_style,
+            enabled=payload.enabled,
+        )
+    except UserProbeNotFoundError:
+        raise not_found("探针任务不存在")
+    except UserProbeConflictError as exc:
+        raise bad_request(str(exc))
+    except UserProbeServiceError as exc:
+        raise bad_request(str(exc))
+
+    return _task_to_response(task, provider_id=provider_id)
+
+
+@router.delete(
+    "/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_user_probe_task_endpoint(
+    user_id: UUID,
+    provider_id: str,
+    task_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> None:
+    """删除一个用户探针任务。"""
+    _ensure_can_manage_user(current_user, user_id)
+    provider = get_private_provider_by_id(db, user_id, provider_id)
+    if provider is None:
+        raise not_found(f"私有提供商 '{provider_id}' 不存在")
+
+    try:
+        task = get_user_probe_task(db, user_id=user_id, provider=provider, task_id=task_id)
+        delete_user_probe_task(db, task=task)
+    except UserProbeNotFoundError:
+        raise not_found("探针任务不存在")
+    except UserProbeConflictError as exc:
+        raise bad_request(str(exc))
+
+
+@router.post(
+    "/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}/run",
+    response_model=UserProbeRunResponse,
+)
+async def run_user_probe_task_now_endpoint(
+    user_id: UUID,
+    provider_id: str,
+    task_id: UUID,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    http_client: CurlCffiClient = Depends(get_http_client),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> UserProbeRunResponse:
+    """立即执行一次探针任务，并返回本次对话探针结果。"""
+    _ensure_can_manage_user(current_user, user_id)
+    provider = get_private_provider_by_id(db, user_id, provider_id)
+    if provider is None:
+        raise not_found(f"私有提供商 '{provider_id}' 不存在")
+
+    try:
+        task = get_user_probe_task(db, user_id=user_id, provider=provider, task_id=task_id)
+    except UserProbeNotFoundError:
+        raise not_found("探针任务不存在")
+
+    # 测试环境经常会用简化版 Redis stub（缺少 zset API），此时退回 None 即可。
+    effective_redis = None if redis is object or not hasattr(redis, "zadd") else redis
+    try:
+        run = await run_user_probe_task_once(
+            db,
+            task=task,
+            provider=provider,
+            client=http_client,
+            redis=effective_redis,
+        )
+    except UserProbeConflictError as exc:
+        raise bad_request(str(exc))
+    except UserProbeServiceError as exc:
+        raise bad_request(str(exc))
+
+    return _run_to_response(run, provider_id=provider_id)
+
+
+@router.get(
+    "/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}/runs",
+    response_model=list[UserProbeRunResponse],
+)
+def list_user_probe_runs_endpoint(
+    user_id: UUID,
+    provider_id: str,
+    task_id: UUID,
+    limit: int = 20,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> list[UserProbeRunResponse]:
+    """查看某个探针任务的近期执行记录。"""
+    _ensure_can_manage_user(current_user, user_id)
+    provider = get_private_provider_by_id(db, user_id, provider_id)
+    if provider is None:
+        raise not_found(f"私有提供商 '{provider_id}' 不存在")
+
+    try:
+        task = get_user_probe_task(db, user_id=user_id, provider=provider, task_id=task_id)
+        runs = list_user_probe_runs(db, task=task, limit=limit)
+    except UserProbeNotFoundError:
+        raise not_found("探针任务不存在")
+
+    return [_run_to_response(r, provider_id=provider_id) for r in runs]
 
 
 __all__ = ["router"]

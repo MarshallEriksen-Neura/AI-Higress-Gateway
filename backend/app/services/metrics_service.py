@@ -10,6 +10,7 @@ import httpx
 
 from sqlalchemy.orm import Session
 
+from app.http_client import CurlCffiClient
 from app.logging_config import logger
 from app.proxy_pool import pick_upstream_proxy
 from app.proxy_pool import report_upstream_proxy_failure
@@ -45,6 +46,15 @@ user_metrics_recorder = BufferedUserMetricsRecorder(
 if settings.metrics_buffer_enabled:
     metrics_recorder.start()
     user_metrics_recorder.start()
+
+def _timeout_seconds(timeout_cfg: object) -> float:
+    if isinstance(timeout_cfg, (int, float)):
+        return float(timeout_cfg)
+    if hasattr(timeout_cfg, "connect"):
+        connect = getattr(timeout_cfg, "connect")
+        if isinstance(connect, (int, float)):
+            return float(connect)
+    return float(settings.upstream_timeout)
 
 
 def _current_bucket_start(now: dt.datetime, bucket_seconds: int) -> dt.datetime:
@@ -224,7 +234,7 @@ def _record_user_metrics_immediate(
 
 async def call_upstream_http_with_metrics(
     *,
-    client: httpx.AsyncClient,
+    client: CurlCffiClient | httpx.AsyncClient,
     url: str,
     headers: dict[str, str],
     json_body: dict[str, object],
@@ -243,7 +253,7 @@ async def call_upstream_http_with_metrics(
     start = time.perf_counter()
     success = False
     proxy_url = await pick_upstream_proxy()
-    timeout_cfg = getattr(client, "timeout", settings.upstream_timeout)
+    timeout_cfg = _timeout_seconds(getattr(client, "timeout", settings.upstream_timeout))
     try:
         if proxy_url:
             max_attempts = settings.upstream_proxy_max_retries + 1
@@ -267,9 +277,15 @@ async def call_upstream_http_with_metrics(
                     max_attempts,
                 )
                 try:
-                    async with httpx.AsyncClient(timeout=timeout_cfg, proxy=current_proxy, trust_env=True) as proxy_client:
+                    async with httpx.AsyncClient(
+                        timeout=timeout_cfg,
+                        proxy=current_proxy,
+                        trust_env=True,
+                    ) as proxy_client:
                         resp = await proxy_client.post(
-                            url, headers=headers, json=json_body
+                            url,
+                            headers=headers,
+                            json=json_body,
                         )
                     success = resp.status_code < 400
                     logger.info(
@@ -352,7 +368,7 @@ async def call_upstream_http_with_metrics(
 
 async def stream_upstream_with_metrics(
     *,
-    client: httpx.AsyncClient,
+    client: CurlCffiClient | httpx.AsyncClient,
     method: str,
     url: str,
     headers: dict[str, str],
@@ -375,7 +391,7 @@ async def stream_upstream_with_metrics(
     start = time.perf_counter()
     first_chunk_seen = False
     proxy_url = await pick_upstream_proxy()
-    timeout_cfg = getattr(client, "timeout", settings.upstream_timeout)
+    timeout_cfg = _timeout_seconds(getattr(client, "timeout", settings.upstream_timeout))
 
     try:
         if proxy_url:
@@ -400,7 +416,11 @@ async def stream_upstream_with_metrics(
                     max_attempts,
                 )
                 try:
-                    async with httpx.AsyncClient(timeout=timeout_cfg, proxy=current_proxy, trust_env=True) as proxy_client:
+                    async with httpx.AsyncClient(
+                        timeout=timeout_cfg,
+                        proxy=current_proxy,
+                        trust_env=True,
+                    ) as proxy_client:
                         async for chunk in stream_upstream(
                             client=proxy_client,
                             method=method,

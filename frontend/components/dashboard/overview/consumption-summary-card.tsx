@@ -60,8 +60,10 @@ export function ConsumptionSummaryCard({
       const date = new Date();
       date.setDate(date.getDate() - i);
       const variance = dailyAvg * (0.8 + Math.random() * 0.4); // ±20% 的波动
+      const month = date.getMonth() + 1;
+      const day = date.getDate();
       data.push({
-        date: date.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        date: `${month}/${day}`,
         consumption: Math.round(variance),
       });
     }

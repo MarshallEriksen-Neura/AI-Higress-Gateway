@@ -1,13 +1,13 @@
 "use client";
 
 import Link from "next/link";
+import dynamic from "next/dynamic";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n-context";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import {
     LayoutDashboard,
-    Server,
     Cpu,
     Key,
     Coins,
@@ -24,19 +24,19 @@ import {
     Megaphone,
     Globe,
 } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { ScrollArea } from "@/components/ui/scroll-area";
+
+// 动态加载 Sheet 组件
+const Sheet = dynamic(() => import("@/components/ui/sheet").then(mod => ({ default: mod.Sheet })), { ssr: false });
+const SheetContent = dynamic(() => import("@/components/ui/sheet").then(mod => ({ default: mod.SheetContent })), { ssr: false });
+const SheetHeader = dynamic(() => import("@/components/ui/sheet").then(mod => ({ default: mod.SheetHeader })), { ssr: false });
+const SheetTitle = dynamic(() => import("@/components/ui/sheet").then(mod => ({ default: mod.SheetTitle })), { ssr: false });
 
 const navItems = [
     {
         titleKey: "nav.overview",
         href: "/dashboard/overview",
         icon: LayoutDashboard,
-    },
-    {
-        titleKey: "nav.providers",
-        href: "/dashboard/providers",
-        icon: Server,
     },
     {
         titleKey: "nav.my_providers",

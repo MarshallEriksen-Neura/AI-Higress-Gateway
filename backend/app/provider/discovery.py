@@ -10,6 +10,7 @@ them in Redis using the key scheme defined in data-model.md:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 import httpx
@@ -30,6 +31,36 @@ from app.provider.key_pool import (
 )
 from app.provider.sdk_selector import get_sdk_driver, normalize_base_url
 from app.storage.redis_service import get_provider_models_json, set_provider_models
+
+
+def _httpx_status_error(
+    *,
+    provider_id: str,
+    method: str,
+    url: str,
+    status_code: int,
+    headers: Mapping[str, str] | None = None,
+    content: bytes | None = None,
+) -> httpx.HTTPStatusError:
+    """
+    Create a httpx.HTTPStatusError from a non-httpx response object.
+
+    We use curl-cffi as the default upstream HTTP client. curl-cffi raises its
+    own exception types (e.g. HTTPError), while most gateway code expects and
+    handles httpx.HTTPError. Normalising here prevents provider discovery
+    failures from bubbling up as unhandled exceptions.
+    """
+    request = httpx.Request(method=method, url=url)
+    response = httpx.Response(
+        status_code=status_code,
+        request=request,
+        headers=dict(headers or {}),
+        content=content or b"",
+    )
+    message = (
+        f"Provider {provider_id} models endpoint returned HTTP {status_code} for {url}"
+    )
+    return httpx.HTTPStatusError(message, request=request, response=response)
 
 
 def _infer_capabilities(raw_model: dict[str, Any]) -> list[ModelCapability]:
@@ -236,22 +267,60 @@ async def fetch_models_from_provider(
 
         try:
             resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
+
+            status_code = getattr(resp, "status_code", None)
+            if not isinstance(status_code, int):
+                raise httpx.HTTPError(
+                    f"Provider {provider.id}: upstream response missing status_code for {url}"
+                )
+
+            if status_code >= 400:
+                if status_code == 404:
+                    logger.warning(
+                        "Provider %s: models endpoint returned 404 for %s; "
+                        "please verify base_url/models_path, or configure static_models to skip discovery",
+                        provider.id,
+                        url,
+                    )
+                # Avoid relying on resp.raise_for_status() because curl-cffi raises
+                # curl_cffi.requests.exceptions.HTTPError which is not a httpx.HTTPError.
+                raw_headers = getattr(resp, "headers", None)
+                parsed_headers: Mapping[str, str] | None = None
+                if isinstance(raw_headers, Mapping):
+                    parsed_headers = raw_headers  # type: ignore[assignment]
+                body_bytes: bytes | None = None
+                try:
+                    content = getattr(resp, "content", None)
+                    if isinstance(content, (bytes, bytearray)):
+                        body_bytes = bytes(content)
+                except Exception:  # pragma: no cover - best-effort
+                    body_bytes = None
+                raise _httpx_status_error(
+                    provider_id=provider.id,
+                    method="GET",
+                    url=url,
+                    status_code=status_code,
+                    headers=parsed_headers,
+                    content=body_bytes,
+                )
         except httpx.HTTPStatusError as exc:
             if key_selection:
                 record_key_failure(
                     key_selection,
-                    retryable=True,
+                    retryable=getattr(exc.response, "status_code", 500) >= 500
+                    or getattr(exc.response, "status_code", 0) == 429,
                     status_code=getattr(exc.response, "status_code", None),
                     redis=redis,
                 )
             payload = _fallback_to_static_models(provider, exc)
-        except httpx.HTTPError as exc:
+        except Exception as exc:
             if key_selection:
                 record_key_failure(
                     key_selection, retryable=True, status_code=None, redis=redis
                 )
-            payload = _fallback_to_static_models(provider, exc)
+            # Normalise non-httpx errors (e.g. curl-cffi transport errors) so that
+            # callers can consistently catch httpx.HTTPError.
+            payload = _fallback_to_static_models(provider, httpx.HTTPError(str(exc)))
         else:
             try:
                 payload = resp.json()

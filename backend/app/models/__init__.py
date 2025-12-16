@@ -9,7 +9,7 @@ from .role_permission import RolePermission
 from .aggregate_metrics import AggregateRoutingMetrics
 from .provider import Provider
 from .provider_preset import ProviderPreset
-from .provider_api_key import ProviderAPIKey
+from .provider_api_key import ProviderAPIKey, ProviderAPIKey as ProviderKey
 from .provider_model import ProviderModel
 from .provider_submission import ProviderSubmission
 from .provider_allowed_user import ProviderAllowedUser
@@ -24,6 +24,7 @@ from .system_gateway_config import GatewayConfig
 from .provider_audit_log import ProviderAuditLog
 from .provider_test_record import ProviderTestRecord
 from .upstream_proxy import UpstreamProxyConfig, UpstreamProxyEndpoint, UpstreamProxySource
+from .user_probe import UserProbeRun, UserProbeTask
 
 __all__ = [
     "APIKey",
@@ -40,6 +41,7 @@ __all__ = [
     "Provider",
     "ProviderPreset",
     "ProviderAPIKey",
+    "ProviderKey",
     "ProviderModel",
     "ProviderSubmission",
     "ProviderAllowedUser",
@@ -58,6 +60,8 @@ __all__ = [
     "UpstreamProxyEndpoint",
     "UpstreamProxySource",
     "UUIDPrimaryKeyMixin",
+    "UserProbeRun",
+    "UserProbeTask",
     "UserPermission",
     "UserRole",
     "User",

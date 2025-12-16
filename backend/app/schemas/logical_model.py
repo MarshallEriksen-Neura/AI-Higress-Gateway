@@ -4,6 +4,11 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .model import ModelCapability
+from .scheduling import SchedulingStrategy
+
+
+def _default_scheduling_strategy() -> SchedulingStrategy:
+    return SchedulingStrategy(name="balanced")
 
 
 class PhysicalModel(BaseModel):
@@ -45,6 +50,10 @@ class LogicalModel(BaseModel):
     enabled: bool = Field(
         default=True,
         description="Whether this logical model is enabled for routing",
+    )
+    strategy: SchedulingStrategy = Field(
+        default_factory=_default_scheduling_strategy,
+        description="Scheduling strategy configuration",
     )
     updated_at: float = Field(..., description="Last update timestamp (epoch seconds)")
 

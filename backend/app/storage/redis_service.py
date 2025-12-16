@@ -135,6 +135,35 @@ async def get_routing_metrics(
     return RoutingMetrics.model_validate(data)
 
 
+async def get_all_provider_metrics(
+    redis: Redis, provider_id: str
+) -> list[RoutingMetrics]:
+    """
+    获取指定 provider 在所有逻辑模型下的路由指标。
+    
+    扫描 Redis 中所有匹配 llm:metrics:*:{provider_id} 的 key，
+    并返回解析后的 RoutingMetrics 列表。
+    """
+    pattern = f"llm:metrics:*:{provider_id}"
+    keys = await redis.keys(pattern)  # type: ignore[attr-defined]
+    
+    if not keys:
+        return []
+    
+    metrics_list: list[RoutingMetrics] = []
+    for key in keys:
+        data = await redis_get_json(redis, key)
+        if data:
+            try:
+                metrics = RoutingMetrics.model_validate(data)
+                metrics_list.append(metrics)
+            except Exception:
+                # 跳过无效的数据
+                continue
+    
+    return metrics_list
+
+
 async def set_routing_metrics(
     redis: Redis, metrics: RoutingMetrics, *, ttl_seconds: int = 3600
 ) -> None:
@@ -178,6 +207,7 @@ __all__ = [
     "SESSION_KEY_TEMPLATE",
     "append_metrics_history",
     "delete_logical_model",
+    "get_all_provider_metrics",
     "get_logical_model",
     "get_provider_models_json",
     "get_routing_metrics",

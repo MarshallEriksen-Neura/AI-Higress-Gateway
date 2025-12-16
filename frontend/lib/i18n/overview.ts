@@ -85,6 +85,32 @@ export const overviewTranslations: Record<Language, Record<string, string>> = {
     "chart.errors": "Errors",
     "chart.success_rate": "Success Rate",
     "chart.overall_success_rate": "Overall Success Rate",
+    // Latency trend card
+    "latency_trend.title": "Response Time Trend",
+    "latency_trend.average": "Average",
+    "latency_trend.p95": "P95",
+    "latency_trend.p99": "P99",
+    "latency_trend.max": "Max",
+    "latency_trend.no_data": "No latency data available",
+    "latency_trend.error": "Failed to load latency data",
+    // QPS gauge
+    "qps.title": "Current QPS",
+    "qps.unit": "QPS",
+    "qps.healthy": "Healthy",
+    "qps.high": "High Load",
+    // Latency gauge
+    "latency.title": "Average Latency",
+    "latency.unit": "ms",
+    "latency.excellent": "Excellent",
+    "latency.good": "Good",
+    "latency.fair": "Fair",
+    "latency.slow": "Slow",
+    // Error rate gauge
+    "error_rate.title": "Error Rate",
+    "error_rate.unit": "%",
+    "error_rate.healthy": "Healthy",
+    "error_rate.warning": "Warning",
+    "error_rate.critical": "Critical",
     // Dashboard active providers
     "dashboard.active_providers": "Active Providers",
     // Time formatting
@@ -206,6 +232,32 @@ export const overviewTranslations: Record<Language, Record<string, string>> = {
     "chart.errors": "错误数",
     "chart.success_rate": "成功率",
     "chart.overall_success_rate": "整体成功率",
+    // Latency trend card
+    "latency_trend.title": "响应时间趋势",
+    "latency_trend.average": "平均延迟",
+    "latency_trend.p95": "P95 延迟",
+    "latency_trend.p99": "P99 延迟",
+    "latency_trend.max": "最大延迟",
+    "latency_trend.no_data": "暂无延迟数据",
+    "latency_trend.error": "延迟数据加载失败",
+    // QPS gauge
+    "qps.title": "当前 QPS",
+    "qps.unit": "QPS",
+    "qps.healthy": "健康",
+    "qps.high": "负载较高",
+    // Latency gauge
+    "latency.title": "平均延迟",
+    "latency.unit": "ms",
+    "latency.excellent": "优秀",
+    "latency.good": "良好",
+    "latency.fair": "一般",
+    "latency.slow": "较慢",
+    // Error rate gauge
+    "error_rate.title": "错误率",
+    "error_rate.unit": "%",
+    "error_rate.healthy": "健康",
+    "error_rate.warning": "警告",
+    "error_rate.critical": "异常",
     // Dashboard active providers
     "dashboard.active_providers": "活跃提供商",
     // Time formatting

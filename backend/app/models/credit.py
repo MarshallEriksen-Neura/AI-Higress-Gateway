@@ -83,6 +83,8 @@ class CreditTransaction(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     amount: Mapped[int] = Column(Integer, nullable=False)
+    # 用于幂等扣费：同一个 idempotency_key 只允许生成一条流水（通过 DB 唯一索引保障）。
+    idempotency_key: Mapped[str | None] = Column(String(80), nullable=True, index=True)
     reason: Mapped[str] = Column(
         String(32),
         nullable=False,

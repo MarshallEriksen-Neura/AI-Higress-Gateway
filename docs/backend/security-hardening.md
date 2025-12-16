@@ -143,7 +143,7 @@ USER appuser
 
 **防护措施**：
 - RequestValidatorMiddleware 检测路径遍历
-- 禁用或保护 /docs 和 /redoc 端点（生产环境）
+- 禁用或保护 /docs、/redoc（以及 /openapi.json）端点（生产环境默认已由后端通过 APP_ENV=production 禁用，可用 ENABLE_API_DOCS=true 覆盖）
 - 使用非标准路径命名
 
 ### 3. SQL 注入
@@ -570,7 +570,7 @@ groups:
 - [ ] 配置 Nginx 反向代理
 - [ ] 启用 WAF（Cloudflare/AWS WAF）
 - [ ] 配置 CDN
-- [ ] 禁用 /docs 和 /redoc
+- [ ] 禁用 /docs、/redoc、/openapi.json（后端代码默认已在 APP_ENV=production 时禁用；也可通过 Nginx/WAF 额外拦截）
 - [ ] 配置防火墙规则
 - [ ] 启用 Fail2Ban
 - [ ] 配置日志聚合（ELK）

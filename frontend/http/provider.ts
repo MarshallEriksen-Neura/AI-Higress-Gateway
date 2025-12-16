@@ -86,6 +86,67 @@ export interface ProviderTestResult {
   updated_at: string;
 }
 
+export type ProbeApiStyle = "auto" | "openai" | "claude" | "responses";
+
+export interface UserProbeRun {
+  id: string;
+  task_id: string;
+  user_id: string;
+  provider_id: string;
+  model_id: string;
+  api_style: string;
+  success: boolean;
+  status_code?: number | null;
+  latency_ms?: number | null;
+  error_message?: string | null;
+  response_text?: string | null;
+  response_excerpt?: string | null;
+  response_json?: any;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserProbeTask {
+  id: string;
+  user_id: string;
+  provider_id: string;
+  name: string;
+  model_id: string;
+  prompt: string;
+  interval_seconds: number;
+  max_tokens: number;
+  api_style: ProbeApiStyle | string;
+  enabled: boolean;
+  in_progress: boolean;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  last_run?: UserProbeRun | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateUserProbeTaskRequest {
+  name: string;
+  model_id: string;
+  prompt: string;
+  interval_seconds: number;
+  max_tokens?: number | null;
+  api_style?: ProbeApiStyle;
+  enabled?: boolean;
+}
+
+export interface UpdateUserProbeTaskRequest {
+  name?: string;
+  model_id?: string;
+  prompt?: string;
+  interval_seconds?: number;
+  max_tokens?: number;
+  api_style?: ProbeApiStyle;
+  enabled?: boolean;
+}
+
 export interface ProviderAuditLog {
   id: string;
   provider_id: string;
@@ -459,6 +520,94 @@ export const providerService = {
     const response = await httpClient.post(
       `/admin/providers/${providerId}/test`,
       payload ?? {}
+    );
+    return response.data;
+  },
+
+  /**
+   * 用户探针任务：列出任务
+   */
+  listUserProbeTasks: async (
+    userId: string,
+    providerId: string
+  ): Promise<UserProbeTask[]> => {
+    const response = await httpClient.get(
+      `/users/${userId}/private-providers/${providerId}/probe-tasks`
+    );
+    return response.data;
+  },
+
+  /**
+   * 用户探针任务：创建任务
+   */
+  createUserProbeTask: async (
+    userId: string,
+    providerId: string,
+    data: CreateUserProbeTaskRequest
+  ): Promise<UserProbeTask> => {
+    const response = await httpClient.post(
+      `/users/${userId}/private-providers/${providerId}/probe-tasks`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * 用户探针任务：更新任务
+   */
+  updateUserProbeTask: async (
+    userId: string,
+    providerId: string,
+    taskId: string,
+    data: UpdateUserProbeTaskRequest
+  ): Promise<UserProbeTask> => {
+    const response = await httpClient.put(
+      `/users/${userId}/private-providers/${providerId}/probe-tasks/${taskId}`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * 用户探针任务：删除任务
+   */
+  deleteUserProbeTask: async (
+    userId: string,
+    providerId: string,
+    taskId: string
+  ): Promise<void> => {
+    await httpClient.delete(
+      `/users/${userId}/private-providers/${providerId}/probe-tasks/${taskId}`
+    );
+  },
+
+  /**
+   * 用户探针任务：立即执行一次
+   */
+  runUserProbeTaskNow: async (
+    userId: string,
+    providerId: string,
+    taskId: string
+  ): Promise<UserProbeRun> => {
+    const response = await httpClient.post(
+      `/users/${userId}/private-providers/${providerId}/probe-tasks/${taskId}/run`,
+      {}
+    );
+    return response.data;
+  },
+
+  /**
+   * 用户探针任务：获取近期执行记录
+   */
+  listUserProbeRuns: async (
+    userId: string,
+    providerId: string,
+    taskId: string,
+    limit: number = 20
+  ): Promise<UserProbeRun[]> => {
+    const response = await httpClient.get(
+      `/users/${userId}/private-providers/${providerId}/probe-tasks/${taskId}/runs`,
+      { params: { limit } }
     );
     return response.data;
   },

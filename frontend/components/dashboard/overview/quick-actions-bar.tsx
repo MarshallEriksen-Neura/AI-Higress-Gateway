@@ -40,7 +40,7 @@ export function QuickActionsBar({ onNavigate }: QuickActionsBarProps) {
       label: t("quick_actions.manage_providers"),
       description: t("quick_actions.manage_providers_description"),
       icon: Settings,
-      path: "/dashboard/providers",
+      path: "/dashboard/my-providers",
       color: "text-purple-600",
       bgColor: "bg-purple-50 dark:bg-purple-950",
     },

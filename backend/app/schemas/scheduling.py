@@ -7,7 +7,9 @@ class SchedulingStrategy(BaseModel):
     """
 
     name: str = Field(..., description="Strategy name")
-    description: str = Field(..., description="Human-readable description")
+    description: str = Field(
+        default="Default routing strategy", description="Human-readable description"
+    )
     alpha: float = Field(
         default=0.3, description="Latency weight coefficient", ge=0.0
     )
@@ -32,4 +34,3 @@ class SchedulingStrategy(BaseModel):
 
 
 __all__ = ["SchedulingStrategy"]
-

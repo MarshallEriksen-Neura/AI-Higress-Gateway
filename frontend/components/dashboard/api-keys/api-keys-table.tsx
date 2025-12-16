@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import {
     Card,
     CardContent,
@@ -17,18 +18,8 @@ import {
     TableHeader,
     TableRow,
 } from "@/components/ui/table";
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
-import { Key, Copy, Trash2, Edit, Plus, Shield } from "lucide-react";
+import { Key, Copy, Trash2, Edit, Plus, Shield, Terminal } from "lucide-react";
 import { toast } from "sonner";
 import { useErrorDisplay } from "@/lib/errors";
 import { formatRelativeTime } from "@/lib/date-utils";
@@ -40,12 +31,23 @@ import {
 } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n-context";
 
+// 动态加载 AlertDialog 组件
+const AlertDialog = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialog })), { ssr: false });
+const AlertDialogAction = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogAction })), { ssr: false });
+const AlertDialogCancel = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogCancel })), { ssr: false });
+const AlertDialogContent = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogContent })), { ssr: false });
+const AlertDialogDescription = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogDescription })), { ssr: false });
+const AlertDialogFooter = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogFooter })), { ssr: false });
+const AlertDialogHeader = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogHeader })), { ssr: false });
+const AlertDialogTitle = dynamic(() => import("@/components/ui/alert-dialog").then(mod => ({ default: mod.AlertDialogTitle })), { ssr: false });
+
 interface ApiKeysTableProps {
     apiKeys: ApiKey[];
     loading: boolean;
     onEdit: (apiKey: ApiKey) => void;
     onDelete: (keyId: string) => Promise<void>;
     onCreate: () => void;
+    onConfigureCli?: (apiKey: ApiKey) => void;
 }
 
 export function ApiKeysTable({
@@ -54,6 +56,7 @@ export function ApiKeysTable({
     onEdit,
     onDelete,
     onCreate,
+    onConfigureCli,
 }: ApiKeysTableProps) {
     const { showError } = useErrorDisplay();
     const { t, language } = useI18n();
@@ -239,6 +242,22 @@ export function ApiKeysTable({
                                         </TableCell>
                                         <TableCell className="text-right">
                                             <div className="flex items-center justify-end space-x-2">
+                                                {onConfigureCli && (
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="sm"
+                                                                onClick={() => onConfigureCli(apiKey)}
+                                                            >
+                                                                <Terminal className="w-4 h-4" />
+                                                            </Button>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            配置 CLI
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                )}
                                                 <Tooltip>
                                                     <TooltipTrigger asChild>
                                                         <Button

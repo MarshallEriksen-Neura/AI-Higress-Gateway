@@ -30,4 +30,7 @@ def test_celery_tasks_registered() -> None:
     # 逻辑模型同步任务目前只验证是否成功注册，避免在测试中访问真实 Redis/DB。
     assert "tasks.sync_logical_models" in celery_app.tasks
 
+    # 聊天计费相关任务：只验证注册，避免在测试里触发真实 DB 写入。
+    assert "tasks.credits.record_chat_completion_usage" in celery_app.tasks
+    assert "tasks.credits.record_streaming_request" in celery_app.tasks
 

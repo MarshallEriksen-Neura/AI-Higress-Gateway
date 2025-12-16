@@ -147,6 +147,36 @@ async def test_fetch_models_from_provider_raises_when_no_fallback(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fetch_models_from_provider_normalises_non_httpx_404():
+    """
+    Regression test: when the upstream client is curl-cffi, resp.raise_for_status()
+    would raise curl_cffi.requests.exceptions.HTTPError (not a httpx.HTTPError),
+    causing unhandled exceptions in callers that only catch httpx.HTTPError.
+    """
+    provider = _make_provider()
+
+    class FakeResponse:
+        status_code = 404
+        headers = {"Content-Type": "application/json"}
+        content = b'{"error":"not found"}'
+
+        def raise_for_status(self) -> None:  # pragma: no cover - must not be called
+            raise AssertionError("fetch_models_from_provider should not call raise_for_status")
+
+        def json(self) -> Any:  # pragma: no cover - status code is already fatal
+            raise AssertionError("fetch_models_from_provider should not parse json on 4xx")
+
+    class FakeClient:
+        async def get(self, url: str, *, headers: dict[str, str] | None = None):
+            return FakeResponse()
+
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        await fetch_models_from_provider(FakeClient(), provider)  # type: ignore[arg-type]
+
+    assert excinfo.value.response.status_code == 404
+
+
+@pytest.mark.asyncio
 async def test_ensure_provider_models_cached_uses_redis_cache():
     provider = _make_provider()
     redis = DummyRedis()

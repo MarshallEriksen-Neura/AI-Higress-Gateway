@@ -36,7 +36,7 @@ from app.provider.health import HealthStatus
 from app.provider.sdk_selector import list_registered_sdk_vendors
 from app.services.provider_health_service import get_health_status_with_fallback
 from app.services.user_provider_service import get_accessible_provider_ids
-from app.storage.redis_service import get_routing_metrics
+from app.storage.redis_service import get_routing_metrics, get_all_provider_metrics
 
 router = APIRouter(
     tags=["providers"],
@@ -380,7 +380,7 @@ async def get_provider_health(
     db: Session = Depends(get_db),
 ) -> HealthStatus:
     """
-    Perform a lightweight health check for the given provider.
+    返回 Provider 最近一次健康状态（由探针/巡检写入 DB + Redis 缓存）。
     """
     status = await get_health_status_with_fallback(redis, db, provider_id)
     if status is None:
@@ -398,11 +398,10 @@ async def get_provider_metrics(
     redis: Redis = Depends(get_redis),
 ) -> ProviderMetricsResponse:
     """
-    Return routing metrics for a provider.
+    返回 provider 的路由指标。
 
-    When `logical_model` is provided, we return at most one entry; for
-    now we do not scan Redis for all logical models and simply return
-    an empty list when the metrics key is missing.
+    - 当提供 `logical_model` 参数时，返回该 provider 在指定逻辑模型下的指标（最多一条）
+    - 当不提供 `logical_model` 参数时，返回该 provider 在所有逻辑模型下的指标列表
     """
     cfg = get_provider_config(provider_id)
     if cfg is None:
@@ -410,13 +409,17 @@ async def get_provider_metrics(
 
     metrics_list: list[RoutingMetrics] = []
     if logical_model:
+        # 查询特定逻辑模型的指标
         metrics = await get_routing_metrics(redis, logical_model, provider_id)
         if metrics is not None:
             metrics_list.append(metrics)
     else:
+        # 查询所有逻辑模型的指标
+        metrics_list = await get_all_provider_metrics(redis, provider_id)
         logger.info(
-            "Provider metrics requested for %s without logical_model; returning empty list",
+            "Provider metrics requested for %s without logical_model; returning %d metrics",
             provider_id,
+            len(metrics_list),
         )
 
     return ProviderMetricsResponse(metrics=metrics_list)

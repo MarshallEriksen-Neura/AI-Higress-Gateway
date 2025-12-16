@@ -7,6 +7,9 @@ HTTP 客户端抽象层，使用 curl-cffi 支持 TLS 指纹伪装。
 
 from typing import AsyncIterator, Any, Optional
 from curl_cffi.requests import AsyncSession, Response
+from curl_cffi.curl import CurlError
+from curl_cffi.const import CurlECode
+import httpx
 import logging
 
 logger = logging.getLogger(__name__)
@@ -156,7 +159,52 @@ class CurlCffiClient:
                 "Use 'async with CurlCffiClient(...) as client:'"
             )
         return self._session
-    
+
+    def _apply_proxy_kwargs(self, request_kwargs: dict[str, Any]) -> None:
+        """
+        将初始化时的代理配置合并到请求参数中。
+
+        curl-cffi 的接口同时支持：
+        - proxy: 单个代理字符串（内部会映射为 all）
+        - proxies: 按协议映射的字典，例如 {"http": "...", "https": "...", "all": "..."}
+        """
+        if not self.proxies:
+            return
+        if isinstance(self.proxies, str):
+            request_kwargs["proxy"] = self.proxies
+        else:
+            request_kwargs["proxies"] = self.proxies
+
+    async def _request_with_optional_http2_downgrade(
+        self,
+        method: str,
+        url: str,
+        request_kwargs: dict[str, Any],
+    ) -> Response:
+        session = self._ensure_session()
+        try:
+            requester = getattr(session, method.lower())
+            return await requester(url, **request_kwargs)
+        except CurlError as exc:
+            code = getattr(exc, "code", None)
+            if (
+                code == CurlECode.HTTP2_STREAM
+                and "http_version" not in request_kwargs
+                and request_kwargs.get("stream") is not True
+            ):
+                logger.warning(
+                    "curl-cffi HTTP/2 stream protocol error, retry with HTTP/1.1: url=%s",
+                    url,
+                )
+                retry_kwargs = dict(request_kwargs)
+                retry_kwargs["http_version"] = "1.1"
+                try:
+                    requester = getattr(session, method.lower())
+                    return await requester(url, **retry_kwargs)
+                except CurlError as retry_exc:
+                    raise httpx.HTTPError(str(retry_exc)) from retry_exc
+            raise httpx.HTTPError(str(exc)) from exc
+
     async def post(
         self,
         url: str,
@@ -184,8 +232,6 @@ class CurlCffiClient:
         Raises:
             RuntimeError: 如果 session 未创建
         """
-        session = self._ensure_session()
-        
         effective_timeout = timeout if timeout is not None else self.timeout
         
         logger.debug(
@@ -205,10 +251,11 @@ class CurlCffiClient:
             "impersonate": self.impersonate,
             **kwargs
         }
-        if self.proxies:
-            request_kwargs["proxies"] = self.proxies
-        
-        return await session.post(url, **request_kwargs)
+        self._apply_proxy_kwargs(request_kwargs)
+
+        return await self._request_with_optional_http2_downgrade(
+            "POST", url, request_kwargs
+        )
     
     async def get(
         self,
@@ -235,8 +282,6 @@ class CurlCffiClient:
         Raises:
             RuntimeError: 如果 session 未创建
         """
-        session = self._ensure_session()
-        
         effective_timeout = timeout if timeout is not None else self.timeout
         
         logger.debug(
@@ -255,10 +300,11 @@ class CurlCffiClient:
             "impersonate": self.impersonate,
             **kwargs
         }
-        if self.proxies:
-            request_kwargs["proxies"] = self.proxies
-        
-        return await session.get(url, **request_kwargs)
+        self._apply_proxy_kwargs(request_kwargs)
+
+        return await self._request_with_optional_http2_downgrade(
+            "GET", url, request_kwargs
+        )
     
     def stream(
         self,
@@ -316,8 +362,7 @@ class CurlCffiClient:
             "impersonate": self.impersonate,
             **kwargs
         }
-        if self.proxies:
-            request_kwargs["proxies"] = self.proxies
+        self._apply_proxy_kwargs(request_kwargs)
         
         return StreamContextManager(session, method, url, request_kwargs)
 
@@ -366,12 +411,37 @@ class StreamContextManager:
         Returns:
             StreamResponse: 包装后的流式响应对象
         """
-        self._stream_context = self._session.stream(
-            self._method,
-            self._url,
-            **self._request_kwargs
-        )
-        response = await self._stream_context.__aenter__()
+        try:
+            self._stream_context = self._session.stream(
+                self._method,
+                self._url,
+                **self._request_kwargs,
+            )
+            response = await self._stream_context.__aenter__()
+        except CurlError as exc:
+            code = getattr(exc, "code", None)
+            if (
+                code == CurlECode.HTTP2_STREAM
+                and "http_version" not in self._request_kwargs
+            ):
+                logger.warning(
+                    "curl-cffi HTTP/2 stream protocol error, retry stream with HTTP/1.1: url=%s",
+                    self._url,
+                )
+                retry_kwargs = dict(self._request_kwargs)
+                retry_kwargs["http_version"] = "1.1"
+                try:
+                    self._stream_context = self._session.stream(
+                        self._method,
+                        self._url,
+                        **retry_kwargs,
+                    )
+                    response = await self._stream_context.__aenter__()
+                except CurlError as retry_exc:
+                    raise httpx.HTTPError(str(retry_exc)) from retry_exc
+            else:
+                raise httpx.HTTPError(str(exc)) from exc
+
         self._response = StreamResponse(response)
         return self._response
     

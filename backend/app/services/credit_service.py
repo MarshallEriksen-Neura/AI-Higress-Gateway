@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.logging_config import logger
@@ -196,6 +197,7 @@ def _create_transaction(
     input_tokens: int | None,
     output_tokens: int | None,
     total_tokens: int | None,
+    idempotency_key: str | None = None,
 ) -> CreditTransaction:
     tx = CreditTransaction(
         account_id=account.id,
@@ -204,6 +206,7 @@ def _create_transaction(
         provider_id=provider_id,
         provider_model_id=provider_model_id,
         amount=amount,
+        idempotency_key=idempotency_key,
         reason=reason,
         description=description,
         model_name=model_name,
@@ -413,6 +416,7 @@ def record_chat_completion_usage(
     request_payload: dict[str, Any] | None = None,
     is_stream: bool = False,
     reason: str | None = None,
+    idempotency_key: str | None = None,
 ) -> int:
     """
     根据响应 payload 中的 usage 字段记录一次调用消耗，并扣减积分。
@@ -513,6 +517,19 @@ def record_chat_completion_usage(
     if cost <= 0:
         return 0
 
+    if idempotency_key:
+        existing = (
+            db.execute(
+                select(CreditTransaction).where(
+                    CreditTransaction.idempotency_key == idempotency_key
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            return 0
+
     account = get_or_create_account_for_user(db, user_id)
 
     account.balance = int(account.balance) - cost
@@ -525,6 +542,7 @@ def record_chat_completion_usage(
         provider_id=provider_id,
         provider_model_id=provider_model_id,
         amount=-cost,
+        idempotency_key=idempotency_key,
         reason=tx_reason,
         description=None,
         model_name=logical_model_name,
@@ -532,7 +550,11 @@ def record_chat_completion_usage(
         output_tokens=output_tokens,
         total_tokens=total_tokens,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return 0
     db.refresh(account)
     logger.info(
         "Recorded credit usage for user=%s model=%r total_tokens=%s cost=%s balance_after=%s",
@@ -554,6 +576,7 @@ def record_streaming_request(
     provider_id: str | None,
     provider_model_id: str | None,
     payload: dict[str, Any],
+    idempotency_key: str | None = None,
 ) -> int:
     """
     对流式请求进行粗略扣费：
@@ -610,6 +633,19 @@ def record_streaming_request(
     if cost <= 0:
         return 0
 
+    if idempotency_key:
+        existing = (
+            db.execute(
+                select(CreditTransaction).where(
+                    CreditTransaction.idempotency_key == idempotency_key
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing is not None:
+            return 0
+
     account = get_or_create_account_for_user(db, user_id)
     account.balance = int(account.balance) - cost
     _create_transaction(
@@ -620,6 +656,7 @@ def record_streaming_request(
         provider_id=provider_id,
         provider_model_id=provider_model_id,
         amount=-cost,
+        idempotency_key=idempotency_key,
         reason="stream_estimate",
         description="流式请求预估扣费",
         model_name=logical_model_name,
@@ -627,7 +664,11 @@ def record_streaming_request(
         output_tokens=None,
         total_tokens=approx_tokens,
     )
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        return 0
     db.refresh(account)
     logger.info(
         "Recorded streaming credit usage for user=%s model=%r approx_tokens=%s cost=%s balance_after=%s",

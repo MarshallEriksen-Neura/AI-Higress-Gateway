@@ -53,6 +53,11 @@ const ProviderMetricsTab = dynamic(() => import("./provider-metrics-tab").then(m
   ssr: false,
 });
 
+const ProviderProbesTab = dynamic(() => import("./provider-probes-tab").then(mod => ({ default: mod.ProviderProbesTab })), {
+  loading: () => <Skeleton className="h-[400px] w-full" />,
+  ssr: false,
+});
+
 // 审计相关组件使用 dynamic 导入
 const ProbeConfigDrawer = dynamic(() => import("./audit/probe-config-drawer").then(mod => ({ default: mod.ProbeConfigDrawer })), {
   loading: () => null,
@@ -239,6 +244,7 @@ export function ProviderDetailMain({ providerId, currentUserId, translations }: 
        (providerVisibility === "private" && providerOwnerId === effectiveUserId));
     const canManageKeys = canManageAudit || (hasEffectiveUserId && isUserOwnedPrivate);
     const canEditModelMapping = canManageAudit || (hasEffectiveUserId && isUserOwnedPrivate);
+    const canManageUserProbes = hasEffectiveUserId && isUserOwnedPrivate;
     
     return {
       canEditSharing,
@@ -247,6 +253,7 @@ export function ProviderDetailMain({ providerId, currentUserId, translations }: 
       canShareToPool,
       canManageKeys,
       canEditModelMapping,
+      canManageUserProbes,
     };
   }, [effectiveUserId, isUserOwnedPrivate, isAdminUser, provider?.visibility, provider?.owner_id]);
 
@@ -497,7 +504,7 @@ export function ProviderDetailMain({ providerId, currentUserId, translations }: 
     [permissions.canShowAuditUI, recentTests.length, auditLogs.length]
   );
 
-  // 加载状态
+  // 加载状态 - 初始加载或刷新中
   if (loading && !provider) {
     return <LoadingSkeleton loadingText={translations.loading} />;
   }
@@ -526,15 +533,17 @@ export function ProviderDetailMain({ providerId, currentUserId, translations }: 
     );
   }
 
-  // 未找到提供商
+  // 未找到提供商 - 使用相同的容器结构避免 hydration 错误
   if (!provider) {
     return (
-      <div className="flex flex-col items-center justify-center h-[50vh] gap-4">
-        <div className="text-xl font-semibold">{translations.notFound}</div>
-        <Button onClick={() => router.back()}>
-          <ArrowLeft className="mr-2 h-4 w-4" />
-          {translations.back}
-        </Button>
+      <div className="space-y-6 max-w-7xl">
+        <div className="flex flex-col items-center justify-center h-[50vh] gap-4">
+          <div className="text-xl font-semibold">{translations.notFound}</div>
+          <Button onClick={() => router.back()}>
+            <ArrowLeft className="mr-2 h-4 w-4" />
+            {translations.back}
+          </Button>
+        </div>
       </div>
     );
   }
@@ -627,6 +636,9 @@ export function ProviderDetailMain({ providerId, currentUserId, translations }: 
           </TabsTrigger>
           <TabsTrigger value="keys">{translations.tabs.keys}</TabsTrigger>
           <TabsTrigger value="metrics">{translations.tabs.metrics}</TabsTrigger>
+          {permissions.canManageUserProbes && (
+            <TabsTrigger value="probes">{translations.tabs.probes}</TabsTrigger>
+          )}
           {permissions.canShowAuditUI && (
             <TabsTrigger value="audit">
               <Shield className="h-4 w-4 mr-1" />
@@ -680,6 +692,18 @@ export function ProviderDetailMain({ providerId, currentUserId, translations }: 
             translations={translations.metrics}
           />
         </TabsContent>
+
+        {/* 用户探针任务标签页（仅私有 Provider 所有者可见） */}
+        {permissions.canManageUserProbes && effectiveUserId && (
+          <TabsContent value="probes">
+            <ProviderProbesTab
+              providerId={providerId}
+              userId={effectiveUserId}
+              models={models?.models || []}
+              translations={translations.userProbes}
+            />
+          </TabsContent>
+        )}
 
         {/* 审核与运营标签页 */}
         {permissions.canShowAuditUI && (

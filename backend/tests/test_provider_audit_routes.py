@@ -6,8 +6,7 @@ from sqlalchemy.orm import Session
 from app.settings import settings
 
 from app.models import Provider, ProviderAPIKey
-from app.provider.health import HealthStatus
-from app.schemas import ProviderStatus
+from app.services.user_probe_executor import ProbeExecutionResult
 from app.services.encryption import encrypt_secret
 from app.services.provider_audit_service import trigger_provider_test
 from tests.utils import InMemoryRedis, jwt_auth_headers, seed_user_and_key
@@ -53,35 +52,31 @@ def _create_public_provider(session, provider_id: str = "audit-provider") -> Pro
 def test_admin_trigger_test_updates_status_and_record(monkeypatch, client, db_session):
     admin = _create_admin(db_session)
     provider = _create_public_provider(db_session, "audit-provider-test")
+    provider.probe_model = "gpt-4o-mini"
+    db_session.add(provider)
+    db_session.commit()
 
-    # 使用内存 Redis 和模拟的健康检查，避免网络依赖
+    # 使用内存 Redis 和模拟的探针执行，避免网络依赖
     monkeypatch.setattr(
         "app.services.provider_audit_service.get_redis_client",
         lambda: InMemoryRedis(),
     )
 
-    healthy_status = HealthStatus(
-        provider_id=provider.provider_id,
-        status=ProviderStatus.HEALTHY,
-        timestamp=0.0,
-        response_time_ms=42.0,
-        error_message=None,
-        last_successful_check=0.0,
-    )
-
-    async def _fake_check_provider_health(client, cfg, redis):
-        return healthy_status
-
-    async def _fake_persist_provider_health(redis, session, provider_obj, status, *, cache_ttl_seconds=None):
-        return None
+    async def _fake_execute_user_probe(*args, **kwargs):
+        return ProbeExecutionResult(
+            success=True,
+            api_style="openai",
+            status_code=200,
+            latency_ms=42,
+            error_message=None,
+            response_text="ok",
+            response_excerpt="ok",
+            response_json={"ok": True},
+        )
 
     monkeypatch.setattr(
-        "app.services.provider_audit_service.check_provider_health",
-        _fake_check_provider_health,
-    )
-    monkeypatch.setattr(
-        "app.services.provider_audit_service.persist_provider_health",
-        _fake_persist_provider_health,
+        "app.services.provider_audit_service.execute_user_probe",
+        _fake_execute_user_probe,
     )
 
     headers = jwt_auth_headers(str(admin.id))

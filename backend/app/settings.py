@@ -81,6 +81,14 @@ class Settings(BaseSettings):
         alias="ENABLE_SECURITY_MIDDLEWARE",
         description="显式控制是否启用安全中间件栈：true 强制开启，false 强制关闭；默认根据 APP_ENV=production 判断",
     )
+    api_docs_override: bool | None = Field(
+        default=None,
+        alias="ENABLE_API_DOCS",
+        description=(
+            "显式控制是否启用 FastAPI 文档路由（/docs、/redoc、/openapi.json）："
+            "true 强制开启，false 强制关闭；默认在 APP_ENV=production 时关闭"
+        ),
+    )
     # 初始管理员
     default_admin_username: str = Field(
         "admin",
@@ -132,13 +140,7 @@ class Settings(BaseSettings):
         description="Timezone used by Celery beat / scheduled tasks.",
     )
 
-    # Provider health-check intervals and cache TTL
-    provider_health_check_interval_seconds: int = Field(
-        3600,
-        alias="PROVIDER_HEALTH_CHECK_INTERVAL_SECONDS",
-        description="定时检测厂商健康状态的间隔（秒）",
-        ge=10,
-    )
+    # Provider probe/audit intervals and cache TTL
     provider_audit_auto_probe_interval_seconds: int = Field(
         1800,
         alias="PROVIDER_AUDIT_AUTO_PROBE_INTERVAL_SECONDS",
@@ -186,7 +188,7 @@ class Settings(BaseSettings):
     probe_prompt: str = Field(
         "请回答一个简单问题用于健康检查。",
         alias="PROBE_PROMPT",
-        description="探针测试默认使用的提示词，可在系统管理页覆盖",
+        description="预留字段：将来用于 health 全局扩展的探针提示词（当前版本不生效，保留给后续实现）",
     )
 
     # API Key 健康巡检与异常禁用
@@ -227,6 +229,84 @@ class Settings(BaseSettings):
         True,
         alias="ENABLE_PROVIDER_HEALTH_CHECK",
         description="是否启用 Provider 健康状态检查和路由过滤（关闭后将忽略 Provider 状态和最低分数过滤）",
+    )
+    
+    # Provider 实时故障标记（用于快速跳过故障 Provider）
+    provider_failure_cooldown_seconds: int = Field(
+        60,
+        alias="PROVIDER_FAILURE_COOLDOWN_SECONDS",
+        description="Provider 故障冷却期（秒）；在此期间内失败次数超过阈值的 Provider 将被跳过",
+        ge=10,
+        le=600,
+    )
+    provider_failure_threshold: int = Field(
+        3,
+        alias="PROVIDER_FAILURE_THRESHOLD",
+        description="Provider 故障阈值；在冷却期内失败次数超过此值将被跳过",
+        ge=1,
+        le=10,
+    )
+
+    # User probe tasks (user-managed chat probes)
+    user_probe_scheduler_interval_seconds: int = Field(
+        60,
+        alias="USER_PROBE_SCHEDULER_INTERVAL_SECONDS",
+        description="用户探针任务调度间隔（秒）；调度器将扫描到期任务并触发一次真实对话请求",
+        ge=10,
+    )
+    user_probe_timeout_seconds: float = Field(
+        15.0,
+        alias="USER_PROBE_TIMEOUT_SECONDS",
+        description="用户探针对话请求超时时间（秒）",
+        gt=0.5,
+    )
+    user_probe_min_interval_seconds: int = Field(
+        300,
+        alias="USER_PROBE_MIN_INTERVAL_SECONDS",
+        description="用户探针任务最小执行间隔（秒），用于限制过高频率造成成本/压力",
+        ge=60,
+    )
+    user_probe_max_interval_seconds: int = Field(
+        86400,
+        alias="USER_PROBE_MAX_INTERVAL_SECONDS",
+        description="用户探针任务最大执行间隔（秒）",
+        ge=60,
+    )
+    user_probe_max_tasks_per_user: int = Field(
+        10,
+        alias="USER_PROBE_MAX_TASKS_PER_USER",
+        description="单用户允许创建的最大探针任务数量",
+        ge=0,
+    )
+    user_probe_max_runs_per_task: int = Field(
+        50,
+        alias="USER_PROBE_MAX_RUNS_PER_TASK",
+        description="单个探针任务保留的最大历史执行记录数（超出将清理最旧记录）",
+        ge=1,
+    )
+    user_probe_max_due_tasks_per_tick: int = Field(
+        50,
+        alias="USER_PROBE_MAX_DUE_TASKS_PER_TICK",
+        description="每次调度 tick 最多处理的到期探针任务数，避免单次任务耗时过长",
+        ge=1,
+    )
+    user_probe_max_prompt_length: int = Field(
+        2000,
+        alias="USER_PROBE_MAX_PROMPT_LENGTH",
+        description="探针提示词最大长度（字符）",
+        ge=1,
+    )
+    user_probe_default_max_tokens: int = Field(
+        16,
+        alias="USER_PROBE_DEFAULT_MAX_TOKENS",
+        description="新建探针任务默认 max_tokens",
+        ge=1,
+    )
+    user_probe_max_tokens_limit: int = Field(
+        256,
+        alias="USER_PROBE_MAX_TOKENS_LIMIT",
+        description="探针任务 max_tokens 上限（避免误配置导致成本过高）",
+        ge=1,
     )
 
     # Metrics buffer & sampling
@@ -555,6 +635,16 @@ class Settings(BaseSettings):
         if self.security_middleware_override is not None:
             return self.security_middleware_override
         return self.environment.lower() == "production"
+
+    @property
+    def enable_api_docs(self) -> bool:
+        """
+        是否启用 FastAPI 内置文档相关路由（/docs、/redoc、/openapi.json）。
+        默认仅在非生产环境开启，可通过 ENABLE_API_DOCS 显式覆盖。
+        """
+        if self.api_docs_override is not None:
+            return self.api_docs_override
+        return self.environment.lower() != "production"
 
 settings = Settings()  # Reads from environment if available
 

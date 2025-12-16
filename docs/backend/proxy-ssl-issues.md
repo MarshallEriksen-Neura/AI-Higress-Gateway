@@ -38,7 +38,7 @@ no_proxy=localhost,127.0.0.1,::1,api.moonshot.cn
 NO_PROXY=localhost,127.0.0.1,::1,api.moonshot.cn
 ```
 
-httpx 客户端（配置了 `trust_env=True`）会自动读取这些环境变量，对列表中的域名使用直连而不走代理。
+网关的上游 HTTP 客户端（默认使用 `CurlCffiClient`，配置了 `trust_env=True`）会自动读取这些环境变量，对列表中的域名使用直连而不走代理。
 
 ### 方案 2：检查代理服务器配置
 
@@ -95,10 +95,10 @@ curl -x http://192.168.31.105:7890 -v https://api.openai.com
 
 ## 代码实现
 
-所有创建 httpx 客户端的地方都已配置 `trust_env=True`，支持读取环境变量：
+所有创建上游 HTTP 客户端的地方都已配置 `trust_env=True`，支持读取环境变量：
 
 ```python
-async with httpx.AsyncClient(
+async with CurlCffiClient(
     timeout=settings.upstream_timeout,
     trust_env=True,  # 启用环境变量代理支持
 ) as client:
@@ -112,6 +112,7 @@ async with httpx.AsyncClient(
 - `backend/app/services/metrics_service.py` - 指标服务
 - `backend/app/services/provider_validation_service.py` - 提供商验证
 - `backend/app/services/provider_audit_service.py` - 提供商审计
+- `backend/app/services/user_probe_service.py` - 用户探针调度
 
 ## 应用修改
 

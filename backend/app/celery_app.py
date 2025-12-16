@@ -40,17 +40,21 @@ celery_app.conf.update(
     imports=(
         "app.tasks",
         "app.tasks.registration",
-        "app.tasks.provider_health",
         "app.tasks.api_key_health",
         "app.tasks.session_maintenance",
+        "app.tasks.credit_billing",
         "app.tasks.credit_auto_topup",
         "app.tasks.provider_audit",
+        "app.tasks.user_probe",
         "app.tasks.upstream_proxy_pool",
     ),
 )
 
 # 自动发现 app 包下的 tasks 模块（即 app.tasks）。
-celery_app.autodiscover_tasks(["app"])
+# 注意：Celery 默认是“惰性发现”，在仅导入 celery_app（不启动 worker）时不会立即导入任务模块，
+# 这会导致测试环境下看不到自定义任务。这里强制立即发现与导入，确保 tasks.* 已注册。
+celery_app.autodiscover_tasks(["app"], force=True)
+celery_app.loader.import_default_modules()
 
 
 @worker_process_init.connect

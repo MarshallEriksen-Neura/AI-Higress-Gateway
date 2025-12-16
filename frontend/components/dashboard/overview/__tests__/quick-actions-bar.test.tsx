@@ -93,7 +93,7 @@ describe("QuickActionsBar Component", () => {
         const manageProvidersButton = screen.getByTestId("quick-action-manage_providers");
         fireEvent.click(manageProvidersButton);
 
-        expect(mockPush).toHaveBeenCalledWith("/dashboard/providers");
+        expect(mockPush).toHaveBeenCalledWith("/dashboard/my-providers");
       });
     });
 
@@ -144,7 +144,7 @@ describe("QuickActionsBar Component", () => {
         expect(manageButton).toBeInTheDocument();
 
         fireEvent.click(manageButton);
-        expect(mockPush).toHaveBeenCalledWith("/dashboard/providers");
+        expect(mockPush).toHaveBeenCalledWith("/dashboard/my-providers");
       });
     });
   });

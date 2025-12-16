@@ -108,6 +108,8 @@ bun dev       # 启动 Next.js 管理台
   - `SECRET_KEY`
   - `LOG_LEVEL`（默认 INFO）
   - `AUTO_APPLY_DB_MIGRATIONS`（默认 true）+ `ENABLE_AUTO_MIGRATION=true`（显式开启实际迁移）
+  - `ENABLE_CREDIT_CHECK`（启用网关层积分不足拦截）
+  - `ENABLE_STREAMING_PRECHARGE`, `STREAMING_MIN_TOKENS`（流式请求预扣开关与估算参数）
 
 ## 🧪 测试
 后端使用 `pytest` / `pytest-asyncio`（AI Agent 不代跑，请本地执行）：

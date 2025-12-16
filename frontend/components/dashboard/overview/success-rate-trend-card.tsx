@@ -14,7 +14,8 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/lib/i18n-context";
 import { useUserSuccessRateTrend } from "@/lib/swr/use-user-overview-metrics";
-import { LineChart, Line, XAxis, YAxis } from "recharts";
+import { formatChartTime } from "@/lib/utils/time-formatter";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Legend } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart";
 
 interface SuccessRateTrendCardProps {
@@ -48,16 +49,16 @@ export function SuccessRateTrendCard({
   const chartData = useMemo(() => {
     if (!trend?.points) return [];
 
-    return trend.points.map((point) => {
+    const points = trend.points;
+
+    // 直接使用时间格式（时:分）
+    return points.map((point) => {
       const overallRate = point.error_requests
         ? point.success_requests / (point.success_requests + point.error_requests)
         : 0;
 
       return {
-        timestamp: new Date(point.window_start).toLocaleDateString("en-US", {
-          month: "short",
-          day: "numeric",
-        }),
+        timestamp: formatChartTime(point.window_start),
         overall: Math.round(overallRate * 100),
         overallDecimal: overallRate,
       };
@@ -252,50 +253,80 @@ export function SuccessRateTrendCard({
           </div>
         )}
 
-        {/* 成功率趋势折线图 - 极简样式 */}
+        {/* 成功率趋势折线图 - 完整样式 */}
         <div className="pt-4 border-t">
           <ChartContainer
             config={{
               overall: {
                 label: t("chart.success_rate"),
-                color: "hsl(var(--foreground))",
+                color: "hsl(142, 76%, 36%)", // 绿色表示成功率
               },
             }}
-            className="h-28 w-full"
+            className="h-64 w-full"
           >
             <LineChart 
               data={chartData}
-              margin={{ top: 5, right: 5, left: 0, bottom: 5 }}
+              margin={{ top: 10, right: 30, left: 10, bottom: 10 }}
             >
+              {/* X轴 */}
               <XAxis
                 dataKey="timestamp"
-                tick={{ fontSize: 9 }}
-                axisLine={false}
-                tickLine={false}
-                height={20}
+                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                tickLine={{ stroke: 'hsl(var(--border))' }}
+                axisLine={{ stroke: 'hsl(var(--border))' }}
+                height={40}
+                interval="preserveStartEnd"
               />
+              
+              {/* Y轴 */}
               <YAxis
                 domain={[0, 100]}
-                tick={{ fontSize: 9 }}
-                axisLine={false}
-                tickLine={false}
-                width={30}
+                tick={{ fontSize: 11, fill: 'hsl(var(--muted-foreground))' }}
+                tickLine={{ stroke: 'hsl(var(--border))' }}
+                axisLine={{ stroke: 'hsl(var(--border))' }}
+                width={60}
+                label={{ 
+                  value: '成功率 (%)', 
+                  angle: -90, 
+                  position: 'insideLeft',
+                  style: { fontSize: 11, fill: 'hsl(var(--muted-foreground))' }
+                }}
               />
+              
+              {/* 网格 */}
+              <CartesianGrid 
+                strokeDasharray="3 3" 
+                stroke="hsl(var(--border))"
+                opacity={0.3}
+              />
+              
+              {/* Tooltip */}
               <ChartTooltip
                 content={
                   <ChartTooltipContent
                     formatter={(value) => `${formatPercentage(value as number)}`}
                   />
                 }
-                cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1 }}
+                cursor={{ stroke: "hsl(var(--muted-foreground))", strokeWidth: 1, strokeDasharray: '5 5' }}
               />
+              
+              {/* 图例 */}
+              <Legend 
+                wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }}
+                iconType="line"
+              />
+              
+              {/* 折线 */}
               <Line
                 type="monotone"
                 dataKey="overall"
+                name={t("chart.success_rate")}
                 stroke="var(--color-overall)"
-                strokeWidth={1.5}
-                dot={false}
-                isAnimationActive={false}
+                strokeWidth={2}
+                dot={{ r: 3, fill: "var(--color-overall)" }}
+                activeDot={{ r: 5 }}
+                isAnimationActive={true}
+                animationDuration={800}
               />
             </LineChart>
           </ChartContainer>

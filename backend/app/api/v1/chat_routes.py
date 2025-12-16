@@ -8,6 +8,7 @@
 """
 
 import json
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -54,8 +55,6 @@ from app.schemas import (
 from app.services.credit_service import (
     InsufficientCreditsError,
     ensure_account_usable,
-    record_chat_completion_usage,
-    record_streaming_request,
 )
 from app.services.metrics_service import (
     call_upstream_http_with_metrics,
@@ -65,6 +64,7 @@ from app.services.metrics_service import (
 )
 from app.services.audit_service import record_audit_event
 from app.services.compliance_service import apply_content_policy, findings_to_summary
+from app.services.provider_health_service import get_cached_health_status
 from app.settings import settings
 from app.services.user_provider_service import get_accessible_provider_ids
 from app.storage.redis_service import get_logical_model
@@ -77,7 +77,16 @@ from app.services.claude_cli_transformer import (
     transform_claude_response_to_openai,
 )
 
+# 导入新的辅助模块
+from app.api.v1.chat.candidate_retry import try_candidates_non_stream
+from app.api.v1.chat.billing import record_completion_usage, record_stream_usage
+
 router = APIRouter(tags=["chat"])
+
+
+def _status_worse(a, b) -> bool:
+    order = {"healthy": 0, "degraded": 1, "down": 2}
+    return order.get(getattr(b, "value", str(b)), 0) > order.get(getattr(a, "value", str(a)), 0)
 
 
 def _enforce_request_moderation(
@@ -272,6 +281,10 @@ async def chat_completions(
     if stream and payload_stream_raw is None:
         payload["stream"] = True
 
+    billing_request_id = uuid.uuid4().hex
+    billing_final_key = f"chat:{billing_request_id}:final"
+    billing_precharge_key = f"chat:{billing_request_id}:precharge"
+
     api_style = api_style_override or detect_request_format(payload)
     requested_model = payload.get("model")
     normalized_model = _strip_model_group_prefix(requested_model)
@@ -310,6 +323,19 @@ async def chat_completions(
     if not accessible_provider_ids:
         raise forbidden("当前用户暂无可用的提供商")
 
+    dynamic_discovery_provider_ids = set(accessible_provider_ids)
+    if current_key.has_provider_restrictions:
+        allowed = {pid for pid in current_key.allowed_provider_ids if pid}
+        dynamic_discovery_provider_ids &= allowed
+        if not dynamic_discovery_provider_ids:
+            raise forbidden(
+                "当前 API Key 未允许访问任何可用的提供商",
+                details={
+                    "api_key_id": str(current_key.id),
+                    "allowed_provider_ids": current_key.allowed_provider_ids,
+                },
+            )
+
     # Try multi-provider logical-model routing first. When a LogicalModel
     # named `lookup_model_id` exists in Redis, we use the routing
     # scheduler to pick a concrete upstream provider+model.
@@ -347,7 +373,7 @@ async def chat_completions(
             lookup_model_id=lookup_model_id,
             api_style=api_style,
             db=db,
-            allowed_provider_ids=accessible_provider_ids,
+            allowed_provider_ids=dynamic_discovery_provider_ids,
             user_id=current_key.user_id,
             is_superuser=current_key.is_superuser,
         )
@@ -398,6 +424,29 @@ async def chat_completions(
                 },
             )
 
+        # 1.5) Optional: filter/penalize candidates based on cached provider health.
+        # This is especially useful for private providers whose health is driven
+        # by user-managed chat probes (not /models checks).
+        health_by_provider: dict[str, Any] = {}
+        if settings.enable_provider_health_check and redis is not object:
+            down_providers: set[str] = set()
+            for cand in candidates:
+                health = await get_cached_health_status(redis, cand.provider_id)
+                if health is None:
+                    continue
+                health_by_provider[cand.provider_id] = health
+                if health.status.value == "down":
+                    down_providers.add(cand.provider_id)
+
+            if down_providers:
+                filtered = [cand for cand in candidates if cand.provider_id not in down_providers]
+                if filtered:
+                    logger.info(
+                        "chat_completions: filtered down providers by cached health: %s",
+                        sorted(down_providers),
+                    )
+                    candidates = filtered
+
         # 2) Optional session stickiness using X-Session-Id as conversation id.
         session_obj: RoutingSession | None = None
         if x_session_id:
@@ -414,6 +463,32 @@ async def chat_completions(
                 candidates,
             )
         )
+        # Overlay cached provider health onto routing metrics status so the scheduler can
+        # penalize degraded providers even when routing metrics are stale/missing.
+        if settings.enable_provider_health_check and health_by_provider:
+            active_provider_ids = {c.provider_id for c in candidates}
+            for pid, health in health_by_provider.items():
+                if pid not in active_provider_ids:
+                    continue
+                existing = metrics_by_provider.get(pid)
+                if existing is None:
+                    # Create a synthetic metrics snapshot so the scheduler can apply status penalty.
+                    # Keep latency in a neutral range (p95=2000ms => norm_lat=0.5 with 4000ms cap).
+                    latency_ms = float(getattr(health, "response_time_ms", None) or 2000.0)
+                    metrics_by_provider[pid] = RoutingMetrics(
+                        logical_model=logical_model.logical_id,
+                        provider_id=pid,
+                        latency_p95_ms=max(1.0, latency_ms),
+                        latency_p99_ms=max(1.0, latency_ms * 1.25),
+                        error_rate=0.0,
+                        success_qps_1m=0.0,
+                        total_requests_1m=0,
+                        last_updated=float(getattr(health, "timestamp", 0.0) or 0.0),
+                        status=health.status,
+                    )
+                else:
+                    if _status_worse(existing.status, health.status):
+                        metrics_by_provider[pid] = existing.model_copy(update={"status": health.status})
         dynamic_weights = await load_dynamic_weights(
             redis, logical_model.logical_id, candidates
         )
@@ -514,6 +589,62 @@ async def chat_completions(
         if not stream:
             # Non-streaming mode: try candidates in order, falling back
             # to the next provider when we see a retryable upstream error.
+            
+            # 定义成功回调
+            selected_provider_id: str | None = None
+            selected_model_id: str | None = None
+
+            async def on_success_callback(provider_id: str, model_id: str):
+                """成功时的处理：记录指标、绑定 Session"""
+                nonlocal selected_provider_id, selected_model_id
+                selected_provider_id = provider_id
+                selected_model_id = model_id
+                _mark_provider_success(provider_id)
+                await _bind_session_for_upstream(provider_id, model_id)
+            
+            # 使用新的辅助函数处理候选重试（简化传输层逻辑）
+            try:
+                response = await try_candidates_non_stream(
+                    candidates=ordered_candidates,
+                    client=client,
+                    redis=redis,
+                    db=db,
+                    payload=payload,
+                    logical_model_id=logical_model.logical_id,
+                    api_key=current_key,
+                    session_id=x_session_id,
+                    on_success=on_success_callback,
+                )
+                
+                # 记录计费
+                billing_payload: dict[str, Any] | None = None
+                try:
+                    body_bytes = response.body
+                    if isinstance(body_bytes, (bytes, bytearray)):
+                        parsed = json.loads(body_bytes.decode("utf-8"))
+                        if isinstance(parsed, dict):
+                            billing_payload = parsed
+                except Exception:  # pragma: no cover - 防御性日志
+                    billing_payload = None
+                record_completion_usage(
+                    db,
+                    user_id=current_key.user_id,
+                    api_key_id=current_key.id,
+                    logical_model_name=logical_model.logical_id,
+                    provider_id=selected_provider_id,
+                    provider_model_id=selected_model_id,
+                    response_payload=billing_payload,
+                    request_payload=payload,
+                    is_stream=False,
+                    idempotency_key=billing_final_key,
+                )
+                
+                return response
+            except HTTPException:
+                # 如果新的辅助函数失败，回退到原来的逻辑
+                logger.warning("New transport handlers failed, falling back to legacy logic")
+            
+            # === 以下是原来的逻辑（作为 fallback）===
             last_status: int | None = None
             last_error_text: str | None = None
 
@@ -742,30 +873,20 @@ async def chat_completions(
                         else:
                             converted_payload = claude_response
                         
-                        # Record credit usage
-                        try:
-                            record_chat_completion_usage(
-                                db,
-                                user_id=current_key.user_id,
-                                api_key_id=current_key.id,
-                                logical_model_name=logical_model.logical_id,
-                                provider_id=provider_id,
-                                provider_model_id=model_id,
-                                response_payload=(
-                                    converted_payload
-                                    if isinstance(converted_payload, dict)
-                                    else None
-                                ),
-                                request_payload=payload if isinstance(payload, dict) else None,
-                                is_stream=False,
-                            )
-                        except Exception:
-                            logger.exception(
-                                "Failed to record credit usage for Claude CLI completion "
-                                "(user=%s logical_model=%s)",
-                                current_key.user_id,
-                                logical_model.logical_id,
-                            )
+                        record_completion_usage(
+                            db,
+                            user_id=current_key.user_id,
+                            api_key_id=current_key.id,
+                            logical_model_name=logical_model.logical_id,
+                            provider_id=provider_id,
+                            provider_model_id=model_id,
+                            response_payload=(
+                                converted_payload if isinstance(converted_payload, dict) else None
+                            ),
+                            request_payload=payload if isinstance(payload, dict) else None,
+                            is_stream=False,
+                            idempotency_key=billing_final_key,
+                        )
                         
                         return JSONResponse(
                             content=_apply_response_moderation(
@@ -780,25 +901,18 @@ async def chat_completions(
                         )
                     
                     # Fallback for unparseable response
-                    try:
-                        record_chat_completion_usage(
-                            db,
-                            user_id=current_key.user_id,
-                            api_key_id=current_key.id,
-                            logical_model_name=logical_model.logical_id,
-                            provider_id=provider_id,
-                            provider_model_id=model_id,
-                            response_payload=None,
-                            request_payload=payload if isinstance(payload, dict) else None,
-                            is_stream=False,
-                        )
-                    except Exception:
-                        logger.exception(
-                            "Failed to record credit usage for raw Claude CLI completion "
-                            "(user=%s logical_model=%s)",
-                            current_key.user_id,
-                            logical_model.logical_id,
-                        )
+                    record_completion_usage(
+                        db,
+                        user_id=current_key.user_id,
+                        api_key_id=current_key.id,
+                        logical_model_name=logical_model.logical_id,
+                        provider_id=provider_id,
+                        provider_model_id=model_id,
+                        response_payload=None,
+                        request_payload=payload if isinstance(payload, dict) else None,
+                        is_stream=False,
+                        idempotency_key=billing_final_key,
+                    )
                     
                     return JSONResponse(
                         content=_apply_response_moderation(
@@ -872,29 +986,20 @@ async def chat_completions(
                             sdk_payload, payload.get("model") or model_id
                         )
                     # 记录一次非流式 SDK 调用的实际 token 消耗。
-                    try:
-                        record_chat_completion_usage(
-                            db,
-                            user_id=current_key.user_id,
-                            api_key_id=current_key.id,
-                            logical_model_name=logical_model.logical_id,
-                            provider_id=provider_id,
-                            provider_model_id=model_id,
-                            response_payload=(
-                                converted_payload
-                                if isinstance(converted_payload, dict)
-                                else None
-                            ),
-                            request_payload=payload if isinstance(payload, dict) else None,
-                            is_stream=False,
-                        )
-                    except Exception:  # pragma: no cover - 防御性日志
-                        logger.exception(
-                            "Failed to record credit usage for SDK chat completion "
-                            "(user=%s logical_model=%s)",
-                            current_key.user_id,
-                            logical_model.logical_id,
-                        )
+                    record_completion_usage(
+                        db,
+                        user_id=current_key.user_id,
+                        api_key_id=current_key.id,
+                        logical_model_name=logical_model.logical_id,
+                        provider_id=provider_id,
+                        provider_model_id=model_id,
+                        response_payload=(
+                            converted_payload if isinstance(converted_payload, dict) else None
+                        ),
+                        request_payload=payload if isinstance(payload, dict) else None,
+                        is_stream=False,
+                        idempotency_key=billing_final_key,
+                    )
                     return JSONResponse(
                         content=_apply_response_moderation(
                             converted_payload,
@@ -966,31 +1071,20 @@ async def chat_completions(
                                     )
                             except Exception:  # pragma: no cover - 防御性日志
                                 billing_payload = None
-                            try:
-                                record_chat_completion_usage(
-                                    db,
-                                    user_id=current_key.user_id,
-                                    api_key_id=current_key.id,
-                                    logical_model_name=logical_model.logical_id,
-                                    provider_id=provider_id,
-                                    provider_model_id=model_id,
-                                    response_payload=(
-                                        billing_payload
-                                        if isinstance(billing_payload, dict)
-                                        else None
-                                    ),
-                                    request_payload=payload
-                                    if isinstance(payload, dict)
-                                    else None,
-                                    is_stream=False,
-                                )
-                            except Exception:  # pragma: no cover - 防御性日志
-                                logger.exception(
-                                    "Failed to record credit usage for Claude fallback "
-                                    "(user=%s logical_model=%s)",
-                                    current_key.user_id,
-                                    logical_model.logical_id,
-                                )
+                            record_completion_usage(
+                                db,
+                                user_id=current_key.user_id,
+                                api_key_id=current_key.id,
+                                logical_model_name=logical_model.logical_id,
+                                provider_id=provider_id,
+                                provider_model_id=model_id,
+                                response_payload=(
+                                    billing_payload if isinstance(billing_payload, dict) else None
+                                ),
+                                request_payload=payload if isinstance(payload, dict) else None,
+                                is_stream=False,
+                                idempotency_key=billing_final_key,
+                            )
                             return outcome.response
                         last_status = outcome.status_code
                         last_error_text = outcome.error_text
@@ -1056,31 +1150,20 @@ async def chat_completions(
                                 )
                         except Exception:  # pragma: no cover - 防御性日志
                             billing_payload = None
-                        try:
-                            record_chat_completion_usage(
-                                db,
-                                user_id=current_key.user_id,
-                                api_key_id=current_key.id,
-                                logical_model_name=logical_model.logical_id,
-                                provider_id=provider_id,
-                                provider_model_id=model_id,
-                                response_payload=(
-                                    billing_payload
-                                    if isinstance(billing_payload, dict)
-                                    else None
-                                ),
-                                request_payload=payload
-                                if isinstance(payload, dict)
-                                else None,
-                                is_stream=False,
-                            )
-                        except Exception:  # pragma: no cover - 防御性日志
-                            logger.exception(
-                                "Failed to record credit usage for Responses fallback "
-                                "(user=%s logical_model=%s)",
-                                current_key.user_id,
-                                logical_model.logical_id,
-                            )
+                        record_completion_usage(
+                            db,
+                            user_id=current_key.user_id,
+                            api_key_id=current_key.id,
+                            logical_model_name=logical_model.logical_id,
+                            provider_id=provider_id,
+                            provider_model_id=model_id,
+                            response_payload=(
+                                billing_payload if isinstance(billing_payload, dict) else None
+                            ),
+                            request_payload=payload if isinstance(payload, dict) else None,
+                            is_stream=False,
+                            idempotency_key=billing_final_key,
+                        )
                         return outcome.response
                     last_status = outcome.status_code
                     last_error_text = outcome.error_text
@@ -1312,29 +1395,20 @@ async def chat_completions(
 
                 if converted_payload is not None:
                     # 记录一次非流式 HTTP 调用的 token 消耗。
-                    try:
-                        record_chat_completion_usage(
-                            db,
-                            user_id=current_key.user_id,
-                            api_key_id=current_key.id,
-                            logical_model_name=logical_model.logical_id,
-                            provider_id=provider_id,
-                            provider_model_id=model_id,
-                            response_payload=(
-                                converted_payload
-                                if isinstance(converted_payload, dict)
-                                else None
-                            ),
-                            request_payload=payload if isinstance(payload, dict) else None,
-                            is_stream=False,
-                        )
-                    except Exception:  # pragma: no cover - 防御性日志
-                            logger.exception(
-                                "Failed to record credit usage for chat completion "
-                                "(user=%s logical_model=%s)",
-                                current_key.user_id,
-                                logical_model.logical_id,
-                            )
+                    record_completion_usage(
+                        db,
+                        user_id=current_key.user_id,
+                        api_key_id=current_key.id,
+                        logical_model_name=logical_model.logical_id,
+                        provider_id=provider_id,
+                        provider_model_id=model_id,
+                        response_payload=(
+                            converted_payload if isinstance(converted_payload, dict) else None
+                        ),
+                        request_payload=payload if isinstance(payload, dict) else None,
+                        is_stream=False,
+                        idempotency_key=billing_final_key,
+                    )
                     return JSONResponse(
                         content=_apply_response_moderation(
                             converted_payload,
@@ -1348,24 +1422,17 @@ async def chat_completions(
                     )
 
                 # 响应体无法解析为结构化 JSON 时，基于请求参数做一次保守估算计费。
-                try:
-                    record_chat_completion_usage(
-                        db,
-                        user_id=current_key.user_id,
-                        api_key_id=current_key.id,
-                        logical_model_name=logical_model.logical_id,
-                        provider_id=provider_id,
-                        provider_model_id=model_id,
-                        response_payload=None,
-                        request_payload=payload if isinstance(payload, dict) else None,
-                        is_stream=False,
-                    )
-                except Exception:  # pragma: no cover - 防御性日志
-                    logger.exception(
-                        "Failed to record credit usage for raw chat completion "
-                        "(user=%s logical_model=%s)",
-                        current_key.user_id,
-                        logical_model.logical_id,
+                record_completion_usage(
+                    db,
+                    user_id=current_key.user_id,
+                    api_key_id=current_key.id,
+                    logical_model_name=logical_model.logical_id,
+                    provider_id=provider_id,
+                    provider_model_id=model_id,
+                    response_payload=None,
+                    request_payload=payload if isinstance(payload, dict) else None,
+                    is_stream=False,
+                    idempotency_key=billing_final_key,
                 )
                 return JSONResponse(
                     content=_apply_response_moderation(
@@ -1933,7 +2000,7 @@ async def chat_completions(
                 primary_provider_id = primary.provider_id
                 primary_model_id = primary.model_id
 
-            record_streaming_request(
+            record_stream_usage(
                 db,
                 user_id=current_key.user_id,
                 api_key_id=current_key.id,
@@ -1941,6 +2008,7 @@ async def chat_completions(
                 provider_id=primary_provider_id,
                 provider_model_id=primary_model_id,
                 payload=payload,
+                idempotency_key=billing_precharge_key,
             )
         except Exception:  # pragma: no cover - 防御性日志
             logger.exception(

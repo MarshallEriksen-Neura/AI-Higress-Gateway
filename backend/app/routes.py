@@ -29,6 +29,7 @@ from .api.v1.admin_notification_routes import router as admin_notification_route
 from .api.v1.admin_upstream_proxy_routes import router as admin_upstream_proxy_router
 from .api.v1.api_key_routes import router as api_key_router
 from .api.v1.chat_routes import router as chat_router
+from .api.v1.chat_routes_refactored import router as chat_v2_router
 from .api.v1.credit_routes import router as credit_router
 from .api.v1.gateway_routes import router as gateway_router
 from .api.v1.notification_routes import router as notification_router
@@ -40,6 +41,7 @@ from .api.v1.provider_submission_routes import (
 from .api.v1.user_provider_routes import router as user_provider_router
 from .api.v1.session_routes import router as user_session_router
 from .api.v1.user_routes import router as user_router
+from .api.v1.cli_config import router as cli_config_router
 from .db import SessionLocal
 from .logging_config import logger
 from .services.bootstrap_admin import ensure_initial_admin
@@ -107,9 +109,26 @@ def create_app() -> FastAPI:
     cors_methods = [method.strip() for method in settings.cors_allow_methods.split(",")] if settings.cors_allow_methods != "*" else ["*"]
     cors_headers = [header.strip() for header in settings.cors_allow_headers.split(",")] if settings.cors_allow_headers != "*" else ["*"]
 
+    docs_url = "/docs" if settings.enable_api_docs else None
+    redoc_url = "/redoc" if settings.enable_api_docs else None
+    openapi_url = "/openapi.json" if settings.enable_api_docs else None
+
     # 使用 lifespan 替代 on_event("startup")
-    app = FastAPI(title="AI Gateway", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title="AI Gateway",
+        version="0.1.0",
+        docs_url=docs_url,
+        redoc_url=redoc_url,
+        openapi_url=openapi_url,
+        lifespan=lifespan,
+    )
     app.add_exception_handler(Exception, handle_unexpected_error)
+
+    if not settings.enable_api_docs:
+        logger.info(
+            "API docs routes are disabled (environment=%s); set ENABLE_API_DOCS=true to enable.",
+            settings.environment,
+        )
 
     # 安全相关中间件：仅在生产环境启用
     if settings.enable_security_middleware:
@@ -189,6 +208,8 @@ def create_app() -> FastAPI:
 
     # Chat 相关网关路由（/v1/chat/completions 等）
     app.include_router(chat_router)
+    # Chat v2 相关网关路由（/v2/chat/completions），与 v1 并存
+    app.include_router(chat_v2_router)
 
     # Metrics
     app.include_router(metrics_router)
@@ -204,6 +225,9 @@ def create_app() -> FastAPI:
     # 用户私有 Provider
     app.include_router(private_provider_router)
     app.include_router(user_provider_router)
+
+    # CLI 配置脚本
+    app.include_router(cli_config_router)
 
     # 管理端路由
     app.include_router(admin_role_router)

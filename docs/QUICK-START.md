@@ -163,7 +163,7 @@ make dev-frontend
 # 8. 访问应用
 # 前端: http://localhost:3000
 # 后端: http://localhost:8000
-# API 文档: http://localhost:8000/docs
+# API 文档（开发环境默认开启；生产环境 APP_ENV=production 默认关闭，可用 ENABLE_API_DOCS=true 临时开启）: http://localhost:8000/docs
 ```
 
 ## 🐛 故障排查

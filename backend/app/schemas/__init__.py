@@ -104,6 +104,13 @@ from .provider_control import (
     UserProviderResponse,
     UserProviderUpdateRequest,
 )
+from .user_probe import (
+    ProbeApiStyle,
+    UserProbeRunResponse,
+    UserProbeTaskCreateRequest,
+    UserProbeTaskResponse,
+    UserProbeTaskUpdateRequest,
+)
 from .provider_routes import (
     ProviderMetricsResponse,
     ProviderModelsResponse,
@@ -272,6 +279,11 @@ __all__ = [
     "UserStatusUpdateRequest",
     "UserUpdateRequest",
     "UserLookupResponse",
+    "ProbeApiStyle",
+    "UserProbeRunResponse",
+    "UserProbeTaskCreateRequest",
+    "UserProbeTaskResponse",
+    "UserProbeTaskUpdateRequest",
     "NotificationCreateRequest",
     "NotificationAdminResponse",
     "NotificationMarkReadRequest",

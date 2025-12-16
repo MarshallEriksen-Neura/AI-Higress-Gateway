@@ -21,6 +21,13 @@ const TokenDisplayDialog = dynamic(
   }
 );
 
+const CliConfigDialog = dynamic(
+  () => import("@/components/dashboard/cli-config-dialog").then(mod => ({ default: mod.CliConfigDialog })),
+  {
+    ssr: false
+  }
+);
+
 export function ApiKeysClient() {
   const { apiKeys, loading, deleteApiKey } = useApiKeys();
   
@@ -31,6 +38,9 @@ export function ApiKeysClient() {
   const [tokenDialogOpen, setTokenDialogOpen] = useState(false);
   const [newToken, setNewToken] = useState<string>('');
   const [newKeyName, setNewKeyName] = useState<string>('');
+  
+  const [cliConfigOpen, setCliConfigOpen] = useState(false);
+  const [selectedKeyForCli, setSelectedKeyForCli] = useState<ApiKey | undefined>();
 
   const handleCreate = () => {
     setDialogMode('create');
@@ -53,6 +63,11 @@ export function ApiKeysClient() {
     setDialogOpen(false);
   };
 
+  const handleConfigureCli = async (apiKey: ApiKey) => {
+    setSelectedKeyForCli(apiKey);
+    setCliConfigOpen(true);
+  };
+
   return (
     <>
       <ApiKeysTable
@@ -61,6 +76,7 @@ export function ApiKeysClient() {
         onEdit={handleEdit}
         onDelete={deleteApiKey}
         onCreate={handleCreate}
+        onConfigureCli={handleConfigureCli}
       />
 
       {dialogOpen && (
@@ -79,6 +95,14 @@ export function ApiKeysClient() {
           onOpenChange={setTokenDialogOpen}
           token={newToken}
           keyName={newKeyName}
+        />
+      )}
+
+      {cliConfigOpen && selectedKeyForCli && (
+        <CliConfigDialog
+          open={cliConfigOpen}
+          onOpenChange={setCliConfigOpen}
+          apiKeyId={selectedKeyForCli.id}
         />
       )}
     </>

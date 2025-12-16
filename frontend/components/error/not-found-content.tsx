@@ -26,7 +26,7 @@ export function NotFoundContent() {
       description: t("error.404.link_dashboard_desc"),
     },
     {
-      href: "/dashboard/providers",
+      href: "/dashboard/my-providers",
       icon: Plug,
       title: t("error.404.link_providers"),
       description: t("error.404.link_providers_desc"),

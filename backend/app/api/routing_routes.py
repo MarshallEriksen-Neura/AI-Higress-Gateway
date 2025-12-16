@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Sequence
+from typing import Any
 
 from fastapi import APIRouter, Depends
 
@@ -20,12 +21,18 @@ from app.routing.provider_weight import load_dynamic_weights
 from app.routing.scheduler import choose_upstream
 from app.routing.session_manager import bind_session, get_session
 from app.settings import settings
+from app.services.provider_health_service import get_cached_health_status
 from app.storage.redis_service import get_logical_model, get_routing_metrics
 
 router = APIRouter(
     tags=["routing"],
     dependencies=[Depends(require_jwt_token)],
 )
+
+
+def _status_worse(a, b) -> bool:
+    order = {"healthy": 0, "degraded": 1, "down": 2}
+    return order.get(getattr(b, "value", str(b)), 0) > order.get(getattr(a, "value", str(a)), 0)
 
 
 def _strategy_from_name(name: str | None) -> SchedulingStrategy:
@@ -102,6 +109,25 @@ async def decide_route(
             f"No upstreams available for logical model '{body.logical_model}'"
         )
 
+    # Optional: filter candidates based on cached provider health (Redis).
+    # This prevents obvious "down" providers from being selected and can reduce
+    # tail latency by avoiding retry loops.
+    health_by_provider: dict[str, Any] = {}
+    if settings.enable_provider_health_check:
+        down_providers: set[str] = set()
+        for cand in candidates:
+            health = await get_cached_health_status(redis, cand.provider_id)
+            if health is None:
+                continue
+            health_by_provider[cand.provider_id] = health
+            if health.status.value == "down":
+                down_providers.add(cand.provider_id)
+
+        if down_providers:
+            filtered = [cand for cand in candidates if cand.provider_id not in down_providers]
+            if filtered:
+                candidates = filtered
+
     strategy = _strategy_from_name(body.strategy)
 
     # Optional session stickiness.
@@ -112,6 +138,28 @@ async def decide_route(
     metrics_by_provider = await _load_metrics_for_candidates(
         redis, logical.logical_id, candidates
     )
+    if settings.enable_provider_health_check and health_by_provider:
+        active_provider_ids = {c.provider_id for c in candidates}
+        for pid, health in health_by_provider.items():
+            if pid not in active_provider_ids:
+                continue
+            existing = metrics_by_provider.get(pid)
+            if existing is None:
+                latency_ms = float(getattr(health, "response_time_ms", None) or 2000.0)
+                metrics_by_provider[pid] = RoutingMetrics(
+                    logical_model=logical.logical_id,
+                    provider_id=pid,
+                    latency_p95_ms=max(1.0, latency_ms),
+                    latency_p99_ms=max(1.0, latency_ms * 1.25),
+                    error_rate=0.0,
+                    success_qps_1m=0.0,
+                    total_requests_1m=0,
+                    last_updated=float(getattr(health, "timestamp", 0.0) or 0.0),
+                    status=health.status,
+                )
+            else:
+                if _status_worse(existing.status, health.status):
+                    metrics_by_provider[pid] = existing.model_copy(update={"status": health.status})
     dynamic_weights = await load_dynamic_weights(
         redis, logical.logical_id, candidates
     )

@@ -67,7 +67,7 @@ class GatewayConfig(BaseModel):
     )
     probe_prompt: str | None = Field(
         default=None,
-        description="探针测试使用的全局提示词（管理员配置）",
+        description="预留字段：将来用于 health 全局扩展的探针提示词（当前版本不生效）",
     )
 
 

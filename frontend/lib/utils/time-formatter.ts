@@ -67,3 +67,39 @@ export function formatDateTime(dateString: string, locale: 'en' | 'zh' = 'en'): 
     minute: '2-digit',
   });
 }
+
+/**
+ * 格式化图表X轴时间标签（简短格式）
+ * @param dateString ISO 8601 格式的日期字符串
+ * @param locale 语言环境
+ * @returns 格式化的简短日期字符串，如 "Dec 12" 或 "12月12日"
+ */
+export function formatChartDate(dateString: string, locale: 'en' | 'zh' = 'en'): string {
+  const date = new Date(dateString);
+  // 使用本地时间（用户时区）
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  
+  if (locale === 'zh') {
+    return `${month}月${day}日`;
+  }
+  
+  // 英文月份简写
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${monthNames[date.getMonth()]} ${day}`;
+}
+
+/**
+ * 格式化图表时间标签（时:分格式）
+ * 使用本地时区，显示用户所在地的时间
+ * @param dateString ISO 8601 格式的日期字符串
+ * @returns 格式化的时间字符串，如 "14:30"
+ */
+export function formatChartTime(dateString: string): string {
+  const date = new Date(dateString);
+  // 使用本地时间（用户时区）
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  return `${hours}:${minutes}`;
+}

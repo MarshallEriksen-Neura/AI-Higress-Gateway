@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from datetime import datetime, timezone
-
-import httpx
+import time
 
 from app.logging_config import logger
+from app.http_client import CurlCffiClient
 from app.schemas.provider_control import ProviderModelValidationResult, ProviderValidationResult
 from app.settings import settings
 
@@ -35,7 +35,11 @@ class ProviderValidationService:
 
         headers = {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}
 
-        async with httpx.AsyncClient(timeout=10.0, trust_env=True) as client:
+        async with CurlCffiClient(
+            timeout=10.0,
+            impersonate="chrome120",
+            trust_env=True,
+        ) as client:
             last_error: str | None = None
             for url in candidates:
                 try:
@@ -136,7 +140,11 @@ class ProviderValidationService:
             return results
 
         target_models = model_ids[:sample_size]
-        async with httpx.AsyncClient(timeout=timeout, trust_env=True) as client:
+        async with CurlCffiClient(
+            timeout=timeout,
+            impersonate="chrome120",
+            trust_env=True,
+        ) as client:
             for model_id in target_models:
                 url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
                 payload = {
@@ -152,8 +160,9 @@ class ProviderValidationService:
                 }
                 latency_ms: int | None = None
                 try:
+                    start = time.perf_counter()
                     response = await client.post(url, json=payload, headers=headers)
-                    latency_ms = int(response.elapsed.total_seconds() * 1000)
+                    latency_ms = int((time.perf_counter() - start) * 1000.0)
                     timestamp = datetime.now(timezone.utc)
                     if response.status_code < 300:
                         results.append(

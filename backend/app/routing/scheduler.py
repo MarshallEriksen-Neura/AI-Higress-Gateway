@@ -24,8 +24,8 @@ from app.schemas import (
 @dataclass
 class CandidateScore:
     upstream: PhysicalModel
-    metrics: RoutingMetrics | None
     score: float
+    metrics: RoutingMetrics | None = None
 
 
 def _normalise_latency(ms: float) -> float:

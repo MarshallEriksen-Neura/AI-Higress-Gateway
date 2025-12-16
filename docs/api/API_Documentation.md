@@ -1129,6 +1129,7 @@
 
 当 `ENABLE_CREDIT_CHECK=true` 且用户余额小于等于 0 时：
 - `POST /v1/chat/completions`
+- `POST /v2/chat/completions`（实验性版本，与 v1 并存）
 - `POST /v1/responses`
 - `POST /v1/messages`
 
@@ -1710,11 +1711,11 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 
 ---
 
-### 4. 检查提供商健康状态
+### 4. 获取提供商健康状态
 
 **接口**: `GET /providers/{provider_id}/health`
 
-**描述**: 执行轻量级健康检查，或返回最近一次健康检查的结果。
+**描述**: 返回最近一次探针/巡检写入的健康状态（DB + Redis 缓存）；接口本身不会对上游发起请求。
 
 > 兼容说明  
 > - 若 Provider 记录存在但尚未执行过健康检查（没有 `last_check`），接口仍然返回 `200`，并根据当前 Provider 状态字段返回一个默认健康状态；  
@@ -1725,9 +1726,12 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 **响应**:
 ```json
 {
+  "provider_id": "string",
   "status": "healthy/degraded/down",
-  "last_check": 1234567890.0,
-  "metadata": {}
+  "timestamp": 1234567890.0,
+  "response_time_ms": 42.0,
+  "error_message": null,
+  "last_successful_check": 1234567890.0
 }
 ```
 
@@ -1787,7 +1791,9 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 **认证**: JWT 令牌
 
 **查询参数**:
-- `logical_model` (可选): 逻辑模型过滤器；若提供，则返回该逻辑模型与 Provider 的一条聚合记录
+- `logical_model` (可选): 逻辑模型过滤器
+  - 若提供，则返回该 Provider 在指定逻辑模型下的指标（最多一条）
+  - 若不提供，则返回该 Provider 在所有逻辑模型下的指标列表
 
 **响应**:
 ```json
@@ -1803,10 +1809,25 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
       "total_requests_1m": 220,
       "last_updated": 1733212345.123,
       "status": "healthy"  // healthy / degraded / down
+    },
+    {
+      "logical_model": "gpt-3.5-turbo",
+      "provider_id": "openai",
+      "latency_p95_ms": 150.0,
+      "latency_p99_ms": 280.0,
+      "error_rate": 0.01,
+      "success_qps_1m": 5.2,
+      "total_requests_1m": 315,
+      "last_updated": 1733212345.123,
+      "status": "healthy"
     }
   ]
 }
 ```
+
+**说明**:
+- 当不提供 `logical_model` 参数时，返回该 Provider 在所有逻辑模型下的指标
+- 如果该 Provider 没有任何路由指标数据，返回空数组 `[]`
 
 **错误响应**:
 - 404: 提供商不存在
@@ -2193,6 +2214,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "supported_api_styles": ["openai", "responses", "claude"]
 }
 ```
+> 注意：部分上游（尤其是某些代理/私有部署）可能不提供 `GET /v1/models` 或 `GET /models`，会返回 `404`。  
+> 这类场景请显式设置 `models_path` 为对方支持的模型列表路径，或直接配置 `static_models` 让网关跳过远端模型发现（否则动态路由/按模型自动匹配会受影响）。
 
 **响应**: 同 “创建用户私有提供商”。
 
@@ -2286,6 +2309,137 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 - 400:  
   - 当前私有提供商未配置可用的上游 API 密钥  
   - 提供商配置验证失败（如无法访问 /models）
+
+---
+
+### 11.1 用户探针任务（真实对话探针）
+
+**说明**：用户可在自己的私有 Provider 下创建探针任务，系统会按设定频率对上游发起一次极小的“真实对话请求”（而不是请求 `/models`），并记录响应结果供前端展示；同时会把结果写入 Provider 的健康状态（DB + Redis 缓存），因此 `GET /providers/{provider_id}/health` 也会反映该探针的最新结果。  
+**注意**：探针会消耗上游额度与资源，服务端会限制最低频率与最大 `max_tokens`。
+
+#### 11.1.1 列出探针任务
+
+**接口**: `GET /users/{user_id}/private-providers/{provider_id}/probe-tasks`
+
+**认证**: JWT 令牌（仅本人或超级管理员）
+
+**响应**:
+```json
+[
+  {
+    "id": "uuid",
+    "user_id": "uuid",
+    "provider_id": "string",
+    "name": "string",
+    "model_id": "string",
+    "prompt": "string",
+    "interval_seconds": 300,
+    "max_tokens": 16,
+    "api_style": "auto/openai/claude/responses",
+    "enabled": true,
+    "in_progress": false,
+    "last_run_at": "datetime | null",
+    "next_run_at": "datetime | null",
+    "last_run": {
+      "id": "uuid",
+      "task_id": "uuid",
+      "user_id": "uuid",
+      "provider_id": "string",
+      "model_id": "string",
+      "api_style": "string",
+      "success": true,
+      "status_code": 200,
+      "latency_ms": 123,
+      "error_message": null,
+      "response_text": "string | null",
+      "response_excerpt": "string | null",
+      "response_json": {}
+    },
+    "created_at": "datetime",
+    "updated_at": "datetime"
+  }
+]
+```
+
+#### 11.1.2 创建探针任务
+
+**接口**: `POST /users/{user_id}/private-providers/{provider_id}/probe-tasks`
+
+**请求体**:
+```json
+{
+  "name": "string",
+  "model_id": "string",
+  "prompt": "string",
+  "interval_seconds": 300,
+  "max_tokens": 16,
+  "api_style": "auto/openai/claude/responses",
+  "enabled": true
+}
+```
+
+**响应**: 同 “列出探针任务” 中单个元素结构。
+
+**错误响应**:
+- 400: 参数非法（如 interval_seconds 过低、prompt 过长、max_tokens 过大等）
+- 404: 私有 Provider 不存在
+- 403: 无权操作其他用户的私有 Provider
+
+#### 11.1.3 更新探针任务
+
+**接口**: `PUT /users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}`
+
+**请求体**（均可选）:
+```json
+{
+  "name": "string",
+  "model_id": "string",
+  "prompt": "string",
+  "interval_seconds": 600,
+  "max_tokens": 16,
+  "api_style": "auto/openai/claude/responses",
+  "enabled": true
+}
+```
+
+**响应**: 同 “列出探针任务” 中单个元素结构。
+
+#### 11.1.4 删除探针任务
+
+**接口**: `DELETE /users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}`
+
+**成功响应**: 204 No Content
+
+#### 11.1.5 立即执行一次探针
+
+**接口**: `POST /users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}/run`
+
+**请求体**: 空对象 `{}`（或不传）
+
+**响应**:
+```json
+{
+  "id": "uuid",
+  "task_id": "uuid",
+  "user_id": "uuid",
+  "provider_id": "string",
+  "model_id": "string",
+  "api_style": "string",
+  "success": true,
+  "status_code": 200,
+  "latency_ms": 123,
+  "error_message": null,
+  "response_text": "pong",
+  "response_excerpt": "{...}",
+  "response_json": {}
+}
+```
+
+#### 11.1.6 查看探针执行记录
+
+**接口**: `GET /users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}/runs?limit=20`
+
+**响应**: `UserProbeRunResponse[]`（同 11.1.5 的结构）。
 
 ---
 
@@ -2621,7 +2775,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 - `PROVIDER_AUDIT_AUTO_PROBE_INTERVAL_SECONDS`（默认 1800）
 - `PROVIDER_AUDIT_CRON_INTERVAL_SECONDS`（默认 3600）
 - 管理员可按 Provider 单独关闭探针、设置自定义频率或指定测试模型，避免过于频繁占用用户上游额度。
-- 探针提示词由系统管理员在 `/system/gateway-config` 的 `probe_prompt` 配置，建议保持简短以降低成本。
+- `probe_prompt` 为预留字段：系统管理员可在 `/system/gateway-config` 配置以便将来复用，但当前版本的自动探针不会读取该提示词向上游发起请求。
 
 ---
 
@@ -2690,23 +2844,35 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "models": [
     {
       "logical_id": "string",
-      "name": "string",
+      "display_name": "string",
       "description": "string",
       "enabled": true,
-      "capabilities": ["text_completion", "chat_completion"],
-      "default_strategy": "string",
+      "capabilities": ["chat", "completion"],
+      "strategy": {
+        "name": "balanced",
+        "description": "Default routing strategy",
+        "alpha": 0.3,
+        "beta": 0.3,
+        "gamma": 0.2,
+        "delta": 0.2,
+        "min_score": 0.1,
+        "enable_stickiness": true,
+        "stickiness_ttl": 7200
+      },
       "upstreams": [
         {
           "provider_id": "string",
           "model_id": "string",
+          "endpoint": "string",
+          "base_weight": 1.0,
           "region": "string | null",
-          "cost_input": 0.0,
-          "cost_output": 0.0,
-          "enabled": true,
-          "weight": 1.0
+          "max_qps": 0,
+          "meta_hash": "string | null",
+          "updated_at": 0.0,
+          "api_style": "openai"
         }
       ],
-      "metadata": {}
+      "updated_at": 0.0
     }
   ],
   "total": 1
@@ -2727,23 +2893,35 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 ```json
 {
   "logical_id": "string",
-  "name": "string",
+  "display_name": "string",
   "description": "string",
   "enabled": true,
-  "capabilities": ["text_completion", "chat_completion"],
-  "default_strategy": "string",
+  "capabilities": ["chat", "completion"],
+  "strategy": {
+    "name": "balanced",
+    "description": "Default routing strategy",
+    "alpha": 0.3,
+    "beta": 0.3,
+    "gamma": 0.2,
+    "delta": 0.2,
+    "min_score": 0.1,
+    "enable_stickiness": true,
+    "stickiness_ttl": 7200
+  },
   "upstreams": [
     {
       "provider_id": "string",
       "model_id": "string",
+      "endpoint": "string",
+      "base_weight": 1.0,
       "region": "string | null",
-      "cost_input": 0.0,
-      "cost_output": 0.0,
-      "enabled": true,
-      "weight": 1.0
+      "max_qps": 0,
+      "meta_hash": "string | null",
+      "updated_at": 0.0,
+      "api_style": "openai"
     }
   ],
-  "metadata": {}
+  "updated_at": 0.0
 }
 ```
 
@@ -2767,11 +2945,13 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
     {
       "provider_id": "string",
       "model_id": "string",
+      "endpoint": "string",
+      "base_weight": 1.0,
       "region": "string | null",
-      "cost_input": 0.0,
-      "cost_output": 0.0,
-      "enabled": true,
-      "weight": 1.0
+      "max_qps": 0,
+      "meta_hash": "string | null",
+      "updated_at": 0.0,
+      "api_style": "openai"
     }
   ]
 }
@@ -3186,6 +3366,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 
 **描述**: 获取当前中转网关的基础配置信息，供前端首页或文档页面展示给最终用户查看。
 
+说明：`probe_prompt` 为预留字段（将来 health 全局扩展备用），当前版本不生效。
+
 **认证**: JWT 令牌（任何已登录用户均可访问）
 
 **响应**:
@@ -3208,6 +3390,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 **描述**: 更新中转网关的基础配置，并持久化到数据库中。环境变量只在首次创建配置记录时作为默认值使用。
 
 **认证**: JWT 令牌 (仅限超级用户)
+
+说明：`probe_prompt` 为预留字段（将来 health 全局扩展备用），当前版本不生效。
 
 **请求体**:
 ```json

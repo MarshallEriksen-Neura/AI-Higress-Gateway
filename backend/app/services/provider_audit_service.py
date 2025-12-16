@@ -5,15 +5,17 @@ from typing import Literal
 from uuid import UUID
 
 import anyio
-import httpx
 from sqlalchemy import Select, select
 from sqlalchemy.orm import Session
 
+from app.http_client import CurlCffiClient
 from app.logging_config import logger
 from app.provider.config import get_provider_config
-from app.provider.health import check_provider_health
+from app.provider.health import HealthStatus
 from app.redis_client import get_redis_client
 from app.services.provider_health_service import persist_provider_health
+from app.services.user_probe_executor import execute_user_probe
+from app.schemas import ProviderStatus
 from app.settings import settings
 from app.models import (
     Provider,
@@ -31,6 +33,34 @@ class ProviderAuditError(RuntimeError):
 
 class ProviderNotFoundError(ProviderAuditError):
     """未找到 Provider。"""
+
+
+def _status_from_probe_result(*, success: bool, status_code: int | None) -> ProviderStatus:
+    if success:
+        return ProviderStatus.HEALTHY
+    if status_code is None:
+        return ProviderStatus.DOWN
+    if status_code >= 500:
+        return ProviderStatus.DOWN
+    if status_code >= 400:
+        return ProviderStatus.DEGRADED
+    return ProviderStatus.DEGRADED
+
+
+def _pick_probe_model(provider: Provider, cfg) -> str | None:
+    probe_model = getattr(provider, "probe_model", None) or getattr(cfg, "probe_model", None)
+    if isinstance(probe_model, str) and probe_model.strip():
+        return probe_model.strip()
+
+    static_models = getattr(cfg, "static_models", None) or []
+    if isinstance(static_models, list):
+        for item in static_models:
+            if not isinstance(item, dict):
+                continue
+            model_id = item.get("model_id") or item.get("id")
+            if isinstance(model_id, str) and model_id.strip():
+                return model_id.strip()
+    return None
 
 
 def _get_provider(session: Session, provider_id: str) -> Provider:
@@ -80,7 +110,7 @@ def trigger_provider_test(
 ) -> ProviderTestRecord:
     """触发一次受控探针测试并写入测试记录。
 
-    当前实现复用健康检查逻辑：调用上游 /models 或健康探针，并落库/缓存。
+    当前实现复用“真实对话探针”执行器：对上游发起一次最小对话请求，并落库/缓存。
     """
 
     provider = _get_provider(session, provider_id)
@@ -91,8 +121,8 @@ def trigger_provider_test(
     probe_status = None
     latency_ms: int | None = None
     error_code: str | None = None
-    probe_model = provider.probe_model
     effective_prompt = custom_input or settings.probe_prompt
+    probe_model = getattr(provider, "probe_model", None)
 
     cfg = get_provider_config(provider_id, session=session)
     if cfg is None:
@@ -137,10 +167,75 @@ def trigger_provider_test(
         session.refresh(provider)
         return record
 
+    probe_model = _pick_probe_model(provider, cfg)
+    if not probe_model:
+        finished_at = datetime.now(timezone.utc)
+        record = ProviderTestRecord(
+            provider_uuid=provider.id,
+            mode=mode,
+            success=False,
+            summary="probe model missing",
+            probe_results=[
+                {
+                    "case": "probe",
+                    "mode": mode,
+                    "model": None,
+                    "input": effective_prompt,
+                    "status": "probe_model_missing",
+                    "latency_ms": None,
+                    "timestamp": finished_at.isoformat(),
+                }
+            ],
+            latency_ms=None,
+            error_code="probe_model_missing",
+            cost=0.0,
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        session.add(record)
+        _record_audit_log(
+            session,
+            provider,
+            "test",
+            operator_id=operator_id,
+            remark=remark,
+            from_status=previous_status,
+            to_status=provider.audit_status,
+            test_record=record,
+        )
+        session.commit()
+        session.refresh(record)
+        session.refresh(provider)
+        return record
+
     async def _run_probe():
         redis = get_redis_client()
-        async with httpx.AsyncClient(timeout=settings.upstream_timeout, trust_env=True) as client:
-            status = await check_provider_health(client, cfg, redis)
+        async with CurlCffiClient(
+            timeout=settings.upstream_timeout,
+            impersonate="chrome120",
+            trust_env=True,
+        ) as client:
+            result = await execute_user_probe(
+                client,  # CurlCffiClient 与 httpx.AsyncClient 接口兼容
+                provider_cfg=cfg,
+                model_id=probe_model,
+                prompt=effective_prompt,
+                max_tokens=32,
+                api_style="auto",
+                redis=redis,
+            )
+
+            finished_at = datetime.now(timezone.utc)
+            status = HealthStatus(
+                provider_id=provider.provider_id,
+                status=_status_from_probe_result(
+                    success=result.success, status_code=result.status_code
+                ),
+                timestamp=finished_at.timestamp(),
+                response_time_ms=float(result.latency_ms) if result.latency_ms is not None else None,
+                error_message=result.error_message,
+                last_successful_check=finished_at.timestamp() if result.success else None,
+            )
             await persist_provider_health(
                 redis,
                 session,
@@ -148,15 +243,17 @@ def trigger_provider_test(
                 status,
                 cache_ttl_seconds=settings.provider_health_cache_ttl_seconds,
             )
-            return status
+            return status, result
 
     try:
-        probe_status = anyio.run(_run_probe)
-        latency_ms = probe_status.response_time_ms or None
-        if probe_status.status.value == "healthy":
+        probe_status, probe_result = anyio.run(_run_probe)
+        latency_ms = int(probe_result.latency_ms) if probe_result.latency_ms is not None else None
+        if probe_result.success:
             error_code = None
         else:
-            error_code = probe_status.error_message or probe_status.status.value
+            error_code = probe_result.error_message or (
+                f"HTTP {probe_result.status_code}" if probe_result.status_code else "probe_failed"
+            )
     except Exception as exc:  # pragma: no cover - 网络/上游异常
         logger.exception("Provider %s test failed: %s", provider_id, exc)
         probe_status = None
@@ -172,7 +269,7 @@ def trigger_provider_test(
         summary=remark or (probe_status.status.value if probe_status else "probe failed"),
         probe_results=[
             {
-                "case": "health_check",
+                "case": "probe",
                 "mode": mode,
                 "model": probe_model,
                 "input": effective_prompt,

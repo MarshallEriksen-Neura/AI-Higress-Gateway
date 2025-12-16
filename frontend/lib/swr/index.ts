@@ -10,3 +10,5 @@ export * from "./use-system-config";
 export * from "./use-logical-models";
 export * from "./use-registration-windows";
 export * from "./use-sdk-vendors";
+export * from "./use-user-probes";
+export * from "./use-cli-config";
