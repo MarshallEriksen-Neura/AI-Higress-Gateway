@@ -125,8 +125,10 @@ class DailyFileHandler(logging.Handler):
 
 
 def _project_root() -> Path:
-    # backend/app/logging_config.py -> backend/app -> backend -> repo root
-    return Path(__file__).resolve().parents[2]
+    # Keep log files under the backend project root, not the repository root.
+    # Local path: backend/app/logging_config.py -> backend/app -> backend
+    # Docker image path: /app/app/logging_config.py -> /app
+    return Path(__file__).resolve().parents[1]
 
 
 def _resolve_log_dir(value: str | Path) -> Path:

@@ -529,7 +529,7 @@ class Settings(BaseSettings):
     log_dir: str = Field(
         "logs",
         alias="LOG_DIR",
-        description="日志目录（相对路径以项目根目录为基准）；默认 logs",
+        description="日志目录（相对路径以 backend 项目根目录为基准）；默认 logs",
     )
     log_backup_days: int = Field(
         7,
