@@ -213,7 +213,7 @@ async def execute_sdk_stream(
 
         # upstream_style == openai
         gemini_adapter: GeminiDictToOpenAISSEAdapter | None = None
-        if driver_name == "google" and _GEMINI_MODEL_REGEX.search(
+        if driver_name in ("google", "vertexai") and _GEMINI_MODEL_REGEX.search(
             str(payload.get("model") or model_id or "")
         ):
             gemini_adapter = GeminiDictToOpenAISSEAdapter(payload.get("model") or model_id)

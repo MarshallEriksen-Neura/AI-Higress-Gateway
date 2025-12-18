@@ -287,7 +287,7 @@ async def execute_sdk_transport(
 
     converted: Any = sdk_payload
     if (
-        getattr(driver, "name", "") == "google"
+        str(getattr(driver, "name", "") or "").lower() in ("google", "vertexai")
         and isinstance(sdk_payload, dict)
         and sdk_payload.get("candidates") is not None
         and _GEMINI_MODEL_REGEX.search(str(payload.get("model") or model_id or ""))

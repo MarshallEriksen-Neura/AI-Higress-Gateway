@@ -144,7 +144,7 @@ class ProviderConfig(BaseModel):
         default=None,
         description=(
             "When transport='sdk', identifies which official SDK implementation to use "
-            "(e.g. openai/google/claude)."
+            "(e.g. openai/google/claude/vertexai)."
         ),
     )
 

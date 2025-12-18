@@ -39,7 +39,7 @@ class UserProviderCreateRequest(BaseModel):
     )
     sdk_vendor: SdkVendorValue | None = Field(
         default=None,
-        description="当 transport=sdk 时必须指定的 SDK 厂商标识，例如 openai/google/claude",
+        description="当 transport=sdk 时必须指定的 SDK 厂商标识，例如 openai/google/claude/vertexai",
     )
     weight: float | None = Field(
         default=1.0,
@@ -484,7 +484,7 @@ class ProviderPresetBase(BaseModel):
     transport: Literal["http", "sdk", "claude_cli"] = Field(default="http")
     sdk_vendor: SdkVendorValue | None = Field(
         default=None,
-        description="当 transport=sdk 时必须指定的 SDK 厂商标识，例如 openai/google/claude",
+        description="当 transport=sdk 时必须指定的 SDK 厂商标识，例如 openai/google/claude/vertexai",
     )
     base_url: HttpUrl
     models_path: str | None = Field(default=None)

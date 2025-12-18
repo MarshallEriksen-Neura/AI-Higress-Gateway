@@ -11,7 +11,7 @@ from tests.utils import jwt_auth_headers
 
 def test_registry_contains_built_in_vendors():
     vendors = list_registered_sdk_vendors()
-    assert {"openai", "google", "claude"}.issubset(set(vendors))
+    assert {"openai", "google", "claude", "vertexai"}.issubset(set(vendors))
 
 
 def test_provider_preset_rejects_unknown_sdk_vendor():
@@ -37,5 +37,5 @@ def test_sdk_vendor_route_returns_registry(app_with_inmemory_db):
 
     assert resp.status_code == 200
     body = resp.json()
-    assert {"openai", "google", "claude"}.issubset(set(body["vendors"]))
-    assert body["total"] >= 3
+    assert {"openai", "google", "claude", "vertexai"}.issubset(set(body["vendors"]))
+    assert body["total"] >= 4

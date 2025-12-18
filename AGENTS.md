@@ -30,14 +30,17 @@
 - 设计规范与文档
   - 在设计或改版任何前端页面之前，必须先阅读根目录的 `ui-prompt.md`，遵循极简 / 墨水风格等统一视觉规范。
   - 新增页面前，优先查阅 `docs/fronted/*.md` 中的对应文档（如 `missing-ui-pages-analysis.md`、页面设计方案等），按文档里的信息架构和交互建议进行实现。
-  - 如任务涉及 API 行为、鉴权或错误码，请同步对照 `docs/api/*.md` 以及相关后端设计文档（如 `docs/backend/*`），保证前后端约定一致，并在变更后更新对应文档。
+  - **文档编写原则**：**只有在用户明确要求时才编写或更新文档**。AI Agent 不应主动创建新的设计文档、技术文档或总结文档，除非用户明确声明需要文档输出。
+  - 如任务涉及 API 行为、鉴权或错误码的改动，需在任务结束后更新 `docs/api/*.md` 对应文档，避免前端继续依赖过时说明。
 
 - 组件复用与 shadcn
-  - 新增或修改前端页面时，**优先复用 `@/components/ui` 中的组件**，不要在页面里直接用 `<button>`, `<input>`, `<select>` 等原生标签堆叠 Tailwind class。
-  - 若现有 `@/components/ui` 中没有合适组件：
-    - AI Agent 可以通过 **shadcn MCP** 查询/检索对应组件用法；
-    - 在 `frontend` 目录下使用 **bun 命令** 安装，例如：`bunx shadcn@latest add button card dialog`（根据需要替换组件名），让组件落到 `components/ui` 后再使用。
-  - 确实必须使用原生元素的场景（极少数），也应先在 `@/components/ui` 中封装成通用组件，再在业务页面中引用，保持交互与样式的一致性。
+  - **组件使用优先级**（从高到低）：
+    1. **优先使用 shadcn/ui 官方组件**：通过 `bunx shadcn@latest add <component>` 安装到 `@/components/ui`，例如 `button`, `card`, `dialog`, `input`, `select`, `table` 等。
+    2. **复用已封装的业务组件**：使用 `@/components/dashboard`、`@/components/layout`、`@/components/forms` 等目录下已有的业务组件。
+    3. **最后才考虑自定义封装**：只有在 shadcn/ui 没有提供对应组件，且现有业务组件无法满足需求时，才在 `@/components/ui` 中封装新的通用组件。
+  - 新增或修改前端页面时，**禁止直接使用原生 HTML 标签**（如 `<button>`, `<input>`, `<select>`）堆叠 Tailwind class，必须使用 `@/components/ui` 中的组件。
+  - 使用 Card 组件时，优先使用 `@/components/ui/card` 中的 `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter` 等组件，保持卡片样式统一。
+  - AI Agent 可以通过 **shadcn MCP** 查询/检索组件用法和示例代码。
 
 - 路由结构与组件拆分
   - `frontend/app/**/page.tsx` 默认应为 **服务端组件**（不加 `"use client"`），负责页面布局和数据装载；有复杂交互或状态管理时，将交互逻辑拆到 `components/*-client.tsx` 等客户端组件中。

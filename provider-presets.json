@@ -52,6 +52,23 @@
       "static_models": []
     },
     {
+      "preset_id": "VERTEXAI",
+      "display_name": "Vertex AI",
+      "description": "Google Cloud Vertex AI（Gemini）官方 SDK",
+      "provider_type": "native",
+      "transport": "sdk",
+      "sdk_vendor": "vertexai",
+      "base_url": "https://us-central1-aiplatform.googleapis.com/",
+      "models_path": "/v1/models",
+      "messages_path": null,
+      "chat_completions_path": "/v1/chat/completions",
+      "responses_path": null,
+      "supported_api_styles": ["openai"],
+      "retryable_status_codes": [429, 500],
+      "custom_headers": {},
+      "static_models": []
+    },
+    {
       "preset_id": "KIMI",
       "display_name": "moonshot ai",
       "description": "moonshot ai 网关",

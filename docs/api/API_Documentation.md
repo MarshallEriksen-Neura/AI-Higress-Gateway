@@ -1622,7 +1622,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
     "static_models": [],
     "transport": "http/sdk/claude_cli",
     "provider_type": "native/aggregator",
-    "sdk_vendor": "string | null（参见 /providers/sdk-vendors）",
+    "sdk_vendor": "string | null（参见 /providers/sdk-vendors，例如 openai/google/claude/vertexai）",
     "supported_api_styles": ["openai", "responses", "claude"] 或 null
   }
 ],
@@ -1631,7 +1631,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 ```
 
 > 说明：
-> - 当 `transport = "sdk"` 时，必须在后台配置 `sdk_vendor`，其值需来自 `/providers/sdk-vendors` 返回列表，网关才会走对应官方 SDK；
+> - 当 `transport = "sdk"` 时，必须在后台配置 `sdk_vendor`，其值需来自 `/providers/sdk-vendors` 返回列表（例如 `openai/google/claude/vertexai`），网关才会走对应官方 SDK；
+> - 当 `sdk_vendor = "vertexai"` 时，建议将 `api_key` 填写为 GCP 服务账号 JSON（将被加密存储）；网关会优先使用该 JSON 中的 `project_id`，并从 `base_url` 推断 `location`（如 `https://us-central1-aiplatform.googleapis.com/`），否则回退到环境变量 `VERTEXAI_PROJECT/GOOGLE_CLOUD_PROJECT` 与 `VERTEXAI_LOCATION/GOOGLE_CLOUD_LOCATION`；
 > - 当 `transport = "http"` 时，`sdk_vendor` 一律为 `null`，表示纯 HTTP 代理模式；
 > - 当 `transport = "claude_cli"` 时，网关会伪装成 Claude Code CLI 客户端，自动添加 CLI 特有的请求头、生成 user_id、转换消息格式，并使用 TLS 指纹伪装技术。适用于需要 Claude CLI 特征的 API 端点。
 
@@ -1648,8 +1649,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 **响应**:
 ```json
 {
-  "vendors": ["openai", "google", "claude"],
-  "total": 3
+  "vendors": ["openai", "google", "claude", "vertexai"],
+  "total": 4
 }
 ```
 
@@ -1693,7 +1694,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "static_models": [],
   "transport": "http/sdk/claude_cli",
   "provider_type": "native/aggregator",
-  "sdk_vendor": "openai/google/claude 或 null",
+  "sdk_vendor": "openai/google/claude/vertexai 或 null",
   "supported_api_styles": ["openai", "responses", "claude"] 或 null
 }
 ```
@@ -2191,7 +2192,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
     "base_url": "url",
     "provider_type": "native/aggregator",
     "transport": "http/sdk/claude_cli",
-    "sdk_vendor": "openai/google/claude 或 null",
+    "sdk_vendor": "openai/google/claude/vertexai 或 null",
     "preset_id": "string | null",
     "visibility": "private",
     "owner_id": "uuid",
@@ -2224,7 +2225,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "api_key": "string",
   "provider_type": "native 或 aggregator (可选, 默认native)",
   "transport": "http 或 sdk 或 claude_cli (可选, 默认http)",
-  "sdk_vendor": "openai/google/claude (当 transport=sdk 时必填)"
+  "sdk_vendor": "openai/google/claude/vertexai (当 transport=sdk 时必填)"
   // 其余可选字段: weight, region, cost_input, cost_output, max_qps,
   // retryable_status_codes, custom_headers,
   // models_path, messages_path, chat_completions_path, responses_path,
@@ -2242,7 +2243,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "base_url": "url",
   "provider_type": "native/aggregator",
   "transport": "http/sdk/claude_cli",
-   "sdk_vendor": "openai/google/claude 或 null",
+   "sdk_vendor": "openai/google/claude/vertexai 或 null",
    "preset_id": "string | null",
   "visibility": "private",
   "owner_id": "uuid",
@@ -2274,7 +2275,7 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "base_url": "url (可选)",
   "provider_type": "native/aggregator (可选)",
   "transport": "http/sdk/claude_cli (可选)",
-  "sdk_vendor": "openai/google/claude (可选；当 transport 变更为 sdk 时建议显式设置)",
+  "sdk_vendor": "openai/google/claude/vertexai (可选；当 transport 变更为 sdk 时建议显式设置)",
   "weight": 1.0,
   "region": "string | null",
   "cost_input": 0.0,

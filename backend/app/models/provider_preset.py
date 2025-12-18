@@ -25,7 +25,7 @@ class ProviderPreset(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sdk_vendor: Mapped[str | None] = Column(
         String(32),
         nullable=True,
-        doc="When transport='sdk', identifies which official SDK implementation to use (e.g. openai/google/claude).",
+        doc="When transport='sdk', identifies which official SDK implementation to use (e.g. openai/google/claude/vertexai).",
     )
     base_url: Mapped[str] = Column(String(255), nullable=False)
     models_path: Mapped[str | None] = Column(String(100), nullable=True)

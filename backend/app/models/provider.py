@@ -33,7 +33,7 @@ class Provider(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     sdk_vendor: Mapped[str | None] = Column(
         String(32),
         nullable=True,
-        doc="When transport='sdk', identifies which official SDK implementation to use (e.g. openai/google/claude).",
+        doc="When transport='sdk', identifies which official SDK implementation to use (e.g. openai/google/claude/vertexai).",
     )
     weight: Mapped[float] = Column(Float, nullable=False, server_default=text("1.0"))
     region: Mapped[str | None] = Column(String(50), nullable=True)

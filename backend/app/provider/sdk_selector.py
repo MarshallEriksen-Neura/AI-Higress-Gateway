@@ -1,7 +1,7 @@
 """
 SDK 厂商分发与探测。
 
-当前支持 google-genai、openai 与 Claude/Anthropic 官方 SDK，后续新增厂商时在此集中配置。
+当前支持 google-genai（Gemini API / Vertex AI）、openai 与 Claude/Anthropic 官方 SDK，后续新增厂商时在此集中配置。
 """
 
 from __future__ import annotations
@@ -10,7 +10,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
-from app.provider import claude_sdk, google_sdk, openai_sdk
+from app.provider import claude_sdk, google_sdk, openai_sdk, vertexai_sdk
 
 if TYPE_CHECKING:
     from app.schemas import ProviderConfig
@@ -90,5 +90,16 @@ register_sdk_driver(
         generate_content=claude_sdk.generate_content,
         stream_content=claude_sdk.stream_content,
         error_types=(claude_sdk.ClaudeSDKError,),
+    ),
+)
+
+register_sdk_driver(
+    "vertexai",
+    SDKDriver(
+        name="vertexai",
+        list_models=vertexai_sdk.list_models,
+        generate_content=vertexai_sdk.generate_content,
+        stream_content=vertexai_sdk.stream_content,
+        error_types=(vertexai_sdk.VertexAISDKError,),
     ),
 )
