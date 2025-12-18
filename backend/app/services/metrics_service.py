@@ -24,6 +24,7 @@ from app.services.metrics_buffer import (
     MetricsStats,
     UserMetricsKey,
 )
+from app.models import ProviderRoutingMetricsHistory
 
 BucketSizeSeconds = Literal[60]
 
@@ -83,6 +84,8 @@ def record_provider_call_metric(
     api_key_id: UUID | None,
     success: bool,
     latency_ms: float,
+    status_code: int | None = None,
+    error_kind: str | None = None,
     bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
 ) -> None:
     """
@@ -94,6 +97,17 @@ def record_provider_call_metric(
     try:
         now = dt.datetime.now(tz=dt.timezone.utc)
         window_start = _current_bucket_start(now, bucket_seconds)
+
+        resolved_error_kind = error_kind
+        if not success and resolved_error_kind is None:
+            if status_code == 429:
+                resolved_error_kind = "429"
+            elif status_code is None:
+                resolved_error_kind = "timeout"
+            elif 400 <= status_code < 500:
+                resolved_error_kind = "4xx"
+            elif 500 <= status_code < 600:
+                resolved_error_kind = "5xx"
 
         if settings.metrics_buffer_enabled:
             metrics_recorder.record_sample(
@@ -107,6 +121,7 @@ def record_provider_call_metric(
                 bucket_seconds=bucket_seconds,
                 success=success,
                 latency_ms=latency_ms,
+                error_kind=resolved_error_kind,
             )
             if user_id is not None:
                 _record_user_metrics_buffered(
@@ -124,7 +139,12 @@ def record_provider_call_metric(
 
         # 缓冲关闭时，直接写库（保留旧逻辑）。
         stats = MetricsStats()
-        stats.record(success=success, latency_ms=latency_ms, sample_limit=1)
+        stats.record(
+            success=success,
+            latency_ms=latency_ms,
+            sample_limit=1,
+            error_kind=resolved_error_kind,
+        )
         key = MetricsKey(
             provider_id=provider_id,
             logical_model=logical_model,
@@ -156,6 +176,109 @@ def record_provider_call_metric(
     except Exception:  # pragma: no cover - 防御性日志，不影响主流程
         logger.exception(
             "Failed to record provider metrics for provider=%s logical_model=%s",
+            provider_id,
+            logical_model,
+        )
+
+
+def record_provider_token_usage(
+    db: Session,
+    *,
+    provider_id: str,
+    logical_model: str,
+    transport: str,
+    is_stream: bool,
+    user_id: UUID | None,
+    api_key_id: UUID | None,
+    occurred_at: dt.datetime | None,
+    input_tokens: int | None,
+    output_tokens: int | None,
+    total_tokens: int | None,
+    estimated: bool,
+    bucket_seconds: int = DEFAULT_BUCKET_SECONDS,
+) -> None:
+    """
+    记录 Token 用量到分钟桶事实表（不依赖扣费是否发生）。
+
+    该写入可能发生在异步计费任务中，因此允许“先插入占位行，再由后续指标写入补齐”。
+    """
+    if not provider_id or not logical_model:
+        return
+    if total_tokens is None:
+        return
+
+    try:
+        at = occurred_at or dt.datetime.now(tz=dt.timezone.utc)
+        window_start = _current_bucket_start(at, bucket_seconds)
+
+        in_tokens = int(input_tokens or 0)
+        out_tokens = int(output_tokens or 0)
+        tot_tokens = int(total_tokens or 0)
+        if tot_tokens < 0:
+            return
+
+        dialect_name = getattr(db.get_bind(), "dialect", None)
+        dialect_name = getattr(dialect_name, "name", None)
+        if dialect_name == "postgresql":
+            from sqlalchemy.dialects.postgresql import insert as upsert_insert
+
+            conflict_kwargs = {"constraint": "uq_provider_routing_metrics_history_bucket"}
+        else:
+            from sqlalchemy.dialects.sqlite import insert as upsert_insert
+
+            conflict_kwargs = {
+                "index_elements": [
+                    ProviderRoutingMetricsHistory.provider_id,
+                    ProviderRoutingMetricsHistory.logical_model,
+                    ProviderRoutingMetricsHistory.transport,
+                    ProviderRoutingMetricsHistory.is_stream,
+                    ProviderRoutingMetricsHistory.user_id,
+                    ProviderRoutingMetricsHistory.api_key_id,
+                    ProviderRoutingMetricsHistory.window_start,
+                ]
+            }
+
+        insert_stmt = upsert_insert(ProviderRoutingMetricsHistory).values(
+            provider_id=provider_id,
+            logical_model=logical_model,
+            transport=transport,
+            is_stream=bool(is_stream),
+            user_id=user_id,
+            api_key_id=api_key_id,
+            window_start=window_start,
+            window_duration=bucket_seconds,
+            total_requests_1m=0,
+            success_requests=0,
+            error_requests=0,
+            latency_avg_ms=0.0,
+            latency_p50_ms=0.0,
+            latency_p95_ms=0.0,
+            latency_p99_ms=0.0,
+            error_rate=0.0,
+            success_qps_1m=0.0,
+            status="healthy",
+            input_tokens_sum=in_tokens,
+            output_tokens_sum=out_tokens,
+            total_tokens_sum=tot_tokens,
+            token_estimated_requests=1 if estimated else 0,
+        )
+
+        update_stmt = insert_stmt.on_conflict_do_update(
+            **conflict_kwargs,
+            set_={
+                "input_tokens_sum": ProviderRoutingMetricsHistory.input_tokens_sum + in_tokens,
+                "output_tokens_sum": ProviderRoutingMetricsHistory.output_tokens_sum + out_tokens,
+                "total_tokens_sum": ProviderRoutingMetricsHistory.total_tokens_sum + tot_tokens,
+                "token_estimated_requests": ProviderRoutingMetricsHistory.token_estimated_requests
+                + (1 if estimated else 0),
+            },
+        )
+        db.execute(update_stmt)
+        db.commit()
+    except Exception:  # pragma: no cover - 指标写入失败不影响主流程
+        db.rollback()
+        logger.exception(
+            "Failed to record token usage for provider=%s logical_model=%s",
             provider_id,
             logical_model,
         )
@@ -218,7 +341,7 @@ def _record_user_metrics_immediate(
     latency_ms: float,
 ) -> None:
     stats = MetricsStats()
-    stats.record(success=success, latency_ms=latency_ms, sample_limit=1)
+    stats.record(success=success, latency_ms=latency_ms, sample_limit=1, error_kind=None)
     key = UserMetricsKey(
         user_id=user_id,
         provider_id=provider_id,
@@ -252,6 +375,8 @@ async def call_upstream_http_with_metrics(
     """
     start = time.perf_counter()
     success = False
+    status_code: int | None = None
+    error_kind: str | None = None
     proxy_url = await pick_upstream_proxy()
     timeout_cfg = _timeout_seconds(getattr(client, "timeout", settings.upstream_timeout))
     try:
@@ -327,6 +452,7 @@ async def call_upstream_http_with_metrics(
                 logical_model,
             )
             resp = await client.post(url, headers=headers, json=json_body)
+        status_code = resp.status_code
         success = resp.status_code < 400
         logger.info(
             "call_upstream_http_with_metrics: 直连请求成功 (provider=%s logical_model=%s status=%d)",
@@ -335,7 +461,17 @@ async def call_upstream_http_with_metrics(
             resp.status_code,
         )
         return resp
+    except httpx.TimeoutException as exc:
+        error_kind = "timeout"
+        logger.warning(
+            "Upstream HTTP timeout for %s (provider=%s): %s",
+            url,
+            provider_id,
+            exc,
+        )
+        raise
     except httpx.HTTPError as exc:
+        error_kind = "timeout"
         logger.warning(
             "Upstream HTTP error for %s (provider=%s): %s",
             url,
@@ -356,6 +492,8 @@ async def call_upstream_http_with_metrics(
                 api_key_id=api_key_id,
                 success=success,
                 latency_ms=latency_ms,
+                status_code=status_code,
+                error_kind=error_kind,
             )
         except Exception:  # pragma: no cover - 防御性日志
             logger.exception(
@@ -585,6 +723,7 @@ async def stream_upstream_with_metrics(
                 api_key_id=api_key_id,
                 success=False,
                 latency_ms=latency_ms,
+                status_code=err.status_code,
             )
         except Exception:  # pragma: no cover - 防御性日志
             logger.exception(
@@ -618,6 +757,7 @@ async def call_sdk_generate_with_metrics(
     """
     start = time.perf_counter()
     success = False
+    err: Exception | None = None
     try:
         result = await driver.generate_content(
             api_key=api_key,
@@ -627,6 +767,9 @@ async def call_sdk_generate_with_metrics(
         )
         success = True
         return result
+    except Exception as exc:
+        err = exc
+        raise
     finally:
         latency_ms = (time.perf_counter() - start) * 1000.0
         try:
@@ -640,6 +783,7 @@ async def call_sdk_generate_with_metrics(
                 api_key_id=api_key_id,
                 success=success,
                 latency_ms=latency_ms,
+                error_kind="timeout" if (err is not None and not success) else None,
             )
         except Exception:  # pragma: no cover - 防御性日志
             logger.exception(
@@ -717,6 +861,7 @@ async def stream_sdk_with_metrics(
                     api_key_id=api_key_id,
                     success=False,
                     latency_ms=latency_ms,
+                    error_kind="timeout",
                 )
             except Exception:  # pragma: no cover - 防御性日志
                 logger.exception(
@@ -730,6 +875,7 @@ async def stream_sdk_with_metrics(
 
 __all__ = [
     "record_provider_call_metric",
+    "record_provider_token_usage",
     "flush_metrics_buffer",
     "flush_user_metrics_buffer",
     "call_upstream_http_with_metrics",

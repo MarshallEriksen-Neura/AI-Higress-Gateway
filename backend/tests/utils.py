@@ -8,6 +8,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.deps import get_db
+from app.deps import get_redis
+from app.db import get_db_session
 from app.models import APIKey, Base, User
 from app.services.api_key_service import (
     APIKeyExpiry,
@@ -40,6 +42,14 @@ def install_inmemory_db(app, *, token_plain: str = "timeline") -> sessionmaker[S
             db.close()
 
     app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_db_session] = override_get_db
+
+    redis = InMemoryRedis()
+
+    async def override_get_redis():
+        return redis
+
+    app.dependency_overrides[get_redis] = override_get_redis
 
     with SessionLocal() as session:
         seed_user_and_key(session, token_plain=token_plain)

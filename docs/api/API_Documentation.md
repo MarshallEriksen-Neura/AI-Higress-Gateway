@@ -3415,7 +3415,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "max_concurrent_requests": 1000,
   "request_timeout_ms": 30000,
   "cache_ttl_seconds": 3600,
-  "probe_prompt": "请回答一个简单问题用于健康检查。"
+  "probe_prompt": "请回答一个简单问题用于健康检查。",
+  "metrics_retention_days": 15
 }
 ```
 
@@ -3438,7 +3439,8 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
   "max_concurrent_requests": 1000,
   "request_timeout_ms": 30000,
   "cache_ttl_seconds": 3600,
-  "probe_prompt": "请回答一个简单问题用于健康检查。"
+  "probe_prompt": "请回答一个简单问题用于健康检查。",
+  "metrics_retention_days": 15
 }
 ```
 

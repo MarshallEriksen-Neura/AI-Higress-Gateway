@@ -63,6 +63,8 @@ def _apply_gateway_config_to_settings(row: GatewayConfigRow) -> None:
     settings.upstream_timeout = row.request_timeout_ms / 1000.0
     # 将缓存 TTL 应用到模型缓存层。
     settings.models_cache_ttl = row.cache_ttl_seconds
+    # Dashboard 指标留存天数（分钟桶）。
+    settings.dashboard_metrics_retention_days = row.metrics_retention_days
 
 
 def _get_or_create_gateway_config_row(db: Session) -> GatewayConfigRow:
@@ -77,6 +79,7 @@ def _get_or_create_gateway_config_row(db: Session) -> GatewayConfigRow:
             request_timeout_ms=settings.gateway_request_timeout_ms,
             cache_ttl_seconds=settings.gateway_cache_ttl_seconds,
             probe_prompt=settings.probe_prompt,
+            metrics_retention_days=settings.dashboard_metrics_retention_days,
         )
         db.add(row)
         db.commit()
@@ -286,6 +289,7 @@ def get_gateway_config(
         request_timeout_ms=row.request_timeout_ms,
         cache_ttl_seconds=row.cache_ttl_seconds,
         probe_prompt=row.probe_prompt or settings.probe_prompt,
+        metrics_retention_days=row.metrics_retention_days,
     )
 
 
@@ -315,6 +319,14 @@ def update_gateway_config(
     row.request_timeout_ms = payload.request_timeout_ms
     row.cache_ttl_seconds = payload.cache_ttl_seconds
     row.probe_prompt = payload.probe_prompt
+    # 为了兼容旧前端（未携带该字段的 PUT 请求），仅在显式传入时才覆盖。
+    payload_data = (
+        payload.model_dump(exclude_unset=True)
+        if hasattr(payload, "model_dump")
+        else payload.dict(exclude_unset=True)  # type: ignore[attr-defined]
+    )
+    if "metrics_retention_days" in payload_data:
+        row.metrics_retention_days = payload.metrics_retention_days
 
     db.add(row)
     db.commit()
@@ -329,6 +341,7 @@ def update_gateway_config(
         request_timeout_ms=row.request_timeout_ms,
         cache_ttl_seconds=row.cache_ttl_seconds,
         probe_prompt=row.probe_prompt,
+        metrics_retention_days=row.metrics_retention_days,
     )
 
 

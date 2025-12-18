@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import os
 from typing import Any
 from uuid import UUID
@@ -95,6 +96,7 @@ def record_completion_usage(
     """
     if os.getenv("PYTEST_CURRENT_TEST"):
         try:
+            occurred_at = dt.datetime.now(tz=dt.timezone.utc)
             _record_chat_completion_usage(
                 db,
                 user_id=user_id,
@@ -107,6 +109,7 @@ def record_completion_usage(
                 is_stream=is_stream,
                 reason=reason,
                 idempotency_key=idempotency_key,
+                occurred_at=occurred_at,
             )
         except Exception:
             logger.exception(
@@ -118,6 +121,7 @@ def record_completion_usage(
             )
         return
 
+    occurred_at = dt.datetime.now(tz=dt.timezone.utc).isoformat()
     _enqueue_celery_task(
         "tasks.credits.record_chat_completion_usage",
         kwargs={
@@ -131,6 +135,7 @@ def record_completion_usage(
             "is_stream": bool(is_stream),
             "reason": reason,
             "idempotency_key": idempotency_key,
+            "occurred_at": occurred_at,
         },
     )
 

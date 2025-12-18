@@ -47,6 +47,7 @@ celery_app.conf.update(
         "app.tasks.provider_audit",
         "app.tasks.user_probe",
         "app.tasks.upstream_proxy_pool",
+        "app.metrics.tasks",
     ),
 )
 

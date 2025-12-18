@@ -35,15 +35,34 @@ class MetricsStats:
     total_requests: int = 0
     success_requests: int = 0
     error_requests: int = 0
+    error_4xx_requests: int = 0
+    error_5xx_requests: int = 0
+    error_429_requests: int = 0
+    error_timeout_requests: int = 0
     latency_sum_ms: float = 0.0
     latency_samples: list[float] = field(default_factory=list)
 
-    def record(self, *, success: bool, latency_ms: float, sample_limit: int) -> None:
+    def record(
+        self,
+        *,
+        success: bool,
+        latency_ms: float,
+        sample_limit: int,
+        error_kind: str | None = None,
+    ) -> None:
         self.total_requests += 1
         if success:
             self.success_requests += 1
         else:
             self.error_requests += 1
+            if error_kind == "429":
+                self.error_429_requests += 1
+            elif error_kind == "4xx":
+                self.error_4xx_requests += 1
+            elif error_kind == "5xx":
+                self.error_5xx_requests += 1
+            elif error_kind == "timeout":
+                self.error_timeout_requests += 1
 
         self.latency_sum_ms += latency_ms
         if sample_limit <= 0:
@@ -80,6 +99,9 @@ class MetricsStats:
 
     def latency_p99(self) -> float:
         return self._percentile(0.99)
+
+    def latency_p50(self) -> float:
+        return self._percentile(0.5)
 
 
 class BufferedMetricsRecorder:
@@ -130,6 +152,7 @@ class BufferedMetricsRecorder:
         bucket_seconds: BucketSeconds,
         success: bool,
         latency_ms: float,
+        error_kind: str | None = None,
     ) -> None:
         if success and self.success_sample_rate < 1.0:
             if random.random() > self.success_sample_rate:
@@ -148,7 +171,12 @@ class BufferedMetricsRecorder:
 
         with self._lock:
             stats = self._buffer.get(key) or MetricsStats()
-            stats.record(success=success, latency_ms=latency_ms, sample_limit=self.latency_sample_size)
+            stats.record(
+                success=success,
+                latency_ms=latency_ms,
+                sample_limit=self.latency_sample_size,
+                error_kind=error_kind,
+            )
             self._buffer[key] = stats
 
             if len(self._buffer) >= self.max_buffered_buckets:
@@ -206,6 +234,7 @@ class BufferedMetricsRecorder:
         error_requests = stats.error_requests
 
         latency_avg = stats.latency_avg()
+        latency_p50 = stats.latency_p50()
         latency_p95 = stats.latency_p95()
         latency_p99 = stats.latency_p99()
         error_rate = (error_requests / total_requests) if total_requests else 0.0
@@ -225,11 +254,16 @@ class BufferedMetricsRecorder:
             success_requests=success_requests,
             error_requests=error_requests,
             latency_avg_ms=latency_avg,
+            latency_p50_ms=latency_p50,
             latency_p95_ms=latency_p95,
             latency_p99_ms=latency_p99,
             error_rate=error_rate,
             success_qps_1m=success_qps,
             status=status,
+            error_4xx_requests=stats.error_4xx_requests,
+            error_5xx_requests=stats.error_5xx_requests,
+            error_429_requests=stats.error_429_requests,
+            error_timeout_requests=stats.error_timeout_requests,
         )
 
         new_total = ProviderRoutingMetricsHistory.total_requests_1m + total_requests
@@ -247,8 +281,24 @@ class BufferedMetricsRecorder:
                 "total_requests_1m": new_total,
                 "success_requests": new_success,
                 "error_requests": new_error,
+                "error_4xx_requests": ProviderRoutingMetricsHistory.error_4xx_requests
+                + stats.error_4xx_requests,
+                "error_5xx_requests": ProviderRoutingMetricsHistory.error_5xx_requests
+                + stats.error_5xx_requests,
+                "error_429_requests": ProviderRoutingMetricsHistory.error_429_requests
+                + stats.error_429_requests,
+                "error_timeout_requests": ProviderRoutingMetricsHistory.error_timeout_requests
+                + stats.error_timeout_requests,
                 "latency_avg_ms": (existing_latency_sum + stats.latency_sum_ms)
                 / cast(new_total, Float),
+                "latency_p50_ms": (
+                    (
+                        ProviderRoutingMetricsHistory.latency_p50_ms
+                        * ProviderRoutingMetricsHistory.total_requests_1m
+                        + latency_p50 * total_requests
+                    )
+                    / cast(new_total, Float)
+                ),
                 "latency_p95_ms": (
                     (
                         ProviderRoutingMetricsHistory.latency_p95_ms
@@ -351,7 +401,12 @@ class BufferedUserMetricsRecorder:
 
         with self._lock:
             stats = self._buffer.get(key) or MetricsStats()
-            stats.record(success=success, latency_ms=latency_ms, sample_limit=self.latency_sample_size)
+            stats.record(
+                success=success,
+                latency_ms=latency_ms,
+                sample_limit=self.latency_sample_size,
+                error_kind=None,
+            )
             self._buffer[key] = stats
 
             if len(self._buffer) >= self.max_buffered_buckets:

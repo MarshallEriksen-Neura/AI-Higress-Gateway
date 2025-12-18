@@ -69,6 +69,12 @@ class GatewayConfig(BaseModel):
         default=None,
         description="预留字段：将来用于 health 全局扩展的探针提示词（当前版本不生效）",
     )
+    metrics_retention_days: int = Field(
+        default=15,
+        ge=7,
+        le=30,
+        description="指标历史保留天数（分钟桶；用于控制 provider_routing_metrics_history 的留存）",
+    )
 
 
 class GatewayConfigUpdateRequest(GatewayConfig):

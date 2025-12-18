@@ -10,6 +10,7 @@ from app.provider.config import get_provider_config, load_provider_configs
 from .api.auth_routes import router as auth_router
 from .api.logical_model_routes import router as logical_model_router
 from .api.metrics_routes import router as metrics_router
+from .api.metrics_dashboard_v2_routes import router as metrics_dashboard_v2_router
 from .api.provider_preset_routes import router as provider_preset_router
 from .api.provider_routes import router as provider_router
 from .api.routing_routes import router as routing_router
@@ -211,6 +212,7 @@ def create_app() -> FastAPI:
 
     # Metrics
     app.include_router(metrics_router)
+    app.include_router(metrics_dashboard_v2_router)
 
     # 用户与 API Key 管理
     app.include_router(user_router)

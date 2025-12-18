@@ -52,6 +52,9 @@ AI Higress 项目的完整 API 接口文档。
 ### [用户概览指标](./metrics-user-overview.md)
 **说明**: `/metrics/user-overview/*` 系列接口、缓存策略与前端映射
 
+### [Dashboard v2 指标接口](./metrics-dashboard-v2.md)
+**说明**: `/metrics/v2/*`（用户页 + 系统页）指标接口、Token 估算口径与缓存策略
+
 ### [LinuxDo OAuth 接入](./linuxdo-oauth.md)
 **说明**: LinuxDo Connect OAuth 登录流程、配置及回调接口
 

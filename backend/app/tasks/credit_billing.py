@@ -8,6 +8,7 @@ Celery 任务：聊天计费（异步扣费/流水写入）。
 
 from __future__ import annotations
 
+import datetime as dt
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +25,17 @@ def _to_uuid(value: str | None) -> UUID | None:
         return None
     return UUID(value)
 
+def _to_datetime(value: str | None) -> dt.datetime | None:
+    if not value:
+        return None
+    try:
+        parsed = dt.datetime.fromisoformat(value)
+    except Exception:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
 
 @shared_task(name="tasks.credits.record_chat_completion_usage")
 def record_chat_completion_usage_task(
@@ -38,6 +50,7 @@ def record_chat_completion_usage_task(
     is_stream: bool = False,
     reason: str | None = None,
     idempotency_key: str | None = None,
+    occurred_at: str | None = None,
 ) -> int:
     session = SessionLocal()
     try:
@@ -53,6 +66,7 @@ def record_chat_completion_usage_task(
             is_stream=is_stream,
             reason=reason,
             idempotency_key=idempotency_key,
+            occurred_at=_to_datetime(occurred_at),
         )
     except Exception:  # pragma: no cover - 防御性日志
         logger.exception(
@@ -102,4 +116,3 @@ def record_streaming_request_task(
 
 
 __all__ = ["record_chat_completion_usage_task", "record_streaming_request_task"]
-

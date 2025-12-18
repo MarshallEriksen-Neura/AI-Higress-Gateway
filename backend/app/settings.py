@@ -463,6 +463,60 @@ class Settings(BaseSettings):
         description="推荐的缓存 TTL（秒），用于调用方理解网关缓存行为",
         ge=0,
     )
+    dashboard_metrics_retention_days: int = Field(
+        15,
+        alias="DASHBOARD_METRICS_RETENTION_DAYS",
+        description="Dashboard 指标分钟桶历史数据保留天数（用于控制 provider_routing_metrics_history 表的留存）",
+        ge=7,
+        le=30,
+    )
+    dashboard_metrics_cleanup_enabled: bool = Field(
+        True,
+        alias="DASHBOARD_METRICS_CLEANUP_ENABLED",
+        description="是否启用 Dashboard 指标分钟桶历史数据的定期清理任务（Celery beat）",
+    )
+    dashboard_metrics_cleanup_interval_seconds: int = Field(
+        86400,
+        alias="DASHBOARD_METRICS_CLEANUP_INTERVAL_SECONDS",
+        description="Dashboard 指标清理任务的调度间隔（秒）",
+        ge=60,
+    )
+    dashboard_metrics_rollup_enabled: bool = Field(
+        True,
+        alias="DASHBOARD_METRICS_ROLLUP_ENABLED",
+        description="是否启用 Dashboard 指标的 hour/day rollup（Celery beat）",
+    )
+    dashboard_metrics_rollup_guard_minutes: int = Field(
+        2,
+        alias="DASHBOARD_METRICS_ROLLUP_GUARD_MINUTES",
+        description="rollup 统计的保护时间（分钟），避免与最新写入强竞争",
+        ge=0,
+        le=60,
+    )
+    dashboard_metrics_rollup_hourly_interval_seconds: int = Field(
+        300,
+        alias="DASHBOARD_METRICS_ROLLUP_HOURLY_INTERVAL_SECONDS",
+        description="hourly rollup 调度间隔（秒）",
+        ge=60,
+    )
+    dashboard_metrics_rollup_daily_interval_seconds: int = Field(
+        3600,
+        alias="DASHBOARD_METRICS_ROLLUP_DAILY_INTERVAL_SECONDS",
+        description="daily rollup 调度间隔（秒）",
+        ge=300,
+    )
+    dashboard_metrics_hourly_retention_days: int = Field(
+        90,
+        alias="DASHBOARD_METRICS_HOURLY_RETENTION_DAYS",
+        description="hourly rollup 数据保留天数",
+        ge=7,
+    )
+    dashboard_metrics_daily_retention_days: int = Field(
+        365,
+        alias="DASHBOARD_METRICS_DAILY_RETENTION_DAYS",
+        description="daily rollup 数据保留天数",
+        ge=30,
+    )
 
     # HTTP timeouts
     upstream_timeout: float = 600.0

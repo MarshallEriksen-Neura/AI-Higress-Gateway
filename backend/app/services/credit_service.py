@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import math
 from typing import Any
 from uuid import UUID
@@ -18,6 +19,7 @@ from app.models import (
     ProviderModel,
 )
 from app.schemas.notification import NotificationCreateRequest
+from app.services.metrics_service import record_provider_token_usage
 from app.services.notification_service import create_notification
 from app.settings import settings
 
@@ -179,6 +181,26 @@ def _load_provider_factor(db: Session, provider_id: str | None) -> float:
         return float(provider.billing_factor or 1.0)
     except Exception:
         return 1.0
+
+
+def _load_provider_transport(db: Session, provider_id: str | None) -> str:
+    if not provider_id:
+        return "http"
+    try:
+        value = (
+            db.execute(select(Provider.transport).where(Provider.provider_id == provider_id))
+            .scalars()
+            .first()
+        )
+    except Exception:  # pragma: no cover
+        logger.exception("Failed to load Provider.transport for provider_id=%r", provider_id)
+        return "http"
+    if not value:
+        return "http"
+    try:
+        return str(value)
+    except Exception:
+        return "http"
 
 
 
@@ -417,6 +439,7 @@ def record_chat_completion_usage(
     is_stream: bool = False,
     reason: str | None = None,
     idempotency_key: str | None = None,
+    occurred_at: dt.datetime | None = None,
 ) -> int:
     """
     根据响应 payload 中的 usage 字段记录一次调用消耗，并扣减积分。
@@ -473,6 +496,31 @@ def record_chat_completion_usage(
 
     if total_tokens is None:
         return 0
+
+    try:
+        transport = _load_provider_transport(db, provider_id)
+        estimated = input_tokens is None and output_tokens is None
+        record_provider_token_usage(
+            db,
+            provider_id=provider_id or "",
+            logical_model=logical_model_name or "",
+            transport=transport,
+            is_stream=bool(is_stream),
+            user_id=user_id,
+            api_key_id=api_key_id,
+            occurred_at=occurred_at,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            total_tokens=total_tokens,
+            estimated=estimated,
+        )
+    except Exception:  # pragma: no cover - 指标失败不影响扣费
+        logger.exception(
+            "Failed to record token usage for user=%s provider=%s model=%s",
+            user_id,
+            provider_id,
+            logical_model_name,
+        )
 
     input_price, output_price = _load_provider_model_pricing(
         db, provider_id=provider_id, model_name=provider_model_id

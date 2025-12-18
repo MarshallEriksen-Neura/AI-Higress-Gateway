@@ -34,6 +34,7 @@ def test_get_gateway_config_accessible_for_authenticated_user():
     assert data["request_timeout_ms"] == settings.gateway_request_timeout_ms
     assert data["cache_ttl_seconds"] == settings.gateway_cache_ttl_seconds
     assert data["probe_prompt"] == settings.probe_prompt
+    assert data["metrics_retention_days"] == settings.dashboard_metrics_retention_days
 
 
 def test_update_gateway_config_requires_superuser():
@@ -88,6 +89,7 @@ def test_update_gateway_config_updates_settings_for_superuser():
         "request_timeout_ms": 45000,
         "cache_ttl_seconds": 7200,
         "probe_prompt": "健康巡检提示词",
+        "metrics_retention_days": 30,
     }
 
     with TestClient(app, base_url="http://testserver") as client:
@@ -100,6 +102,7 @@ def test_update_gateway_config_updates_settings_for_superuser():
     assert data["request_timeout_ms"] == payload["request_timeout_ms"]
     assert data["cache_ttl_seconds"] == payload["cache_ttl_seconds"]
     assert data["probe_prompt"] == payload["probe_prompt"]
+    assert data["metrics_retention_days"] == payload["metrics_retention_days"]
 
     # settings 实例也应被更新，后续请求可以读到最新配置。
     assert settings.gateway_api_base_url == payload["api_base_url"]
@@ -107,6 +110,48 @@ def test_update_gateway_config_updates_settings_for_superuser():
     assert settings.gateway_request_timeout_ms == payload["request_timeout_ms"]
     assert settings.gateway_cache_ttl_seconds == payload["cache_ttl_seconds"]
     assert settings.probe_prompt == payload["probe_prompt"]
+    assert settings.dashboard_metrics_retention_days == payload["metrics_retention_days"]
     # 同步到内部使用的超时和缓存 TTL。
     assert settings.upstream_timeout == payload["request_timeout_ms"] / 1000.0
     assert settings.models_cache_ttl == payload["cache_ttl_seconds"]
+
+
+def test_update_gateway_config_rejects_invalid_metrics_retention_days():
+    """metrics_retention_days 必须在 7..30 之间。"""
+    app = create_app()
+    SessionLocal = install_inmemory_db(app)
+
+    with SessionLocal() as session:
+        admin_user, _ = seed_user_and_key(
+            session,
+            token_plain="admin-token",
+            username="admin-user",
+            email="admin3@example.com",
+            is_superuser=True,
+        )
+        admin_id = str(admin_user.id)
+
+    headers = jwt_auth_headers(admin_id)
+
+    base_payload = {
+        "api_base_url": "https://gateway.new-example.com",
+        "max_concurrent_requests": 2000,
+        "request_timeout_ms": 45000,
+        "cache_ttl_seconds": 7200,
+        "probe_prompt": "健康巡检提示词",
+    }
+
+    with TestClient(app, base_url="http://testserver") as client:
+        resp_low = client.put(
+            "/system/gateway-config",
+            headers=headers,
+            json={**base_payload, "metrics_retention_days": 6},
+        )
+        resp_high = client.put(
+            "/system/gateway-config",
+            headers=headers,
+            json={**base_payload, "metrics_retention_days": 31},
+        )
+
+    assert resp_low.status_code == 422
+    assert resp_high.status_code == 422

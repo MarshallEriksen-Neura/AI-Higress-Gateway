@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 from collections.abc import AsyncIterator, Callable
 from typing import Any
@@ -22,6 +23,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     Redis = object  # type: ignore
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 
 from app.api.v1.chat.billing import record_completion_usage, record_stream_usage
@@ -32,6 +34,9 @@ from app.api.v1.chat.routing_state import RoutingStateService
 from app.api.v1.chat.session_manager import SessionManager
 from app.auth import AuthenticatedAPIKey
 from app.logging_config import logger
+from app.models import Provider
+from app.services.metrics_service import record_provider_token_usage
+from app.settings import settings
 
 
 class RequestHandler:
@@ -231,9 +236,10 @@ class RequestHandler:
 
         base_weights = selection.base_weights
         selected_provider_id: str | None = None
+        token_estimated = False
 
         async def on_first_chunk(provider_id: str, model_id: str) -> None:
-            nonlocal selected_provider_id
+            nonlocal selected_provider_id, token_estimated
             selected_provider_id = provider_id
             if provider_id_sink is not None:
                 provider_id_sink(provider_id)
@@ -244,6 +250,50 @@ class RequestHandler:
                     provider_id=provider_id,
                     model_id=model_id,
                 )
+
+            if token_estimated:
+                return
+
+            approx_tokens: int | None = None
+            for key in ("max_tokens", "max_tokens_to_sample", "max_output_tokens"):
+                value = payload.get(key)
+                if isinstance(value, int) and value > 0:
+                    approx_tokens = value
+                    break
+
+            if approx_tokens is None:
+                approx_tokens = int(getattr(settings, "streaming_min_tokens", 0) or 0)
+
+            if approx_tokens <= 0:
+                return
+
+            try:
+                transport = (
+                    self.db.execute(
+                        select(Provider.transport).where(Provider.provider_id == provider_id)
+                    )
+                    .scalars()
+                    .first()
+                )
+                transport_str = str(transport or "http")
+            except Exception:  # pragma: no cover
+                transport_str = "http"
+
+            record_provider_token_usage(
+                self.db,
+                provider_id=provider_id,
+                logical_model=lookup_model_id,
+                transport=transport_str,
+                is_stream=True,
+                user_id=UUID(str(self.api_key.user_id)),
+                api_key_id=UUID(str(self.api_key.id)),
+                occurred_at=dt.datetime.now(tz=dt.timezone.utc),
+                input_tokens=None,
+                output_tokens=None,
+                total_tokens=approx_tokens,
+                estimated=True,
+            )
+            token_estimated = True
 
         def on_stream_complete(provider_id: str) -> None:
             self.routing_state.record_success(
