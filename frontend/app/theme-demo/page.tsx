@@ -1,5 +1,6 @@
-import { AdaptiveCard } from "@/components/ui/adaptive-card";
-import { StatCard, MetricCard, IntensityCard } from "@/components/cards";
+import { AdaptiveCard, StatCard, MetricCard, IntensityCard } from "@/components/cards";
+import { DialogExamples } from "@/components/dialogs/dialog-examples";
+import { SidebarExamples } from "@/components/sidebars/sidebar-examples";
 import { ArrowLeft } from "lucide-react";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import Link from "next/link";
@@ -126,6 +127,18 @@ export default function ThemeDemoPage() {
             </div>
           </section>
 
+          {/* Dialog 示例 */}
+          <section className="space-y-4">
+            <h3 className="text-2xl font-semibold text-center">对话框组件示例</h3>
+            <DialogExamples />
+          </section>
+
+          {/* Sidebar 示例 */}
+          <section className="space-y-4">
+            <h3 className="text-2xl font-semibold text-center">侧边栏组件示例</h3>
+            <SidebarExamples />
+          </section>
+
           {/* 提示信息 */}
           <div className="mt-12 p-6 rounded-lg border border-dashed border-white/30 bg-black/20 backdrop-blur-sm">
             <h3 className="text-lg font-semibold mb-2 text-white">💡 效果说明</h3>
@@ -136,6 +149,9 @@ export default function ThemeDemoPage() {
               <li>• 装饰：右上角圣诞彩灯和雪花</li>
               <li>• 颜色：支持 red, green, blue, purple, orange, cyan</li>
               <li>• 强度：支持 1-3 档调节</li>
+              <li>• 对话框：支持 AdaptiveDialog、NeonDialog、ThemeDialog</li>
+              <li>• 侧边栏：支持 AdaptiveSidebar、NeonSidebar、ThemeSidebar</li>
+              <li>• 圣诞装饰：顶部 4 个彩球 + 花环，底部 2 个彩球 + 翻转花环</li>
             </ul>
           </div>
         </div>
