@@ -108,12 +108,6 @@ export function FilterBar({
           </SelectContent>
         </Select>
       </div>
-      <a
-        href="/dashboard/metrics"
-        className="text-xs text-muted-foreground hover:text-foreground underline-offset-4 hover:underline transition-colors"
-      >
-        {t("overview.system_monitor_link")}
-      </a>
     </div>
   );
 }

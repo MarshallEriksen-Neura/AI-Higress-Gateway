@@ -24,6 +24,7 @@ import {
     Megaphone,
     Globe,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
 // 动态加载 Sheet 组件
@@ -32,7 +33,14 @@ const SheetContent = dynamic(() => import("@/components/ui/sheet").then(mod => (
 const SheetHeader = dynamic(() => import("@/components/ui/sheet").then(mod => ({ default: mod.SheetHeader })), { ssr: false });
 const SheetTitle = dynamic(() => import("@/components/ui/sheet").then(mod => ({ default: mod.SheetTitle })), { ssr: false });
 
-const navItems = [
+type NavItem = {
+    titleKey: string;
+    href: string;
+    icon: LucideIcon;
+    requiresSuperuser?: boolean;
+};
+
+const navItems: NavItem[] = [
     {
         titleKey: "nav.overview",
         href: "/dashboard/overview",
@@ -75,7 +83,7 @@ const navItems = [
     },
 ];
 
-const adminItems = [
+const adminItems: NavItem[] = [
     {
         titleKey: "nav.routing",
         href: "/dashboard/routing",
@@ -85,6 +93,12 @@ const adminItems = [
         titleKey: "nav.provider_presets",
         href: "/dashboard/provider-presets",
         icon: Package,
+    },
+    {
+        titleKey: "nav.system_dashboard",
+        href: "/dashboard/system",
+        icon: Activity,
+        requiresSuperuser: true,
     },
     {
         titleKey: "nav.system",
@@ -128,14 +142,20 @@ export function MobileSidebar({ open, onOpenChange }: MobileSidebarProps) {
     const { t } = useI18n();
     const currentUser = useAuthStore(state => state.user);
     const roleCodes = currentUser?.role_codes ?? [];
+    const isSuperuser = currentUser?.is_superuser === true;
     const isAdmin =
-        currentUser?.is_superuser === true ||
+        isSuperuser ||
         roleCodes.includes("system_admin") ||
         roleCodes.includes("admin");
 
     const handleLinkClick = () => {
         onOpenChange(false);
     };
+
+    const visibleAdminItems = adminItems.filter((item) => {
+        if (item.requiresSuperuser === true) return isSuperuser;
+        return true;
+    });
 
     return (
         <Sheet open={open} onOpenChange={onOpenChange}>
@@ -179,7 +199,7 @@ export function MobileSidebar({ open, onOpenChange }: MobileSidebarProps) {
                                     </p>
                                 </div>
 
-                                {adminItems.map((item) => (
+                                {visibleAdminItems.map((item) => (
                                     <Link
                                         key={item.href}
                                         href={item.href}

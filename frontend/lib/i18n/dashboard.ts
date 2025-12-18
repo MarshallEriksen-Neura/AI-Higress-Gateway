@@ -70,6 +70,12 @@ export const dashboardV2Translations: Record<Language, Record<string, string>> =
     "dashboard_v2.chart.cost.subtitle": "Distribution",
     "dashboard_v2.chart.top_models.title": "Top Models",
     "dashboard_v2.chart.top_models.subtitle": "Most used models",
+    
+    // System Dashboard Charts
+    "dashboardV2.system.charts.requestsErrors": "Requests & Errors Trend",
+    "dashboardV2.system.charts.latencyPercentiles": "Latency Percentiles",
+    "dashboardV2.system.charts.tokenUsage": "Token Usage",
+    "dashboardV2.system.topModels.title": "Top Models",
 
     // Error labels for charts
     "dashboard_v2.chart.error.4xx": "4xx Errors",
@@ -127,6 +133,7 @@ export const dashboardV2Translations: Record<Language, Record<string, string>> =
     "dashboardV2.provider.lastCheck.minutesAgo": "{count} minutes ago",
     "dashboardV2.provider.lastCheck.hoursAgo": "{count} hours ago",
     "dashboardV2.provider.lastCheck.daysAgo": "{count} days ago",
+    "dashboardV2.provider.lastCheck.unknown": "Unknown",
 
     // Error states (通用键)
     "dashboard.errors.loadFailed": "Failed to load data",
@@ -209,6 +216,12 @@ export const dashboardV2Translations: Record<Language, Record<string, string>> =
     "dashboard_v2.chart.cost.subtitle": "分布情况",
     "dashboard_v2.chart.top_models.title": "热门模型",
     "dashboard_v2.chart.top_models.subtitle": "使用最多的模型",
+    
+    // System Dashboard Charts
+    "dashboardV2.system.charts.requestsErrors": "请求 & 错误趋势",
+    "dashboardV2.system.charts.latencyPercentiles": "延迟分位数趋势",
+    "dashboardV2.system.charts.tokenUsage": "Token 使用趋势",
+    "dashboardV2.system.topModels.title": "热门模型",
 
     // Error labels for charts
     "dashboard_v2.chart.error.4xx": "4xx 错误",
@@ -266,6 +279,7 @@ export const dashboardV2Translations: Record<Language, Record<string, string>> =
     "dashboardV2.provider.lastCheck.minutesAgo": "{count} 分钟前",
     "dashboardV2.provider.lastCheck.hoursAgo": "{count} 小时前",
     "dashboardV2.provider.lastCheck.daysAgo": "{count} 天前",
+    "dashboardV2.provider.lastCheck.unknown": "未知",
 
     // Error states (通用键)
     "dashboard.errors.loadFailed": "加载数据失败",

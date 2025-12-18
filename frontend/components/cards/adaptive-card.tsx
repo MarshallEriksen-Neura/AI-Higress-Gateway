@@ -6,7 +6,15 @@ import {
   Card,
 } from "@/components/ui/card";
 
-interface AdaptiveCardProps extends React.ComponentProps<typeof Card> {
+interface AdaptiveCardProps extends Omit<React.ComponentProps<typeof Card>, "className"> {
+  /**
+   * 传给内部 Card 的 className（用于控制 Card 本身样式）
+   */
+  className?: string;
+  /**
+   * 外层包裹 div 的 className（用于布局/分组 hover 等）
+   */
+  wrapperClassName?: string;
   /**
    * 是否显示圣诞装饰
    * 装饰通过 CSS 类 .christmas-card-decor 自动控制显示/隐藏
@@ -37,12 +45,13 @@ interface AdaptiveCardProps extends React.ComponentProps<typeof Card> {
  */
 export function AdaptiveCard({
   className,
+  wrapperClassName,
   showDecor = true,
   children,
   ...props
 }: AdaptiveCardProps) {
   return (
-    <div className={cn("relative", className)}>
+    <div className={cn("relative", wrapperClassName)}>
       <Card
         className={cn(
           "relative overflow-hidden",
@@ -50,6 +59,7 @@ export function AdaptiveCard({
           "border-white/20",
           "transition-all duration-300",
           "hover:scale-[1.02]",
+          className,
         )}
         {...props}
       >

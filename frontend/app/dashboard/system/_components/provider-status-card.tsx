@@ -57,9 +57,26 @@ export function ProviderStatusCard({
   // 格式化最后检查时间
   const formatLastCheck = (isoString: string) => {
     try {
+      // 如果没有提供日期或者是无效的日期，返回 "未知"
+      if (!isoString || isoString === "" || isoString === "0001-01-01T00:00:00Z") {
+        return t("dashboardV2.provider.lastCheck.unknown");
+      }
+
       const date = new Date(isoString);
+      
+      // 检查日期是否有效
+      if (isNaN(date.getTime())) {
+        return t("dashboardV2.provider.lastCheck.unknown");
+      }
+
       const now = new Date();
       const diffMs = now.getTime() - date.getTime();
+      
+      // 如果日期在未来或者差异太大（超过 10 年），认为是无效数据
+      if (diffMs < 0 || diffMs > 315360000000) { // 10 years in ms
+        return t("dashboardV2.provider.lastCheck.unknown");
+      }
+
       const diffMins = Math.floor(diffMs / 60000);
       const diffHours = Math.floor(diffMs / 3600000);
       const diffDays = Math.floor(diffMs / 86400000);
@@ -70,11 +87,14 @@ export function ProviderStatusCard({
         return t("dashboardV2.provider.lastCheck.minutesAgo", { count: diffMins });
       } else if (diffHours < 24) {
         return t("dashboardV2.provider.lastCheck.hoursAgo", { count: diffHours });
-      } else {
+      } else if (diffDays < 30) {
         return t("dashboardV2.provider.lastCheck.daysAgo", { count: diffDays });
+      } else {
+        // 超过 30 天，显示具体日期
+        return date.toLocaleDateString();
       }
     } catch {
-      return isoString;
+      return t("dashboardV2.provider.lastCheck.unknown");
     }
   };
 

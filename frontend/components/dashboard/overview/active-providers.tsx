@@ -1,8 +1,6 @@
 "use client";
 
-import Link from "next/link";
 import { useMemo } from "react";
-import { Button } from "@/components/ui/button";
 import { ProviderStatusCard } from "../common";
 import { useI18n } from "@/lib/i18n-context";
 import { useUserOverviewProviders, UserOverviewTimeRange } from "@/lib/swr/use-user-overview-metrics";
@@ -51,11 +49,6 @@ export function ActiveProviders({ timeRange = "today" }: ActiveProvidersProps) {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-medium">{t("overview.my_active_providers")}</h2>
-        <Link href="/dashboard/metrics/providers">
-          <Button size="sm" variant="ghost" className="h-8 text-xs">
-            {t("overview.view_all")}
-          </Button>
-        </Link>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {loading && providers.length === 0 ? (

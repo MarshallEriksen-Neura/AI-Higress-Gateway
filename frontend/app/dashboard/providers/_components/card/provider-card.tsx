@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import type { Provider } from "@/http/provider";
 import type { DashboardV2ProviderMetricsItem } from "@/lib/api-types";
 import { useI18n } from "@/lib/i18n-context";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { AdaptiveCard, CardContent, CardFooter, CardHeader } from "@/components/cards/adaptive-card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -164,7 +164,7 @@ export function ProviderCard({
   );
 
   return (
-    <Card className="group relative overflow-hidden">
+    <AdaptiveCard className="group" showDecor={false}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 space-y-2">
@@ -359,7 +359,6 @@ export function ProviderCard({
           {t("my_providers.card_configure")}
         </Button>
       </CardFooter>
-    </Card>
+    </AdaptiveCard>
   );
 }
-

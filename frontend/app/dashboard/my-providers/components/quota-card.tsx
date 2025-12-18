@@ -1,6 +1,6 @@
 "use client";
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdaptiveCard, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/cards/adaptive-card";
 import { Progress } from "@/components/ui/progress";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { AlertCircle } from "lucide-react";
@@ -28,7 +28,7 @@ export function QuotaCard({
 
   if (isLoading) {
     return (
-      <Card>
+      <AdaptiveCard showDecor={false}>
         <CardHeader>
           <CardTitle>{t("my_providers.quota_title")}</CardTitle>
           <CardDescription>
@@ -41,12 +41,12 @@ export function QuotaCard({
             <div className="h-2 bg-muted animate-pulse rounded" />
           </div>
         </CardContent>
-      </Card>
+      </AdaptiveCard>
     );
   }
 
   return (
-    <Card>
+    <AdaptiveCard showDecor={false}>
       <CardHeader>
         <CardTitle>{t("my_providers.quota_title")}</CardTitle>
         <CardDescription>
@@ -87,6 +87,6 @@ export function QuotaCard({
           )}
         </div>
       </CardContent>
-    </Card>
+    </AdaptiveCard>
   );
 }

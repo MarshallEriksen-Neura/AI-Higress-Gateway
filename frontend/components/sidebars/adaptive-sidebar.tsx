@@ -36,8 +36,16 @@ import {
   Megaphone,
   Globe,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
-const navItems = [
+type NavItem = {
+  titleKey: string;
+  href: string;
+  icon: LucideIcon;
+  requiresSuperuser?: boolean;
+};
+
+const navItems: NavItem[] = [
   {
     titleKey: "nav.overview",
     href: "/dashboard/overview",
@@ -80,7 +88,7 @@ const navItems = [
   },
 ];
 
-const adminItems = [
+const adminItems: NavItem[] = [
   {
     titleKey: "nav.routing",
     href: "/dashboard/routing",
@@ -90,6 +98,12 @@ const adminItems = [
     titleKey: "nav.provider_presets",
     href: "/dashboard/provider-presets",
     icon: Package,
+  },
+  {
+    titleKey: "nav.system_dashboard",
+    href: "/dashboard/system",
+    icon: Activity,
+    requiresSuperuser: true,
   },
   {
     titleKey: "nav.system",
@@ -202,13 +216,14 @@ export function AdaptiveSidebar() {
   const { t } = useI18n();
   const currentUser = useAuthStore((state) => state.user);
   const roleCodes = currentUser?.role_codes ?? [];
+  const isSuperuser = currentUser?.is_superuser === true;
   const isAdmin =
-    currentUser?.is_superuser === true ||
+    isSuperuser ||
     roleCodes.includes("system_admin") ||
     roleCodes.includes("admin");
 
   // 渲染菜单项：只有激活的才显示装饰
-  const renderMenuItem = (item: typeof navItems[0], isActive: boolean) => {
+  const renderMenuItem = (item: NavItem, isActive: boolean) => {
     const linkContent = (
       <Link
         href={item.href}
@@ -236,6 +251,11 @@ export function AdaptiveSidebar() {
     );
   };
 
+  const visibleAdminItems = adminItems.filter((item) => {
+    if (item.requiresSuperuser === true) return isSuperuser;
+    return true;
+  });
+
   return (
     <Sidebar className="hidden lg:flex w-64 border-r h-screen theme-adaptive-sidebar">
       <SidebarHeader className="p-6 border-b">
@@ -261,7 +281,9 @@ export function AdaptiveSidebar() {
                     </SidebarGroupLabel>
                   </div>
 
-                  {adminItems.map((item) => renderMenuItem(item, pathname === item.href))}
+                  {visibleAdminItems.map((item) =>
+                    renderMenuItem(item, pathname === item.href)
+                  )}
                 </>
               )}
             </SidebarMenu>

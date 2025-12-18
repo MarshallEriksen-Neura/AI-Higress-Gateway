@@ -7,10 +7,7 @@
 // 自适应主题卡片组件（唯一的通用卡片）
 export { AdaptiveCard } from "./adaptive-card";
 
-// 预设内容组件
-export { StatCard } from "./stat-card";
-export { MetricCard } from "./metric-card";
-export { IntensityCard } from "./intensity-card";
+
 
 // 重新导出 shadcn card 的所有子组件
 export {

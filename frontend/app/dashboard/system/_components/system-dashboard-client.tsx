@@ -121,7 +121,10 @@ export function SystemDashboardClient() {
               onRetry={pulseResult.refresh}
             />
           ) : pulseResult.points.length === 0 && !pulseResult.loading ? (
-            <EmptyState message={t("dashboard.errors.noData")} />
+            <EmptyState 
+              title={t("dashboardV2.system.charts.requestsErrors")}
+              message={t("dashboard.errors.noData")} 
+            />
           ) : (
             <RequestsErrorsChart
               data={pulseResult.points}
@@ -137,7 +140,10 @@ export function SystemDashboardClient() {
               onRetry={pulseResult.refresh}
             />
           ) : pulseResult.points.length === 0 && !pulseResult.loading ? (
-            <EmptyState message={t("dashboard.errors.noData")} />
+            <EmptyState 
+              title={t("dashboardV2.system.charts.latencyPercentiles")}
+              message={t("dashboard.errors.noData")} 
+            />
           ) : (
             <LatencyPercentilesChart
               data={pulseResult.points}
@@ -156,7 +162,10 @@ export function SystemDashboardClient() {
             onRetry={tokensResult.refresh}
           />
         ) : tokensResult.points.length === 0 && !tokensResult.loading ? (
-          <EmptyState message={t("dashboard.errors.noData")} />
+          <EmptyState 
+            title={t("dashboardV2.system.charts.tokenUsage")}
+            message={t("dashboard.errors.noData")} 
+          />
         ) : (
           <TokenUsageChart
             data={tokensResult.points}
@@ -178,7 +187,10 @@ export function SystemDashboardClient() {
               onRetry={topModelsResult.refresh}
             />
           ) : topModelsResult.items.length === 0 && !topModelsResult.loading ? (
-            <EmptyState message={t("dashboard.errors.noData")} />
+            <EmptyState 
+              title={t("dashboardV2.system.topModels.title")}
+              message={t("dashboard.errors.noData")} 
+            />
           ) : (
             <TopModelsTable
               data={topModelsResult.items}

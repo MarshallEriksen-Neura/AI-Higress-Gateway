@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { AdaptiveCard, CardContent, CardHeader, CardTitle } from "@/components/cards/adaptive-card";
 import { Provider } from "@/http/provider";
 import { useI18n } from "@/lib/i18n-context";
 import { CheckCircle2, AlertTriangle, XCircle } from "lucide-react";
@@ -29,7 +29,7 @@ export function HealthStats({ providers, isLoading }: HealthStatsProps) {
 
   if (isLoading) {
     return (
-      <Card>
+      <AdaptiveCard showDecor={false}>
         <CardHeader>
           <CardTitle>{t("my_providers.health_title")}</CardTitle>
         </CardHeader>
@@ -43,12 +43,12 @@ export function HealthStats({ providers, isLoading }: HealthStatsProps) {
             ))}
           </div>
         </CardContent>
-      </Card>
+      </AdaptiveCard>
     );
   }
 
   return (
-    <Card>
+    <AdaptiveCard showDecor={false}>
       <CardHeader>
         <CardTitle>{t("my_providers.health_title")}</CardTitle>
       </CardHeader>
@@ -102,6 +102,6 @@ export function HealthStats({ providers, isLoading }: HealthStatsProps) {
           <span className="text-sm font-medium">{stats.total}</span>
         </div>
       </CardContent>
-    </Card>
+    </AdaptiveCard>
   );
 }
