@@ -16,7 +16,6 @@ class Run(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         Index("ix_chat_runs_message_created", "message_id", "created_at"),
         Index("ix_chat_runs_user_created", "user_id", "created_at"),
-        Index("ix_chat_runs_eval_id", "eval_id"),
     )
 
     eval_id: Mapped[PG_UUID | None] = Column(

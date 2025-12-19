@@ -70,6 +70,9 @@ def _conversation_to_item(obj) -> dict:
         "project_id": obj.api_key_id,
         "title": obj.title,
         "last_activity_at": obj.last_activity_at,
+        "is_pinned": obj.is_pinned,
+        "last_message_content": obj.last_message_content,
+        "unread_count": obj.unread_count,
         "created_at": obj.created_at,
         "updated_at": obj.updated_at,
     }
@@ -208,6 +211,8 @@ def update_conversation_endpoint(
         user_id=UUID(str(current_user.id)),
         title=payload.title,
         archived=payload.archived,
+        is_pinned=payload.is_pinned,
+        unread_count=payload.unread_count,
     )
     return _conversation_to_item(conv)
 
@@ -227,6 +232,7 @@ def list_conversations_endpoint(
     assistant_id: UUID = Query(...),
     cursor: str | None = Query(default=None),
     limit: int = Query(default=30, ge=1, le=100),
+    archived: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_jwt_token),
 ) -> ConversationListResponse:
@@ -236,6 +242,7 @@ def list_conversations_endpoint(
         assistant_id=assistant_id,
         cursor=cursor,
         limit=limit,
+        archived=archived,
     )
     return ConversationListResponse(
         items=[_conversation_to_item(it) for it in items],

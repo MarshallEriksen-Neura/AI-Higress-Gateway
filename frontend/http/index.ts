@@ -61,3 +61,8 @@ export {
   type UpdateProviderKeyRequest
 } from './provider-keys';
 export { upstreamProxyService } from './upstream-proxy';
+export { assistantService } from './assistant';
+export { conversationService } from './conversation';
+export { messageService } from './message';
+export { evalService } from './eval';
+export { evalConfigService } from './eval-config';

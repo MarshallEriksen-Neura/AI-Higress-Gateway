@@ -12,3 +12,8 @@ export * from "./use-registration-windows";
 export * from "./use-sdk-vendors";
 export * from "./use-user-probes";
 export * from "./use-cli-config";
+export * from "./use-assistants";
+export * from "./use-conversations";
+export * from "./use-messages";
+export * from "./use-evals";
+export * from "./use-eval-config";

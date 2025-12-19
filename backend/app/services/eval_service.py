@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import time
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import os
+import httpx
 
 from fastapi import BackgroundTasks
 from sqlalchemy import select
@@ -35,6 +40,14 @@ from app.services.project_eval_config_service import (
 from app.auth import AuthenticatedAPIKey
 from app.redis_client import get_redis_client
 from app.settings import settings
+from app.api.v1.chat.request_handler import RequestHandler
+from app.upstream import detect_request_format
+
+
+try:
+    from redis.asyncio import Redis
+except ModuleNotFoundError:  # pragma: no cover
+    Redis = object  # type: ignore
 
 
 _RUN_SEMAPHORE = asyncio.Semaphore(6)
@@ -122,6 +135,7 @@ async def create_eval(
     conversation_id: UUID,
     message_id: UUID,
     baseline_run_id: UUID,
+    start_background_runs: bool = True,
 ) -> tuple[Eval, list[Run], dict | None]:
     ctx = resolve_project_context(db, project_id=project_id, current_user=current_user)
     cfg = get_or_default_project_eval_config(db, project_id=ctx.project_id)
@@ -324,13 +338,14 @@ async def create_eval(
     db.commit()
     db.refresh(eval_obj)
 
-    if os.getenv("PYTEST_CURRENT_TEST"):
-        # 测试环境下同步跑完，避免后台任务不确定性。
-        for run in challenger_runs:
-            await _execute_run_background(run_id=UUID(str(run.id)))
-    else:
-        for run in challenger_runs:
-            asyncio.create_task(_execute_run_background(run_id=UUID(str(run.id))))
+    if start_background_runs:
+        if os.getenv("PYTEST_CURRENT_TEST"):
+            # 测试环境下同步跑完，避免后台任务不确定性。
+            for run in challenger_runs:
+                await _execute_run_background(run_id=UUID(str(run.id)))
+        else:
+            for run in challenger_runs:
+                asyncio.create_task(_execute_run_background(run_id=UUID(str(run.id))))
 
     # Optional: Project AI（LLM）解释（可拔插），失败降级为规则解释
     try:
@@ -392,6 +407,157 @@ def _maybe_mark_eval_ready(db: Session, *, eval_id: UUID) -> None:
     if eval_obj.status != "ready":
         eval_obj.status = "ready"
         db.add(eval_obj)
+
+
+async def execute_run_stream(
+    db: Session,
+    *,
+    redis: Redis,
+    client: httpx.AsyncClient,
+    api_key: AuthenticatedAPIKey,
+    effective_provider_ids: set[str],
+    conversation: Conversation,
+    assistant: AssistantPreset,
+    user_message: Message,
+    run: Run,
+    requested_logical_model: str,
+    payload_override: dict[str, Any] | None = None,
+) -> AsyncIterator[dict[str, Any]]:
+    """
+    执行一次 stream run，并持续产生 chunk 给调用方。
+    每个 chunk 包含 run_id, status, provider_id, delta 等字段。
+    """
+    run_id_str = str(run.id)
+    start = time.time()
+    
+    # 状态置为 running
+    run.status = "running"
+    run.started_at = datetime.now(UTC)
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+
+    full_text_list: list[str] = []
+    selected: dict[str, str | None] = {"provider_id": None, "model_id": None}
+
+    try:
+        payload = payload_override or chat_run_service.build_openai_request_payload(
+            db,
+            conversation=conversation,
+            assistant=assistant,
+            user_message=user_message,
+            requested_logical_model=requested_logical_model,
+        )
+        payload["stream"] = True
+        api_style = detect_request_format(payload)
+
+        def _sink(provider_id: str, model_id: str | None = None) -> None:
+            selected["provider_id"] = provider_id
+            if model_id:
+                selected["model_id"] = model_id
+
+        handler = RequestHandler(api_key=api_key, db=db, redis=redis, client=client)
+        
+        async for chunk_bytes in handler.handle_stream(
+            payload=payload,
+            requested_model=requested_logical_model,
+            lookup_model_id=requested_logical_model,
+            api_style=api_style,
+            effective_provider_ids=effective_provider_ids,
+            session_id=str(conversation.id),
+            provider_id_sink=_sink,
+        ):
+            # 解析 chunk 获取文本增量（best-effort）
+            text_delta = ""
+            try:
+                chunk_str = chunk_bytes.decode("utf-8", errors="ignore")
+                if chunk_str.startswith("data: "):
+                    data_str = chunk_str[6:].strip()
+                    if data_str != "[DONE]":
+                        data = json.loads(data_str)
+                        if "choices" in data and len(data["choices"]) > 0:
+                            delta = data["choices"][0].get("delta", {})
+                            text_delta = delta.get("content", "")
+                            if text_delta:
+                                full_text_list.append(text_delta)
+                        elif "error" in data:
+                            yield {
+                                "run_id": run_id_str,
+                                "type": "run.error",
+                                "status": "failed",
+                                "error": data["error"],
+                            }
+                            # 更新 DB 记录失败
+                            run.status = "failed"
+                            run.selected_provider_id = selected.get("provider_id")
+                            run.selected_provider_model = selected.get("model_id")
+                            run.error_code = data["error"].get("type") or "UPSTREAM_ERROR"
+                            run.error_message = data["error"].get("message")
+                            run.finished_at = datetime.now(UTC)
+                            db.add(run)
+                            db.commit()
+                            return
+            except Exception:
+                pass
+
+            yield {
+                "run_id": run_id_str,
+                "type": "run.delta",
+                "status": "running",
+                "provider_id": selected.get("provider_id"),
+                "delta": text_delta,
+            }
+
+        full_text = "".join(full_text_list)
+        output_preview = full_text[:380].rstrip() if full_text else None
+        
+        run.status = "succeeded"
+        run.selected_provider_id = selected.get("provider_id")
+        run.selected_provider_model = selected.get("model_id")
+        run.output_text = full_text
+        run.output_preview = output_preview
+        run.latency_ms = int(max(0, (time.time() - start) * 1000))
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+
+        yield {
+            "run_id": run_id_str,
+            "type": "run.completed",
+            "status": "succeeded",
+            "provider_id": selected.get("provider_id"),
+            "provider_model": selected.get("model_id"),
+            "latency_ms": run.latency_ms,
+            "full_text": full_text,
+        }
+
+    except asyncio.CancelledError:
+        logger.info("eval_service: streaming run cancelled (run_id=%s)", run.id)
+        run.status = "cancelled"
+        run.selected_provider_id = selected.get("provider_id")
+        run.selected_provider_model = selected.get("model_id")
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+        # 对于 CancelledError，通常不需要 yield 东西，因为连接已经断开了
+        raise
+    except Exception as exc:
+        logger.exception("eval_service: streaming run failed (run_id=%s): %s", run.id, exc)
+        run.status = "failed"
+        run.selected_provider_id = selected.get("provider_id")
+        run.selected_provider_model = selected.get("model_id")
+        run.error_code = "INTERNAL_ERROR"
+        run.error_message = str(exc)
+        run.latency_ms = int(max(0, (time.time() - start) * 1000))
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+        yield {
+            "run_id": run_id_str,
+            "type": "run.error",
+            "status": "failed",
+            "error": {"message": str(exc)},
+        }
 
 
 async def _execute_run_background(*, run_id: UUID) -> None:

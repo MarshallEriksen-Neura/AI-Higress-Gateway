@@ -60,6 +60,8 @@ class ConversationCreateRequest(BaseModel):
 class ConversationUpdateRequest(BaseModel):
     title: str | None = Field(default=None, max_length=255)
     archived: bool | None = None
+    is_pinned: bool | None = None
+    unread_count: int | None = Field(default=None, ge=0)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -70,6 +72,9 @@ class ConversationItem(BaseModel):
     project_id: UUID
     title: str | None = None
     last_activity_at: datetime
+    is_pinned: bool = False
+    last_message_content: str | None = None
+    unread_count: int = 0
     created_at: datetime
     updated_at: datetime
 

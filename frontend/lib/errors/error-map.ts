@@ -134,6 +134,115 @@ export const ERROR_MAP: Record<string, ErrorMapping> = {
     i18nKey: 'errors.gateway_timeout',
     retryable: true,
     actionable: true
+  },
+  
+  // ===== 聊天助手系统错误 =====
+  // 助手相关错误
+  'assistant_not_found': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.assistant_not_found',
+    retryable: false,
+    actionable: false
+  },
+  'assistant_archived': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.assistant_archived',
+    retryable: false,
+    actionable: false
+  },
+  
+  // 会话相关错误
+  'conversation_not_found': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.conversation_not_found',
+    retryable: false,
+    actionable: false
+  },
+  'conversation_archived': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.conversation_archived',
+    retryable: false,
+    actionable: false
+  },
+  
+  // 消息相关错误
+  'message_send_failed': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.ERROR,
+    i18nKey: 'chat.errors.message_send_failed',
+    retryable: true,
+    actionable: true
+  },
+  'run_execution_failed': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.ERROR,
+    i18nKey: 'chat.errors.run_execution_failed',
+    retryable: true,
+    actionable: true
+  },
+  
+  // 评测相关错误
+  'eval_not_enabled': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.eval_not_enabled',
+    retryable: false,
+    actionable: true
+  },
+  'eval_cooldown': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.eval_cooldown',
+    retryable: true,
+    actionable: false
+  },
+  'eval_not_found': {
+    category: ErrorCategory.BUSINESS,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.eval_not_found',
+    retryable: false,
+    actionable: false
+  },
+  'invalid_reason_tags': {
+    category: ErrorCategory.VALIDATION,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.invalid_reason_tags',
+    retryable: false,
+    actionable: true
+  },
+  
+  // 配置相关错误
+  'invalid_config': {
+    category: ErrorCategory.VALIDATION,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.invalid_config',
+    retryable: false,
+    actionable: true
+  },
+  'empty_candidate_models': {
+    category: ErrorCategory.VALIDATION,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.empty_candidate_models',
+    retryable: false,
+    actionable: true
+  },
+  'invalid_max_challengers': {
+    category: ErrorCategory.VALIDATION,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.invalid_max_challengers',
+    retryable: false,
+    actionable: true
+  },
+  'project_ai_config_incomplete': {
+    category: ErrorCategory.VALIDATION,
+    severity: ErrorSeverity.WARNING,
+    i18nKey: 'chat.errors.project_ai_config_incomplete',
+    retryable: false,
+    actionable: true
   }
 };
 

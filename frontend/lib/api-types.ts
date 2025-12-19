@@ -812,3 +812,213 @@ export interface ProviderStatusItem {
 export interface SystemDashboardProvidersResponse {
   items: ProviderStatusItem[];
 }
+
+// ============= 聊天助手系统相关 =============
+
+// ============= 助手相关 =============
+export interface Assistant {
+  assistant_id: string;
+  project_id: string;
+  name: string;
+  system_prompt?: string;
+  default_logical_model: string; // 可以是 "auto" 或具体模型 ID
+  model_preset?: Record<string, any>;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateAssistantRequest {
+  project_id: string;
+  name: string;
+  system_prompt?: string;
+  default_logical_model: string;
+  model_preset?: Record<string, any>;
+}
+
+export interface UpdateAssistantRequest {
+  name?: string;
+  system_prompt?: string;
+  default_logical_model?: string;
+  model_preset?: Record<string, any>;
+  archived?: boolean;
+}
+
+export interface GetAssistantsParams {
+  project_id: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface AssistantsResponse {
+  items: Assistant[];
+  next_cursor?: string;
+}
+
+// ============= 会话相关 =============
+export interface Conversation {
+  conversation_id: string;
+  assistant_id: string;
+  project_id: string;
+  title?: string;
+  archived: boolean;
+  last_activity_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateConversationRequest {
+  assistant_id: string;
+  project_id: string;
+  title?: string;
+}
+
+export interface UpdateConversationRequest {
+  title?: string;
+  archived?: boolean;
+}
+
+export interface GetConversationsParams {
+  assistant_id: string;
+  cursor?: string;
+  limit?: number;
+}
+
+export interface ConversationsResponse {
+  items: Conversation[];
+  next_cursor?: string;
+}
+
+// ============= 消息相关 =============
+export interface Message {
+  message_id: string;
+  conversation_id: string;
+  role: 'user' | 'assistant';
+  content: string;
+  run_id?: string; // assistant 消息关联的 run_id
+  created_at: string;
+}
+
+export interface RunSummary {
+  run_id: string;
+  requested_logical_model: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  output_preview?: string;
+  latency?: number;
+  error_code?: string;
+}
+
+export interface RunDetail extends RunSummary {
+  request: Record<string, any>;
+  response: Record<string, any>;
+  output_text: string;
+  input_tokens?: number;
+  output_tokens?: number;
+  total_tokens?: number;
+  cost?: number;
+}
+
+export interface SendMessageRequest {
+  content: string;
+  override_logical_model?: string;
+  model_preset?: Record<string, any>;
+}
+
+export interface SendMessageResponse {
+  message_id: string;
+  baseline_run: RunSummary;
+}
+
+export interface GetMessagesParams {
+  cursor?: string;
+  limit?: number;
+}
+
+export interface MessagesResponse {
+  items: Array<{
+    message: Message;
+    run?: RunSummary; // assistant 消息包含 run 摘要
+  }>;
+  next_cursor?: string;
+}
+
+// ============= 评测相关 =============
+export interface ChallengerRun {
+  run_id: string;
+  requested_logical_model: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  output_preview?: string;
+  latency?: number;
+  error_code?: string;
+}
+
+export interface EvalExplanation {
+  summary: string;
+  evidence?: {
+    policy_version?: string;
+    exploration?: boolean;
+    [key: string]: any;
+  };
+}
+
+export interface EvalResponse {
+  eval_id: string;
+  status: 'running' | 'ready' | 'rated';
+  baseline_run_id: string;
+  challengers: ChallengerRun[];
+  explanation: EvalExplanation;
+  created_at: string;
+}
+
+export interface CreateEvalRequest {
+  project_id: string;
+  assistant_id: string;
+  conversation_id: string;
+  message_id: string;
+  baseline_run_id: string;
+}
+
+export type ReasonTag = 'accurate' | 'complete' | 'concise' | 'safe' | 'fast' | 'cheap';
+
+export interface SubmitRatingRequest {
+  winner_run_id: string;
+  reason_tags: ReasonTag[];
+}
+
+export interface RatingResponse {
+  eval_id: string;
+  winner_run_id: string;
+  reason_tags: ReasonTag[];
+  created_at: string;
+}
+
+// ============= 评测配置相关 =============
+export type ProviderScope = 'private' | 'shared' | 'public';
+
+export interface EvalConfig {
+  id: string;
+  project_id: string;
+  enabled: boolean;
+  max_challengers: number;
+  provider_scopes: ProviderScope[];
+  candidate_logical_models: string[];
+  cooldown_seconds: number;
+  budget_per_eval_credits?: number;
+  rubric?: string;
+  project_ai_enabled: boolean;
+  project_ai_provider_model?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateEvalConfigRequest {
+  enabled?: boolean;
+  max_challengers?: number;
+  provider_scopes?: ProviderScope[];
+  candidate_logical_models?: string[];
+  cooldown_seconds?: number;
+  budget_per_eval_credits?: number;
+  rubric?: string;
+  project_ai_enabled?: boolean;
+  project_ai_provider_model?: string;
+}

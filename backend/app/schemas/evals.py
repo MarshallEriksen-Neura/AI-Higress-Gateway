@@ -14,6 +14,7 @@ class EvalCreateRequest(BaseModel):
     conversation_id: UUID
     message_id: UUID
     baseline_run_id: UUID
+    streaming: bool = Field(default=False)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -53,6 +54,8 @@ class EvalRatingResponse(BaseModel):
 
 __all__ = [
     "EvalCreateRequest",
+    "EvalChallengerItem",
+    "EvalExplanation",
     "EvalResponse",
     "EvalRatingRequest",
     "EvalRatingResponse",

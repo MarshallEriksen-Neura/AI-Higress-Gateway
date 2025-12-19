@@ -82,6 +82,7 @@
 - `POST /v1/evals`
 - `GET /v1/evals/{eval_id}`
 - `POST /v1/evals/{eval_id}/rating`
+  - 可选：`POST /v1/evals` 支持 `streaming=true`（SSE 返回 challenger 执行过程）
 
 ### Project Eval Config（管理员配置页）
 
@@ -119,7 +120,9 @@
 2. 点击触发：`POST /v1/evals`
    - UI 立即渲染 challenger 卡片占位（running）
    - 展示 explanation（`summary` + 可选 `evidence`）
-3. 轮询：`GET /v1/evals/{eval_id}`（直到 `status=ready/rated` 或 challengers 全部结束）
+3. 刷新方式二选一：
+   - 轮询：`GET /v1/evals/{eval_id}`（直到 `status=ready/rated` 或 challengers 全部结束）
+   - SSE：`POST /v1/evals` 带 `streaming=true`，按事件流增量更新（`eval.created` / `run.delta` / `eval.completed` / `[DONE]`）
 4. 选择赢家 + 原因标签：`POST /v1/evals/{eval_id}/rating`
    - 提交成功后可立即隐藏评测面板或展示“已提交反馈”
 
@@ -214,4 +217,3 @@
 - 429 评测太频繁（cooldown）：提示“评测太频繁，请稍后再试”
 
 > 建议统一使用前端现有错误标准化层（`ErrorHandler`）来展示 `detail.message` 与 `detail.error`。
-

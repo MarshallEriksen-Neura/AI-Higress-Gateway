@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped
 
@@ -42,6 +42,10 @@ class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     title: Mapped[str | None] = Column(String(255), nullable=True)
     last_activity_at = Column(DateTime(timezone=True), nullable=False, index=True)
     archived_at = Column(DateTime(timezone=True), nullable=True)
+
+    is_pinned: Mapped[bool] = Column(Boolean, default=False, nullable=False)
+    last_message_content: Mapped[str | None] = Column(String(1000), nullable=True)
+    unread_count: Mapped[int] = Column(Integer, default=0, nullable=False)
 
 
 __all__ = ["Conversation"]

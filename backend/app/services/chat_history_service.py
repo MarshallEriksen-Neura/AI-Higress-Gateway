@@ -172,6 +172,7 @@ def list_conversations(
     assistant_id: UUID,
     cursor: str | None = None,
     limit: int = 30,
+    archived: bool = False,
 ) -> tuple[list[Conversation], str | None]:
     offset = _parse_offset_cursor(cursor)
     limit = max(1, min(int(limit or 30), 100))
@@ -181,10 +182,19 @@ def list_conversations(
         .where(
             Conversation.user_id == user_id,
             Conversation.assistant_id == assistant_id,
-            Conversation.archived_at.is_(None),
         )
-        .order_by(Conversation.last_activity_at.desc(), Conversation.created_at.desc())
     )
+    if archived:
+        stmt = stmt.where(Conversation.archived_at.is_not(None))
+    else:
+        stmt = stmt.where(Conversation.archived_at.is_(None))
+
+    stmt = stmt.order_by(
+        Conversation.is_pinned.desc(),
+        Conversation.last_activity_at.desc(),
+        Conversation.created_at.desc(),
+    )
+
     rows = list(db.execute(stmt.offset(offset).limit(limit + 1)).scalars().all())
     has_more = len(rows) > limit
     items = rows[:limit]
@@ -236,6 +246,8 @@ def update_conversation(
     user_id: UUID,
     title: str | None = None,
     archived: bool | None = None,
+    is_pinned: bool | None = None,
+    unread_count: int | None = None,
 ) -> Conversation:
     conv = get_conversation_any(db, conversation_id=conversation_id, user_id=user_id)
 
@@ -243,6 +255,11 @@ def update_conversation(
         conv.title = title
     if archived is not None:
         conv.archived_at = datetime.now(UTC) if archived else None
+    if is_pinned is not None:
+        conv.is_pinned = is_pinned
+    if unread_count is not None:
+        conv.unread_count = unread_count
+
     db.add(conv)
     db.commit()
     db.refresh(conv)
@@ -303,6 +320,7 @@ def create_user_message(
         sequence=seq,
     )
     conversation.last_activity_at = datetime.now(UTC)
+    conversation.last_message_content = content_text
     db.add_all([msg, conversation])
     db.commit()
     db.refresh(msg)
@@ -324,6 +342,15 @@ def create_assistant_message_after_user(
         sequence=seq,
     )
     db.add(msg)
+
+    # Update conversation preview and unread count
+    conv = db.get(Conversation, conversation_id)
+    if conv:
+        conv.last_message_content = content_text
+        conv.unread_count += 1
+        conv.last_activity_at = datetime.now(UTC)
+        db.add(conv)
+
     db.commit()
     db.refresh(msg)
     return msg
@@ -348,6 +375,13 @@ def update_assistant_message_for_user_sequence(
         return None
     msg.content = {"type": "text", "text": new_text}
     db.add(msg)
+
+    # Update conversation preview
+    conv = db.get(Conversation, conversation_id)
+    if conv:
+        conv.last_message_content = new_text
+        db.add(conv)
+
     return msg
 
 
@@ -360,7 +394,12 @@ def list_messages_with_run_summaries(
     limit: int = 30,
 ) -> tuple[list[Message], dict[UUID, list[Run]], str | None]:
     conv = get_conversation_any(db, conversation_id=conversation_id, user_id=user_id)
-    _ = conv
+
+    # Reset unread count when user views the conversation
+    if conv.unread_count > 0:
+        conv.unread_count = 0
+        db.add(conv)
+        db.commit()
 
     offset = _parse_offset_cursor(cursor)
     limit = max(1, min(int(limit or 30), 100))
