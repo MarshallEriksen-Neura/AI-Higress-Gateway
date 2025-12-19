@@ -114,8 +114,8 @@ def test_logical_model_routes_list_and_get():
     app = create_app()
     # logical_model_routes is already included by create_app via app.include_router
 
-    app.dependency_overrides[get_redis] = override_get_redis
     SessionLocal = install_inmemory_db(app)
+    app.dependency_overrides[get_redis] = override_get_redis
 
     # 获取测试用户的 ID
     with SessionLocal() as session:
@@ -171,8 +171,8 @@ def test_logical_model_routes_upstreams():
     from app.deps import get_db
     
     app = create_app()
-    app.dependency_overrides[get_redis] = override_get_redis
     SessionLocal = install_inmemory_db(app)
+    app.dependency_overrides[get_redis] = override_get_redis
 
     # 获取测试用户的 ID
     with SessionLocal() as session:

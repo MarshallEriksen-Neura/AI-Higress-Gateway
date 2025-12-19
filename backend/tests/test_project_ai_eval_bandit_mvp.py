@@ -113,7 +113,6 @@ def _mock_send(request: httpx.Request) -> httpx.Response:
     return httpx.Response(404, json={"error": "not_found"})
 
 
-@asynccontextmanager
 async def _override_get_http_client():
     transport = httpx.MockTransport(_mock_send)
     async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:

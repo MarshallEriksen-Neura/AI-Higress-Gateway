@@ -7,9 +7,10 @@ import { ConversationList } from "@/components/chat/conversation-list";
 import { ProjectSelector } from "@/components/chat/project-selector";
 import { ErrorAlert } from "@/components/chat/error-alert";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAssistants, useCreateAssistant, useUpdateAssistant, useDeleteAssistant } from "@/lib/swr/use-assistants";
 import { useConversations, useCreateConversation, useDeleteConversation } from "@/lib/swr/use-conversations";
 import { toast } from "sonner";
@@ -48,6 +49,8 @@ export default function ChatLayout({
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const { selectedProjectId, selectedAssistantId, setSelectedAssistant, setSelectedConversation } = useChatStore();
+  const layout = useChatLayoutStore((s) => s.layout);
+  const setLayout = useChatLayoutStore((s) => s.setLayout);
 
   // 对话框状态
   const [isAssistantDialogOpen, setIsAssistantDialogOpen] = useState(false);
@@ -55,21 +58,19 @@ export default function ChatLayout({
   const [deleteConfirmAssistant, setDeleteConfirmAssistant] = useState<string | null>(null);
   const [deleteConfirmConversation, setDeleteConfirmConversation] = useState<string | null>(null);
 
-  // 未登录时重定向到首页
-  useEffect(() => {
-    if (!isLoading && !user) {
-      router.push('/');
+  const defaultLayout = useMemo(() => {
+    if (layout && "chat-sidebar" in layout && "chat-main" in layout) {
+      return {
+        "chat-sidebar": layout["chat-sidebar"],
+        "chat-main": layout["chat-main"],
+      };
     }
-  }, [user, isLoading, router]);
+    return { "chat-sidebar": 20, "chat-main": 80 };
+  }, [layout]);
 
-  // 加载中或未登录时不渲染
-  if (isLoading || !user) {
-    return null;
-  }
-
-  // 获取助手列表（仅当选中项目时）
+  // 获取助手列表（仅当已登录且选中项目时）
   const { assistants, isLoading: isLoadingAssistants, error: assistantsError, mutate: mutateAssistants } = useAssistants(
-    selectedProjectId
+    user && selectedProjectId
       ? {
           project_id: selectedProjectId,
           limit: 50,
@@ -77,9 +78,14 @@ export default function ChatLayout({
       : { project_id: '', limit: 0 }
   );
 
-  // 获取会话列表（仅当选中助手时）
-  const { conversations, isLoading: isLoadingConversations, error: conversationsError, mutate: mutateConversations } = useConversations(
-    selectedAssistantId
+  // 获取会话列表（仅当已登录且选中助手时）
+  const {
+    conversations,
+    isLoading: isLoadingConversations,
+    error: conversationsError,
+    mutate: mutateConversations,
+  } = useConversations(
+    user && selectedAssistantId
       ? {
           assistant_id: selectedAssistantId,
           limit: 50,
@@ -93,6 +99,18 @@ export default function ChatLayout({
   const deleteAssistant = useDeleteAssistant();
   const createConversation = useCreateConversation();
   const deleteConversation = useDeleteConversation();
+
+  // 未登录时重定向到首页
+  useEffect(() => {
+    if (!isLoading && !user) {
+      router.push('/');
+    }
+  }, [user, isLoading, router]);
+
+  // 加载中或未登录时不渲染
+  if (isLoading || !user) {
+    return null;
+  }
 
   // 助手操作
   const handleSelectAssistant = (assistantId: string) => {
@@ -208,9 +226,14 @@ export default function ChatLayout({
         {/* 主内容区 */}
         {selectedProjectId ? (
           <div className="flex-1 overflow-hidden">
-            <ResizablePanelGroup direction="horizontal">
+            <ResizablePanelGroup
+              id="chat-layout"
+              direction="horizontal"
+              defaultLayout={defaultLayout}
+              onLayoutChange={setLayout}
+            >
               {/* 左侧边栏：助手列表 + 会话列表 */}
-              <ResizablePanel defaultSize={20} minSize={15} maxSize={30}>
+              <ResizablePanel id="chat-sidebar" defaultSize={20} minSize={15} maxSize={30}>
                 <div className="flex flex-col h-full border-r">
                   {/* 助手列表区域 */}
                   <div className="flex-1 overflow-y-auto border-b">
@@ -256,7 +279,7 @@ export default function ChatLayout({
               <ResizableHandle withHandle />
 
               {/* 主内容区 */}
-              <ResizablePanel defaultSize={80}>
+              <ResizablePanel id="chat-main" defaultSize={80}>
                 <div className="h-full overflow-hidden">
                   {children}
                 </div>

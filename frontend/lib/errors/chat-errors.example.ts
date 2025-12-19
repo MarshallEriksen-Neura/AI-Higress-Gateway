@@ -53,7 +53,7 @@ export function useErrorHandling() {
     
     // 获取错误消息
     const message = ErrorHandler.getUserMessage(standardError, t);
-    const hint = ChatErrorHandler.getActionSuggestion(standardError, t);
+    // const hint = ChatErrorHandler.getActionSuggestion(standardError, t);
     
     // 显示 toast 通知
     // toast.error(message, { description: hint });
@@ -83,8 +83,8 @@ export function useErrorHandling() {
  * 示例 3: 在 SWR mutation 中使用
  */
 export async function sendMessageWithErrorHandling(
-  conversationId: string,
-  content: string,
+  _conversationId: string,
+  _content: string,
   t: (key: string) => string
 ) {
   try {

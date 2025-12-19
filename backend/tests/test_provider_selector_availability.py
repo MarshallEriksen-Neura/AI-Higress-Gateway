@@ -200,6 +200,7 @@ async def test_check_candidate_availability(provider_selector, sample_logical_mo
             )
             assert available == ["model-a"]
 
+            mock_estimate.side_effect = None
             mock_estimate.return_value = 999
             available = await provider_selector.check_candidate_availability(
                 candidate_logical_models=["model-a"],

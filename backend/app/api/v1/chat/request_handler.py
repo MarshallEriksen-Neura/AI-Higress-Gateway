@@ -53,6 +53,13 @@ def _extract_last_user_text(payload: dict[str, Any] | None) -> str:
     return ""
 
 
+def _safe_uuid(value: Any) -> UUID | None:
+    try:
+        return UUID(str(value))
+    except Exception:
+        return None
+
+
 class RequestHandler:
     """
     执行阶段协调器：负责把“已排序的候选 upstream”转成最终响应，并补齐
@@ -102,15 +109,18 @@ class RequestHandler:
             session_id,
         )
 
+        user_uuid = _safe_uuid(self.api_key.user_id)
+        api_key_uuid = _safe_uuid(self.api_key.id)
+
         selection = await self.provider_selector.select(
             requested_model=requested_model,
             lookup_model_id=lookup_model_id,
             api_style=api_style,
             effective_provider_ids=effective_provider_ids,
             session_id=session_id,
-            user_id=UUID(str(self.api_key.user_id)),
+            user_id=user_uuid,
             is_superuser=bool(self.api_key.is_superuser),
-            bandit_project_id=UUID(str(self.api_key.id)),
+            bandit_project_id=api_key_uuid,
             bandit_assistant_id=assistant_id,
             bandit_user_text=_extract_last_user_text(payload),
             bandit_request_payload=payload,
@@ -186,19 +196,27 @@ class RequestHandler:
         )
 
         # 计费：使用上游原始 payload 提取 usage（避免审核脱敏影响 usage 字段）
-        record_completion_usage(
-            self.db,
-            user_id=UUID(str(self.api_key.user_id)),
-            api_key_id=UUID(str(self.api_key.id)),
-            logical_model_name=lookup_model_id,
-            provider_id=selected_provider_id,
-            provider_model_id=selected_model_id,
-            response_payload=response_payload,
-            request_payload=payload,
-            is_stream=False,
-            reason=billing_reason,
-            idempotency_key=idempotency_key,
-        )
+        try:
+            if user_uuid is not None and api_key_uuid is not None:
+                record_completion_usage(
+                    self.db,
+                    user_id=user_uuid,
+                    api_key_id=api_key_uuid,
+                    logical_model_name=lookup_model_id,
+                    provider_id=selected_provider_id,
+                    provider_model_id=selected_model_id,
+                    response_payload=response_payload,
+                    request_payload=payload,
+                    is_stream=False,
+                    reason=billing_reason,
+                    idempotency_key=idempotency_key,
+                )
+        except Exception:  # pragma: no cover
+            logger.exception(
+                "chat_v2: failed to record non-stream credit usage user=%s model=%s",
+                self.api_key.user_id,
+                lookup_model_id,
+            )
 
         return JSONResponse(content=moderated, status_code=upstream_response.status_code)
 
@@ -226,6 +244,9 @@ class RequestHandler:
             session_id,
         )
 
+        user_uuid = _safe_uuid(self.api_key.user_id)
+        api_key_uuid = _safe_uuid(self.api_key.id)
+
         if selection is None:
             selection = await self.provider_selector.select(
                 requested_model=requested_model,
@@ -233,9 +254,9 @@ class RequestHandler:
                 api_style=api_style,
                 effective_provider_ids=effective_provider_ids,
                 session_id=session_id,
-                user_id=UUID(str(self.api_key.user_id)),
+                user_id=user_uuid,
                 is_superuser=bool(self.api_key.is_superuser),
-                bandit_project_id=UUID(str(self.api_key.id)),
+                bandit_project_id=api_key_uuid,
                 bandit_assistant_id=assistant_id,
                 bandit_user_text=_extract_last_user_text(payload),
                 bandit_request_payload=payload,
@@ -249,16 +270,17 @@ class RequestHandler:
                 primary = selection.ordered_candidates[0].upstream
                 primary_provider_id = primary.provider_id
                 primary_model_id = primary.model_id
-            record_stream_usage(
-                self.db,
-                user_id=UUID(str(self.api_key.user_id)),
-                api_key_id=UUID(str(self.api_key.id)),
-                logical_model_name=lookup_model_id,
-                provider_id=primary_provider_id,
-                provider_model_id=primary_model_id,
-                payload=payload,
-                idempotency_key=idempotency_key,
-            )
+            if user_uuid is not None and api_key_uuid is not None:
+                record_stream_usage(
+                    self.db,
+                    user_id=user_uuid,
+                    api_key_id=api_key_uuid,
+                    logical_model_name=lookup_model_id,
+                    provider_id=primary_provider_id,
+                    provider_model_id=primary_model_id,
+                    payload=payload,
+                    idempotency_key=idempotency_key,
+                )
         except Exception:  # pragma: no cover
             logger.exception(
                 "chat_v2: failed to record streaming credit usage user=%s model=%s",
@@ -314,20 +336,28 @@ class RequestHandler:
             except Exception:  # pragma: no cover
                 transport_str = "http"
 
-            record_provider_token_usage(
-                self.db,
-                provider_id=provider_id,
-                logical_model=lookup_model_id,
-                transport=transport_str,
-                is_stream=True,
-                user_id=UUID(str(self.api_key.user_id)),
-                api_key_id=UUID(str(self.api_key.id)),
-                occurred_at=dt.datetime.now(tz=dt.timezone.utc),
-                input_tokens=None,
-                output_tokens=None,
-                total_tokens=approx_tokens,
-                estimated=True,
-            )
+            try:
+                record_provider_token_usage(
+                    self.db,
+                    provider_id=provider_id,
+                    logical_model=lookup_model_id,
+                    transport=transport_str,
+                    is_stream=True,
+                    user_id=user_uuid,
+                    api_key_id=api_key_uuid,
+                    occurred_at=dt.datetime.now(tz=dt.timezone.utc),
+                    input_tokens=None,
+                    output_tokens=None,
+                    total_tokens=approx_tokens,
+                    estimated=True,
+                )
+            except Exception:  # pragma: no cover
+                logger.exception(
+                    "chat_v2: failed to record streaming token usage user=%s model=%s provider=%s",
+                    self.api_key.user_id,
+                    lookup_model_id,
+                    provider_id,
+                )
             token_estimated = True
 
         def on_stream_complete(provider_id: str) -> None:

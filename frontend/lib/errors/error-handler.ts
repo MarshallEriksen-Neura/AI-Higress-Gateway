@@ -327,8 +327,11 @@ export function getErrorMessage(error: any): string {
   };
   
   // 优先使用映射的友好消息
-  if (standardError.error && errorMessages[standardError.error]) {
-    return errorMessages[standardError.error];
+  if (standardError.error) {
+    const mappedMessage = errorMessages[standardError.error];
+    if (mappedMessage) {
+      return mappedMessage;
+    }
   }
   
   // 使用标准错误的消息

@@ -351,7 +351,7 @@ export function EvalConfigForm({
                   <div key={scope} className="flex items-center space-x-2">
                     <Checkbox
                       id={`scope-${scope}`}
-                      checked={field.value.includes(scope)}
+                      checked={field.value?.includes(scope) ?? false}
                       onCheckedChange={(checked) =>
                         handleProviderScopeToggle(scope, checked as boolean)
                       }

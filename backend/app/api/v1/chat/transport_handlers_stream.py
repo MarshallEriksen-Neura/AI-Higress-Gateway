@@ -24,7 +24,7 @@ from app.api.v1.chat.protocol_adapter import adapt_request_payload
 from app.api.v1.chat.protocol_stream_adapter import adapt_stream
 from app.api.v1.chat.upstream_error_classifier import classify_capability_mismatch
 from app.api.v1.chat.provider_endpoint_resolver import resolve_http_upstream_target
-from app.provider.config import get_provider_config
+from app.provider import config as provider_config
 from app.provider.key_pool import (
     NoAvailableProviderKey,
     acquire_provider_key,
@@ -64,7 +64,7 @@ async def execute_http_stream(
     messages_path_override: str | None = None,
     fallback_path_override: str | None = None,
 ) -> AsyncIterator[bytes]:
-    provider_cfg = get_provider_config(provider_id)
+    provider_cfg = provider_config.get_provider_config(provider_id)
     if provider_cfg is None:
         raise Exception(f"Provider '{provider_id}' is not configured")
 
@@ -164,7 +164,7 @@ async def execute_sdk_stream(
     api_key: AuthenticatedAPIKey,
     session_id: str | None,
 ) -> AsyncIterator[bytes]:
-    provider_cfg = get_provider_config(provider_id)
+    provider_cfg = provider_config.get_provider_config(provider_id)
     if provider_cfg is None:
         raise Exception(f"Provider '{provider_id}' is not configured")
 
@@ -276,7 +276,7 @@ async def execute_claude_cli_stream(
     api_key: AuthenticatedAPIKey,
     session_id: str | None,
 ) -> AsyncIterator[bytes]:
-    provider_cfg = get_provider_config(provider_id)
+    provider_cfg = provider_config.get_provider_config(provider_id)
     if provider_cfg is None:
         raise Exception(f"Provider '{provider_id}' is not configured")
 

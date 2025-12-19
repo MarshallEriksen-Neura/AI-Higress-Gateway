@@ -477,7 +477,7 @@ export function ProviderFormEnhanced({
                             throw new Error(t("providers.form_error_multiple_keys_edit_hint"));
                         }
 
-                        if (keys.length === 1) {
+                        if (keys.length === 1 && keys[0]) {
                             await providerKeyService.updateKey(editingProvider.provider_id, keys[0].id, { key: newApiKey });
                         } else {
                             await providerKeyService.createKey(editingProvider.provider_id, {

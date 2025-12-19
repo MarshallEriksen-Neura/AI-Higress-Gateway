@@ -19,6 +19,7 @@ import type {
 export function useAssistants(params: GetAssistantsParams) {
   // 使用字符串 key 确保序列化一致性
   const key = useMemo(() => {
+    if (!params.project_id) return null;
     const queryParams = new URLSearchParams();
     queryParams.set('project_id', params.project_id);
     if (params.cursor) queryParams.set('cursor', params.cursor);

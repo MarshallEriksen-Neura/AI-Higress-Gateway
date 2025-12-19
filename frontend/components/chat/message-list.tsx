@@ -211,7 +211,7 @@ export function MessageList({
                 <div className="pb-6">
                   <MessageItem
                     message={item.message}
-                    runs={item.runs}
+                    runs={item.run ? [item.run] : []}
                     onViewDetails={onViewDetails}
                     onTriggerEval={onTriggerEval}
                     showEvalButton={showEvalButton}

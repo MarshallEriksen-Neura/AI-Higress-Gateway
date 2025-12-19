@@ -33,7 +33,7 @@ from app.api.v1.chat.transport_handlers import (
 )
 from app.auth import AuthenticatedAPIKey
 from app.logging_config import logger
-from app.provider.config import get_provider_config
+from app.provider import config as provider_config
 from app.routing.scheduler import CandidateScore
 from app.schemas import PhysicalModel
 from app.upstream import UpstreamStreamError, detect_request_format
@@ -63,6 +63,14 @@ def _call_failure_hook(hook: Callable[..., None] | None, provider_id: str, retry
         hook(provider_id, retryable=retryable)
     except TypeError:
         hook(provider_id)
+
+
+def get_provider_config(provider_id: str):
+    """
+    Thin wrapper to allow tests to patch `app.api.v1.chat.candidate_retry.get_provider_config`
+    while still deferring to the latest implementation in `app.provider.config`.
+    """
+    return provider_config.get_provider_config(provider_id)
 
 
 async def try_candidates_non_stream(

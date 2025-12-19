@@ -128,6 +128,7 @@ class InMemoryRedis:
         self._sets: dict[str, set[str]] = {}
         self._counters: dict[str, int] = {}
         self._zsets: dict[str, dict[str, float]] = {}
+        self._lists: dict[str, list[str]] = {}
 
     async def get(self, key: str):
         return self._data.get(key)
@@ -188,6 +189,9 @@ class InMemoryRedis:
             if key in self._sets:
                 removed += 1
                 self._sets.pop(key, None)
+            if key in self._lists:
+                removed += 1
+                self._lists.pop(key, None)
         return removed
 
     # --- Set operations (minimal subset used by proxy pool) ---
@@ -219,6 +223,68 @@ class InMemoryRedis:
         if not s:
             return None
         return random.choice(s)
+
+    # --- List operations (minimal subset used by context store) ---
+
+    async def lpush(self, key: str, value: str) -> int:
+        lst = self._lists.setdefault(key, [])
+        lst.insert(0, str(value))
+        return len(lst)
+
+    async def ltrim(self, key: str, start: int, stop: int) -> bool:
+        """
+        Keep only elements within [start, stop] (inclusive), supports negative indices.
+        """
+        lst = self._lists.get(key, [])
+        if not lst:
+            self._lists[key] = []
+            return True
+
+        n = len(lst)
+        s = int(start)
+        e = int(stop)
+        if s < 0:
+            s = n + s
+        if e < 0:
+            e = n + e
+        if s < 0:
+            s = 0
+        if e < 0:
+            self._lists[key] = []
+            return True
+        if s >= n:
+            self._lists[key] = []
+            return True
+        if e >= n:
+            e = n - 1
+        if e < s:
+            self._lists[key] = []
+            return True
+
+        self._lists[key] = lst[s : e + 1]
+        return True
+
+    async def lrange(self, key: str, start: int, stop: int) -> list[str]:
+        lst = self._lists.get(key, [])
+        if not lst:
+            return []
+
+        n = len(lst)
+        s = int(start)
+        e = int(stop)
+        if s < 0:
+            s = n + s
+        if e < 0:
+            e = n + e
+        if s < 0:
+            s = 0
+        if s >= n:
+            return []
+        if e >= n:
+            e = n - 1
+        if e < s:
+            return []
+        return list(lst[s : e + 1])
 
 
 __all__ = ["InMemoryRedis", "auth_headers", "jwt_auth_headers", "install_inmemory_db", "seed_user_and_key"]

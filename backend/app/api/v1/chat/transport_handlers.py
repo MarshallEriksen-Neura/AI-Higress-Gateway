@@ -23,7 +23,8 @@ from sqlalchemy.orm import Session as DbSession
 
 from app.auth import AuthenticatedAPIKey
 from app.context_store import save_context
-from app.provider.config import ProviderConfig, get_provider_config
+from app.provider import config as provider_config
+from app.provider.config import ProviderConfig
 from app.provider.key_pool import (
     NoAvailableProviderKey,
     acquire_provider_key,
@@ -101,7 +102,7 @@ async def execute_http_transport(
     messages_path_override: str | None = None,
     fallback_path_override: str | None = None,
 ) -> TransportResult:
-    provider_cfg = get_provider_config(provider_id)
+    provider_cfg = provider_config.get_provider_config(provider_id)
     if provider_cfg is None:
         return TransportResult(
             success=False,
@@ -231,7 +232,7 @@ async def execute_sdk_transport(
     api_key: AuthenticatedAPIKey,
     session_id: str | None,
 ) -> TransportResult:
-    provider_cfg = get_provider_config(provider_id)
+    provider_cfg = provider_config.get_provider_config(provider_id)
     if provider_cfg is None:
         return TransportResult(
             success=False,
@@ -327,7 +328,7 @@ async def execute_claude_cli_transport(
     api_key: AuthenticatedAPIKey,
     session_id: str | None,
 ) -> TransportResult:
-    provider_cfg = get_provider_config(provider_id)
+    provider_cfg = provider_config.get_provider_config(provider_id)
     if provider_cfg is None:
         return TransportResult(
             success=False,

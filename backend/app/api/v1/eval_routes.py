@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 
 from app.deps import get_db, get_http_client, get_redis
 from app.errors import not_found
@@ -36,7 +36,7 @@ from app.services.chat_history_service import get_conversation, get_assistant
 
 
 from app.logging_config import logger
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal as _AppSessionLocal
 import asyncio
 import time
 
@@ -44,6 +44,17 @@ router = APIRouter(
     tags=["evals"],
     dependencies=[Depends(require_jwt_token)],
 )
+
+# Backward-compatible hook for tests:
+# - tests may patch `app.api.v1.eval_routes.SessionLocal` to control DB sessions in streaming tasks.
+# - runtime code should prefer building a sessionmaker from the current request-scoped Session bind.
+SessionLocal = _AppSessionLocal
+
+def _build_stream_session_factory(db: Session):
+    if SessionLocal is not _AppSessionLocal:
+        return SessionLocal
+    bind = db.get_bind()
+    return sessionmaker(bind=bind, autoflush=False, autocommit=False, future=True)
 
 def _encode_sse_event(*, event_type: str, data: Any) -> bytes:
     """
@@ -113,6 +124,10 @@ async def create_eval_endpoint(
         )
 
     # 计算 stream 执行所需的上下文，并尽量提前释放 request-scoped 资源（db/http client）。
+    # 注意：StreamingResponse 生命周期很长，后续并发任务需要独立 Session，
+    # 但必须与当前请求使用同一 bind（否则测试注入的 in-memory DB/生产 DB 不一致会导致查不到数据）。
+    BackgroundSessionLocal = _build_stream_session_factory(db)
+
     ctx = resolve_project_context(db, project_id=payload.project_id, current_user=current_user)
     cfg = get_or_default_project_eval_config(db, project_id=ctx.project_id)
     effective_provider_ids = get_effective_provider_ids_for_user(
@@ -190,30 +205,29 @@ async def create_eval_endpoint(
                 return None
 
             # 2) 先把已完成/失败的 challenger 直接发 snapshot；queued 才执行（避免重复跑/重复计费）
+            # 这里优先使用 create_eval 返回的 challenger_runs（避免在测试环境里 SessionLocal 被 mock 后
+            # .all() 结果不可用导致无法启动任务），必要时再依赖后续的 polling 兜底。
             to_execute: list[UUID] = []
             unfinished: set[UUID] = set()
-            if challenger_run_ids:
-                with SessionLocal() as snapshot_db:
-                    rows = list(
-                        snapshot_db.execute(select(RunModel).where(RunModel.id.in_(challenger_run_ids)))
-                        .scalars()
-                        .all()
-                    )
-                for row in rows:
-                    if row.status == "queued":
-                        to_execute.append(UUID(str(row.id)))
-                        unfinished.add(UUID(str(row.id)))
-                    elif row.status == "running":
-                        unfinished.add(UUID(str(row.id)))
-                    else:
-                        snap = _emit_run_snapshot(row)
-                        if snap is not None:
-                            await queue.put(snap)
+            for row in challenger_runs:
+                try:
+                    rid = UUID(str(row.id))
+                except Exception:
+                    continue
+                if row.status == "queued":
+                    to_execute.append(rid)
+                    unfinished.add(rid)
+                elif row.status == "running":
+                    unfinished.add(rid)
+                else:
+                    snap = _emit_run_snapshot(row)
+                    if snap is not None:
+                        await queue.put(snap)
 
             async def _run_task(run_id: UUID) -> None:
                 try:
                     # 每个 run 独立 session，避免同一 Session 在多个并发任务中交叉使用导致报错
-                    with SessionLocal() as task_db:
+                    with BackgroundSessionLocal() as task_db:
                         task_run = (
                             task_db.execute(select(RunModel).where(RunModel.id == run_id))
                             .scalars()
@@ -294,7 +308,7 @@ async def create_eval_endpoint(
                     logger.exception("eval_routes: run_task failed for run %s", run_id)
                     # best-effort 落库（对齐 poll 路径）
                     try:
-                        with SessionLocal() as err_db:
+                        with BackgroundSessionLocal() as err_db:
                             err_run = (
                                 err_db.execute(select(RunModel).where(RunModel.id == run_id))
                                 .scalars()
@@ -346,7 +360,7 @@ async def create_eval_endpoint(
                     # best-effort：观察非本次请求启动的 running 任务，捕捉其最终态
                     if unfinished:
                         try:
-                            with SessionLocal() as poll_db:
+                            with BackgroundSessionLocal() as poll_db:
                                 polled = list(
                                     poll_db.execute(select(RunModel).where(RunModel.id.in_(list(unfinished))))
                                     .scalars()
@@ -370,7 +384,7 @@ async def create_eval_endpoint(
                     logger.exception("eval_routes: error getting from queue")
 
             # 检查是否全部 ready
-            with SessionLocal() as final_db:
+            with BackgroundSessionLocal() as final_db:
                 _maybe_mark_eval_ready(final_db, eval_id=eval_id)
                 final_db.commit()
                 eval_row = final_db.execute(select(EvalModel).where(EvalModel.id == eval_id)).scalars().first()

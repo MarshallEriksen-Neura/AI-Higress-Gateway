@@ -19,6 +19,7 @@ import type {
 export function useConversations(params: GetConversationsParams) {
   // 使用字符串 key 确保序列化一致性
   const key = useMemo(() => {
+    if (!params.assistant_id) return null;
     const queryParams = new URLSearchParams();
     queryParams.set('assistant_id', params.assistant_id);
     if (params.cursor) queryParams.set('cursor', params.cursor);
