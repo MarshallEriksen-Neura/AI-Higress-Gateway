@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import time
+from datetime import UTC, datetime
+from typing import Any
+from uuid import UUID
+
+import httpx
+from fastapi import HTTPException
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+try:
+    from redis.asyncio import Redis
+except ModuleNotFoundError:  # pragma: no cover
+    Redis = object  # type: ignore
+
+from app.api.v1.chat.request_handler import RequestHandler
+from app.auth import AuthenticatedAPIKey
+from app.logging_config import logger
+from app.models import AssistantPreset, Conversation, Message, Run
+from app.upstream import detect_request_format
+
+
+def _safe_text_from_message_content(content: dict) -> str:
+    if not isinstance(content, dict):
+        return ""
+    text = content.get("text")
+    if isinstance(text, str):
+        return text
+    return ""
+
+
+def _extract_assistant_text_from_openai_response(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    choices = payload.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return None
+    first = choices[0]
+    if not isinstance(first, dict):
+        return None
+    message = first.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str) and content.strip():
+            return content
+    # Fallback: some providers return `text` field
+    content = first.get("text")
+    if isinstance(content, str) and content.strip():
+        return content
+    return None
+
+
+def _build_openai_messages(
+    db: Session,
+    *,
+    conversation_id: UUID,
+    assistant: AssistantPreset,
+    new_user_message: Message,
+) -> list[dict[str, Any]]:
+    """
+    构造 OpenAI chat.completions 的 messages 数组：
+    - system: assistant.system_prompt（若非空）
+    - 取历史 messages（按 sequence 升序）
+    - 最后追加本次 user message（若还未入库也可直接拼接）
+    """
+    stmt = (
+        select(Message)
+        .where(Message.conversation_id == conversation_id)
+        .order_by(Message.sequence.asc())
+    )
+    history = list(db.execute(stmt).scalars().all())
+
+    messages: list[dict[str, Any]] = []
+    system_prompt = (assistant.system_prompt or "").strip()
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+
+    for msg in history:
+        if msg.id == new_user_message.id:
+            continue
+        role = str(msg.role or "").strip() or "user"
+        if role not in {"user", "assistant", "system"}:
+            role = "user"
+        content_text = _safe_text_from_message_content(msg.content)
+        if not content_text:
+            continue
+        messages.append({"role": role, "content": content_text})
+
+    # append new message
+    messages.append(
+        {
+            "role": "user",
+            "content": _safe_text_from_message_content(new_user_message.content),
+        }
+    )
+    return messages
+
+
+def _merge_model_preset(base: dict | None, override: dict | None) -> dict:
+    merged: dict = {}
+    if isinstance(base, dict):
+        merged.update(base)
+    if isinstance(override, dict):
+        merged.update(override)
+    return merged
+
+
+def build_openai_request_payload(
+    db: Session,
+    *,
+    conversation: Conversation,
+    assistant: AssistantPreset,
+    user_message: Message,
+    requested_logical_model: str,
+    model_preset_override: dict | None = None,
+) -> dict[str, Any]:
+    messages = _build_openai_messages(
+        db,
+        conversation_id=UUID(str(conversation.id)),
+        assistant=assistant,
+        new_user_message=user_message,
+    )
+    preset = _merge_model_preset(assistant.model_preset, model_preset_override)
+    return {"model": requested_logical_model, "messages": messages, **preset}
+
+
+def create_run_record(
+    db: Session,
+    *,
+    user_id: UUID,
+    api_key_id: UUID,
+    message_id: UUID,
+    requested_logical_model: str,
+    request_payload: dict[str, Any],
+) -> Run:
+    run = Run(
+        message_id=message_id,
+        user_id=user_id,
+        api_key_id=api_key_id,
+        requested_logical_model=requested_logical_model,
+        selected_provider_id=None,
+        selected_provider_model=None,
+        status="running",
+        started_at=datetime.now(UTC),
+        finished_at=None,
+        latency_ms=None,
+        cost_credits=None,
+        error_code=None,
+        error_message=None,
+        request_payload=request_payload,
+        response_payload=None,
+        output_text=None,
+        output_preview=None,
+    )
+    db.add(run)
+    db.commit()
+    db.refresh(run)
+    return run
+
+
+async def execute_run_non_stream(
+    db: Session,
+    *,
+    redis: Redis,
+    client: httpx.AsyncClient,
+    api_key: AuthenticatedAPIKey,
+    effective_provider_ids: set[str],
+    conversation: Conversation,
+    assistant: AssistantPreset,
+    user_message: Message,
+    run: Run,
+    requested_logical_model: str,
+    model_preset_override: dict | None = None,
+    payload_override: dict[str, Any] | None = None,
+) -> Run:
+    """
+    执行一次 non-stream run，并把结果写回 Run 记录。
+    """
+    start = time.time()
+
+    try:
+        if payload_override is not None:
+            payload = dict(payload_override)
+        else:
+            payload = build_openai_request_payload(
+                db,
+                conversation=conversation,
+                assistant=assistant,
+                user_message=user_message,
+                requested_logical_model=requested_logical_model,
+                model_preset_override=model_preset_override,
+            )
+        api_style = detect_request_format(payload)
+
+        selected: dict[str, str | None] = {"provider_id": None, "model_id": None}
+
+        def _sink(provider_id: str, model_id: str) -> None:
+            selected["provider_id"] = provider_id
+            selected["model_id"] = model_id
+
+        handler = RequestHandler(api_key=api_key, db=db, redis=redis, client=client)
+        response = await handler.handle(
+            payload=payload,
+            requested_model=requested_logical_model,
+            lookup_model_id=requested_logical_model,
+            api_style=api_style,
+            effective_provider_ids=effective_provider_ids,
+            session_id=str(conversation.id),
+            provider_id_sink=_sink,
+        )
+
+        response_payload: dict[str, Any] | None = None
+        try:
+            if isinstance(response.body, (bytes, bytearray)):
+                parsed = httpx.Response(200, content=response.body).json()
+            else:
+                parsed = None
+            if isinstance(parsed, dict):
+                response_payload = parsed
+        except Exception:
+            response_payload = None
+
+        output_text = _extract_assistant_text_from_openai_response(response_payload)
+        output_preview = (output_text or "").strip()
+        if output_preview:
+            output_preview = output_preview[:380].rstrip()
+        else:
+            output_preview = None
+
+        run.status = "succeeded" if response.status_code < 400 else "failed"
+        run.selected_provider_id = selected.get("provider_id")
+        run.selected_provider_model = selected.get("model_id")
+        run.response_payload = response_payload
+        run.output_text = output_text
+        run.output_preview = output_preview
+        run.latency_ms = int(max(0, (time.time() - start) * 1000))
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
+
+    except HTTPException as exc:
+        run.status = "failed"
+        run.error_code = "UPSTREAM_ERROR"
+        run.error_message = str(exc.detail)
+        run.latency_ms = int(max(0, (time.time() - start) * 1000))
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
+    except Exception as exc:  # pragma: no cover
+        logger.exception("chat_run_service: run failed (run_id=%s): %s", run.id, exc)
+        run.status = "failed"
+        run.error_code = "INTERNAL_ERROR"
+        run.error_message = str(exc)
+        run.latency_ms = int(max(0, (time.time() - start) * 1000))
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+        return run
+
+
+__all__ = ["build_openai_request_payload", "create_run_record", "execute_run_non_stream"]

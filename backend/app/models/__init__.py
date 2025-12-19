@@ -30,6 +30,14 @@ from .provider_audit_log import ProviderAuditLog
 from .provider_test_record import ProviderTestRecord
 from .upstream_proxy import UpstreamProxyConfig, UpstreamProxyEndpoint, UpstreamProxySource
 from .user_probe import UserProbeRun, UserProbeTask
+from .project_eval_config import ProjectEvalConfig
+from .assistant_preset import AssistantPreset
+from .conversation import Conversation
+from .message import Message
+from .run import Run
+from .eval import Eval
+from .rating import EvalRating
+from .bandit_arm_stats import BanditArmStats
 
 __all__ = [
     "APIKey",
@@ -73,4 +81,12 @@ __all__ = [
     "UserPermission",
     "UserRole",
     "User",
+    "ProjectEvalConfig",
+    "AssistantPreset",
+    "Conversation",
+    "Message",
+    "Run",
+    "Eval",
+    "EvalRating",
+    "BanditArmStats",
 ]

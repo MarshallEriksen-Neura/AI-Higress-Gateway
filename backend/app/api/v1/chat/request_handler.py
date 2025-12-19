@@ -76,6 +76,8 @@ class RequestHandler:
         idempotency_key: str | None = None,
         messages_path_override: str | None = None,
         fallback_path_override: str | None = None,
+        provider_id_sink: Callable[[str, str], None] | None = None,
+        billing_reason: str | None = None,
     ) -> JSONResponse:
         logger.info(
             "chat_v2: handle non-stream user=%s logical_model=%s api_style=%s session_id=%s",
@@ -103,6 +105,11 @@ class RequestHandler:
             nonlocal selected_provider_id, selected_model_id
             selected_provider_id = provider_id
             selected_model_id = model_id
+            if provider_id_sink is not None:
+                try:
+                    provider_id_sink(provider_id, model_id)
+                except Exception:  # pragma: no cover
+                    logger.debug("chat_v2: provider_id_sink failed", exc_info=True)
 
             self.routing_state.record_success(
                 lookup_model_id, provider_id, base_weights.get(provider_id, 1.0)
@@ -170,6 +177,7 @@ class RequestHandler:
             response_payload=response_payload,
             request_payload=payload,
             is_stream=False,
+            reason=billing_reason,
             idempotency_key=idempotency_key,
         )
 

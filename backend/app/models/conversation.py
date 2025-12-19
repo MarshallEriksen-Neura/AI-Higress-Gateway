@@ -1,0 +1,48 @@
+from __future__ import annotations
+
+from sqlalchemy import Column, DateTime, ForeignKey, Index, String
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import Mapped
+
+from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+
+
+class Conversation(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """按助手分组的会话。"""
+
+    __tablename__ = "chat_conversations"
+    __table_args__ = (
+        Index(
+            "ix_chat_conversations_user_assistant_last_activity",
+            "user_id",
+            "assistant_id",
+            "last_activity_at",
+        ),
+    )
+
+    user_id: Mapped[PG_UUID] = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    api_key_id: Mapped[PG_UUID] = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("api_keys.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+        doc="MVP project_id == api_key_id",
+    )
+    assistant_id: Mapped[PG_UUID] = Column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("assistant_presets.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    title: Mapped[str | None] = Column(String(255), nullable=True)
+    last_activity_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+
+
+__all__ = ["Conversation"]
+

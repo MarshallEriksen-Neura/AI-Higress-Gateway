@@ -42,6 +42,9 @@ from .api.v1.user_provider_routes import router as user_provider_router
 from .api.v1.session_routes import router as user_session_router
 from .api.v1.user_routes import router as user_router
 from .api.v1.cli_config import router as cli_config_router
+from .api.v1.assistant_routes import router as assistant_router
+from .api.v1.eval_routes import router as eval_router
+from .api.v1.project_eval_config_routes import router as project_eval_config_router
 from .db import SessionLocal
 from .logging_config import logger
 from .log_sanitizer import sanitize_headers_for_log
@@ -221,6 +224,11 @@ def create_app() -> FastAPI:
     app.include_router(provider_key_router)
     app.include_router(user_session_router)
     app.include_router(credit_router)
+
+    # Chat 应用能力：助手 / 会话 / 评测闭环（JWT）
+    app.include_router(assistant_router)
+    app.include_router(eval_router)
+    app.include_router(project_eval_config_router)
 
     # 用户私有 Provider
     app.include_router(private_provider_router)
