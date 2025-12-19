@@ -125,6 +125,97 @@ class ProviderSelector:
                 disabled.add((provider_id, model_id))
         return disabled
 
+    async def check_candidate_availability(
+        self,
+        *,
+        candidate_logical_models: list[str],
+        effective_provider_ids: set[str],
+        api_style: str = "openai",
+        user_id: UUID | None = None,
+        is_superuser: bool = False,
+    ) -> list[str]:
+        """
+        Check which of the candidate logical models are currently available/feasible.
+        
+        A model is feasible if:
+        1. It resolves to a valid LogicalModel (static or dynamic).
+        2. It is enabled.
+        3. It has at least one valid upstream (PhysicalModel) within effective_provider_ids.
+        4. It is not disabled by provider/model pair.
+        5. It is not fully down (health check).
+        """
+        available: list[str] = []
+        # Pre-load disabled pairs for all relevant providers to avoid repetitive DB queries?
+        # Optimization: We do it per model for now as the list is small.
+        
+        for model_id in candidate_logical_models:
+            try:
+                # 1) Resolve
+                logical_model = await self._resolve_logical_model(
+                    requested_model=model_id,
+                    lookup_model_id=model_id,
+                    api_style=api_style,
+                    allowed_provider_ids=effective_provider_ids,
+                    user_id=user_id,
+                    is_superuser=is_superuser,
+                )
+                
+                if not logical_model.enabled:
+                    continue
+
+                # 2) Candidates
+                candidates: list[PhysicalModel] = select_candidate_upstreams(
+                    logical_model,
+                    preferred_region=None,
+                    exclude_providers=[],
+                )
+                candidates = [c for c in candidates if c.provider_id in effective_provider_ids]
+
+                if not candidates:
+                    continue
+
+                # 3) API Style / Non-responses check
+                if api_style in ("openai", "claude"):
+                    non_responses = [
+                        c for c in candidates if getattr(c, "api_style", "openai") != "responses"
+                    ]
+                    if not non_responses:
+                        continue
+                    candidates = non_responses
+
+                # 4) Disabled pairs
+                disabled_pairs = self._load_disabled_pairs(
+                    provider_ids={c.provider_id for c in candidates},
+                    model_ids={c.model_id for c in candidates},
+                )
+                if disabled_pairs:
+                    candidates = [
+                        c for c in candidates if (c.provider_id, c.model_id) not in disabled_pairs
+                    ]
+                
+                if not candidates:
+                    continue
+
+                # 5) Health check
+                if settings.enable_provider_health_check and self.redis is not object:
+                    down_providers: set[str] = set()
+                    for cand in candidates:
+                        health = await self.routing_state.get_cached_health_status(cand.provider_id)
+                        if health and health.status.value == "down":
+                            down_providers.add(cand.provider_id)
+                    
+                    if down_providers:
+                        candidates = [c for c in candidates if c.provider_id not in down_providers]
+                
+                if candidates:
+                    available.append(model_id)
+
+            except Exception:
+                # Any failure in resolution or check means this model is not available.
+                continue
+        
+        return available
+
     async def select(
         self,
         *,

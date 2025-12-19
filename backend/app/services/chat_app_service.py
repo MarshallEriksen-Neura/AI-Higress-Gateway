@@ -30,6 +30,7 @@ from app.services.project_eval_config_service import (
     get_or_default_project_eval_config,
     resolve_project_context,
 )
+from app.api.v1.chat.provider_selector import ProviderSelector
 
 
 def _to_authenticated_api_key(
@@ -85,6 +86,14 @@ async def send_message_and_run_baseline(
         raise bad_request("未指定模型")
 
     cfg = get_or_default_project_eval_config(db, project_id=ctx.project_id)
+    
+    effective_provider_ids = get_effective_provider_ids_for_user(
+        db,
+        user_id=UUID(str(current_user.id)),
+        api_key=ctx.api_key,
+        provider_scopes=list(getattr(cfg, "provider_scopes", None) or DEFAULT_PROVIDER_SCOPES),
+    )
+
     if requested_model == "auto":
         candidates = list(cfg.candidate_logical_models or [])
         if not candidates:
@@ -92,6 +101,23 @@ async def send_message_and_run_baseline(
                 "当前助手默认模型为 auto，但项目未配置 candidate_logical_models",
                 details={"project_id": str(ctx.project_id)},
             )
+        
+        # 过滤不可用/无权限/故障的模型
+        selector = ProviderSelector(client=client, redis=redis, db=db)
+        candidates = await selector.check_candidate_availability(
+            candidate_logical_models=candidates,
+            effective_provider_ids=effective_provider_ids,
+            api_style="openai",  # 默认聊天场景
+            user_id=UUID(str(current_user.id)),
+            is_superuser=current_user.is_superuser,
+        )
+
+        if not candidates:
+             raise bad_request(
+                "auto 模式下无可用的候选模型（均被禁用或无健康上游）",
+                details={"project_id": str(ctx.project_id)},
+            )
+
         rec = recommend_challengers(
             db,
             project_id=ctx.project_id,
@@ -109,13 +135,6 @@ async def send_message_and_run_baseline(
                 details={"project_id": str(ctx.project_id)},
             )
         requested_model = rec.candidates[0].logical_model
-
-    effective_provider_ids = get_effective_provider_ids_for_user(
-        db,
-        user_id=UUID(str(current_user.id)),
-        api_key=ctx.api_key,
-        provider_scopes=list(getattr(cfg, "provider_scopes", None) or DEFAULT_PROVIDER_SCOPES),
-    )
 
     user_message = create_user_message(db, conversation=conv, content_text=content)
     payload = build_openai_request_payload(
