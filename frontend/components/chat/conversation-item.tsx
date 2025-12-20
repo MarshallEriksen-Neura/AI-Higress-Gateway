@@ -43,7 +43,6 @@ export function ConversationItem({
 }: ConversationItemProps) {
   const { t } = useI18n();
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
-  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
 
   const handleCardClick = () => {
     if (onSelect) {
@@ -58,12 +57,6 @@ export function ConversationItem({
     setShowArchiveDialog(false);
   };
 
-  const handleDeleteConfirm = () => {
-    if (onDelete) {
-      onDelete(conversation.conversation_id);
-    }
-    setShowDeleteDialog(false);
-  };
 
   // 格式化时间显示
   const formatLastActivity = (dateString: string) => {
@@ -141,7 +134,9 @@ export function ConversationItem({
                 <DropdownMenuItem
                   onClick={(e) => {
                     e.stopPropagation();
-                    setShowDeleteDialog(true);
+                    if (onDelete) {
+                      onDelete(conversation.conversation_id);
+                    }
                   }}
                   className="text-destructive focus:text-destructive"
                 >
@@ -172,29 +167,6 @@ export function ConversationItem({
             </Button>
             <Button onClick={handleArchiveConfirm} autoFocus>
               {t("chat.action.confirm")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* 删除确认对话框 */}
-      <Dialog open={showDeleteDialog} onOpenChange={setShowDeleteDialog}>
-        <DialogContent aria-describedby="delete-conversation-dialog-description">
-          <DialogHeader>
-            <DialogTitle>{t("chat.conversation.delete")}</DialogTitle>
-            <DialogDescription id="delete-conversation-dialog-description">
-              {t("chat.conversation.delete_confirm")}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => setShowDeleteDialog(false)}
-            >
-              {t("chat.action.cancel")}
-            </Button>
-            <Button variant="destructive" onClick={handleDeleteConfirm} autoFocus>
-              {t("chat.action.delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

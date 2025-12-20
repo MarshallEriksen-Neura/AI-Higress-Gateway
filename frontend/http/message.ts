@@ -27,7 +27,7 @@ export const messageService = {
     const { data } = await httpClient.get<MessagesResponseBackend>(`/v1/conversations/${conversationId}/messages`, {
       params,
     });
-    return normalizeMessagesResponse(data);
+    return normalizeMessagesResponse(data, conversationId);
   },
 
   /**

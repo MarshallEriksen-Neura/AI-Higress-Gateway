@@ -10,9 +10,15 @@ import { useChatStore } from "@/lib/stores/chat-store";
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { useAssistants, useCreateAssistant, useUpdateAssistant, useDeleteAssistant } from "@/lib/swr/use-assistants";
+import React, { useEffect, useState, useMemo } from "react";
+import {
+  useAssistants,
+  useCreateAssistant,
+  useUpdateAssistant,
+  useDeleteAssistant,
+} from "@/lib/swr/use-assistants";
 import { useConversations, useCreateConversation, useDeleteConversation } from "@/lib/swr/use-conversations";
+import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n-context";
 import type { Assistant, CreateAssistantRequest, UpdateAssistantRequest, CreateConversationRequest } from "@/lib/api-types";
@@ -49,24 +55,28 @@ export default function ChatLayout({
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const { selectedProjectId, selectedAssistantId, setSelectedAssistant, setSelectedConversation } = useChatStore();
-  const layout = useChatLayoutStore((s) => s.layout);
+  const storedLayout = useChatLayoutStore((s) => s.layout);
   const setLayout = useChatLayoutStore((s) => s.setLayout);
+
+  // 验证并准备默认布局
+  const defaultLayout = useMemo(() => {
+    if (!storedLayout) return undefined;
+    
+    const isValidStoredLayout =
+      storedLayout &&
+      typeof storedLayout === 'object' &&
+      "chat-sidebar" in storedLayout &&
+      "chat-main" in storedLayout &&
+      Object.keys(storedLayout).length === 2;
+    
+    return isValidStoredLayout ? storedLayout : undefined;
+  }, [storedLayout]);
 
   // 对话框状态
   const [isAssistantDialogOpen, setIsAssistantDialogOpen] = useState(false);
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
   const [deleteConfirmAssistant, setDeleteConfirmAssistant] = useState<string | null>(null);
   const [deleteConfirmConversation, setDeleteConfirmConversation] = useState<string | null>(null);
-
-  const defaultLayout = useMemo(() => {
-    if (layout && "chat-sidebar" in layout && "chat-main" in layout) {
-      return {
-        "chat-sidebar": layout["chat-sidebar"],
-        "chat-main": layout["chat-main"],
-      };
-    }
-    return { "chat-sidebar": 20, "chat-main": 80 };
-  }, [layout]);
 
   // 获取助手列表（仅当已登录且选中项目时）
   const { assistants, isLoading: isLoadingAssistants, error: assistantsError, mutate: mutateAssistants } = useAssistants(
@@ -92,6 +102,26 @@ export default function ChatLayout({
         }
       : { assistant_id: '', limit: 0 }
   );
+
+  // 获取可用逻辑模型列表（用于助手默认模型下拉）
+  const { models: logicalModels } = useLogicalModels();
+
+  const availableAssistantModels = useMemo(() => {
+    const modelSet = new Set<string>(["auto"]);
+
+    for (const model of logicalModels) {
+      if (!model.enabled) continue;
+      if (!model.capabilities?.includes("chat")) continue;
+      modelSet.add(model.logical_id);
+    }
+
+    // 编辑时确保当前值可选（即便该模型暂时不可用/被禁用）
+    if (editingAssistant?.default_logical_model) {
+      modelSet.add(editingAssistant.default_logical_model);
+    }
+
+    return ["auto", ...Array.from(modelSet).filter((m) => m !== "auto").sort()];
+  }, [logicalModels, editingAssistant?.default_logical_model]);
 
   // Mutation hooks
   const createAssistant = useCreateAssistant();
@@ -233,7 +263,7 @@ export default function ChatLayout({
               onLayoutChange={setLayout}
             >
               {/* 左侧边栏：助手列表 + 会话列表 */}
-              <ResizablePanel id="chat-sidebar" defaultSize={20} minSize={15} maxSize={30}>
+              <ResizablePanel id="chat-sidebar" defaultSize="25%" minSize="20%" maxSize="50%">
                 <div className="flex flex-col h-full border-r">
                   {/* 助手列表区域 */}
                   <div className="flex-1 overflow-y-auto border-b">
@@ -279,7 +309,7 @@ export default function ChatLayout({
               <ResizableHandle withHandle />
 
               {/* 主内容区 */}
-              <ResizablePanel id="chat-main" defaultSize={80}>
+              <ResizablePanel id="chat-main" defaultSize="75%">
                 <div className="h-full overflow-hidden">
                   {children}
                 </div>
@@ -301,6 +331,7 @@ export default function ChatLayout({
           editingAssistant={editingAssistant}
           projectId={selectedProjectId}
           onSubmit={handleSaveAssistant}
+          availableModels={availableAssistantModels}
         />
       )}
 

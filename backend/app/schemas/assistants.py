@@ -30,13 +30,13 @@ class AssistantPresetItem(BaseModel):
     assistant_id: UUID
     project_id: UUID | None = None
     name: str
+    system_prompt: str = Field(default="", max_length=20000)
     default_logical_model: str
     created_at: datetime
     updated_at: datetime
 
 
 class AssistantPresetResponse(AssistantPresetItem):
-    system_prompt: str
     model_preset: dict | None = None
     archived_at: datetime | None = None
 
@@ -72,6 +72,7 @@ class ConversationItem(BaseModel):
     project_id: UUID
     title: str | None = None
     last_activity_at: datetime
+    archived_at: datetime | None = None
     is_pinned: bool = False
     last_message_content: str | None = None
     unread_count: int = 0

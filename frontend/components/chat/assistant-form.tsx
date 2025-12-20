@@ -50,7 +50,7 @@ export function AssistantForm({
   projectId,
   onSubmit,
   isSubmitting = false,
-  availableModels = ["auto", "gpt-4", "gpt-4-turbo", "claude-3-opus", "claude-3-sonnet", "gpt-3.5-turbo"],
+  availableModels = ["auto"],
 }: AssistantFormProps) {
   const { t } = useI18n();
   const isEditing = Boolean(editingAssistant);

@@ -115,11 +115,14 @@ export interface RunDetailBackend extends RunSummaryBackend {
  * 后端实际返回的消息列表结构
  * 与前端类型的差异：
  * - 每条消息包含 runs 数组（而非单个 run）
- * - message 使用 MessageBackend 类型（content 是结构化对象）
+ * - messages 接口当前返回“扁平化 message 字段”（不再嵌套在 message 对象里）
  */
 export interface MessagesResponseBackend {
   items: Array<{
-    message: MessageBackend;
+    message_id: string;
+    role: 'user' | 'assistant';
+    content: MessageContent;
+    created_at: string;
     runs: RunSummaryBackend[]; // 后端返回 runs 数组
   }>;
   next_cursor?: string;

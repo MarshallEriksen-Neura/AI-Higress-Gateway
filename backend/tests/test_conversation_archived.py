@@ -66,7 +66,10 @@ def test_list_conversations_archived(client: TestClient, db_session: Session):
         },
     )
     assert resp.status_code == 201
-    active_id = resp.json()["conversation_id"]
+    active_payload = resp.json()
+    active_id = active_payload["conversation_id"]
+    assert "archived_at" in active_payload
+    assert active_payload["archived_at"] is None
 
     # 5. Create Another Conversation and Archive it
     resp = client.post(
@@ -79,7 +82,10 @@ def test_list_conversations_archived(client: TestClient, db_session: Session):
         },
     )
     assert resp.status_code == 201
-    archived_id = resp.json()["conversation_id"]
+    archived_payload = resp.json()
+    archived_id = archived_payload["conversation_id"]
+    assert "archived_at" in archived_payload
+    assert archived_payload["archived_at"] is None
 
     # Archive it
     resp = client.put(
@@ -88,6 +94,9 @@ def test_list_conversations_archived(client: TestClient, db_session: Session):
         json={"title": "Archived Chat", "archived": True},
     )
     assert resp.status_code == 200
+    updated_payload = resp.json()
+    assert updated_payload["conversation_id"] == archived_id
+    assert updated_payload["archived_at"] is not None
 
     # 6. List Default (Active only, archived=False)
     resp = client.get(f"/v1/conversations?assistant_id={assistant_id}", headers=headers)
@@ -96,6 +105,9 @@ def test_list_conversations_archived(client: TestClient, db_session: Session):
     ids = [i["conversation_id"] for i in items]
     assert active_id in ids
     assert archived_id not in ids
+    active_item = next(i for i in items if i["conversation_id"] == active_id)
+    assert "archived_at" in active_item
+    assert active_item["archived_at"] is None
 
     # 7. List Archived (archived=True)
     resp = client.get(
@@ -106,3 +118,6 @@ def test_list_conversations_archived(client: TestClient, db_session: Session):
     ids = [i["conversation_id"] for i in items]
     assert active_id not in ids
     assert archived_id in ids
+    archived_item = next(i for i in items if i["conversation_id"] == archived_id)
+    assert "archived_at" in archived_item
+    assert archived_item["archived_at"] is not None

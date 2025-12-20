@@ -62,7 +62,7 @@ export function normalizeAssistant(backend: AssistantBackend): Assistant {
     system_prompt: backend.system_prompt,
     default_logical_model: backend.default_logical_model,
     model_preset: backend.model_preset,
-    archived: backend.archived_at !== null, // 转换为 boolean
+    archived: backend.archived_at != null, // 转换为 boolean（兼容 undefined）
     created_at: backend.created_at,
     updated_at: backend.updated_at,
   };
@@ -98,7 +98,7 @@ export function normalizeConversation(backend: ConversationBackend): Conversatio
     assistant_id: backend.assistant_id,
     project_id: backend.project_id,
     title: backend.title,
-    archived: backend.archived_at !== null, // 转换为 boolean
+    archived: backend.archived_at != null, // 转换为 boolean（兼容 undefined）
     last_activity_at: backend.last_activity_at,
     created_at: backend.created_at,
     updated_at: backend.updated_at,
@@ -205,15 +205,22 @@ export function normalizeRunDetail(backend: RunDetailBackend): RunDetail {
  * @returns 前端使用的消息列表响应
  */
 export function normalizeMessagesResponse(
-  backend: MessagesResponseBackend
+  backend: MessagesResponseBackend,
+  conversationId: string
 ): MessagesResponse {
   return {
     items: backend.items.map((item) => {
-      const normalizedMessage = normalizeMessage(item.message);
-      const normalizedRuns = item.runs.map(normalizeRunSummary);
-      
-      // 如果是 assistant 消息且有 runs，取第一个 run
-      // 注意：后端返回的是 runs 数组，前端期望单个 run（可选）
+      const normalizedMessage: Message = {
+        message_id: item.message_id,
+        conversation_id: conversationId,
+        role: item.role,
+        content: normalizeMessageContent(item.content),
+        created_at: item.created_at,
+      };
+
+      const normalizedRuns = (item.runs ?? []).map(normalizeRunSummary);
+
+      // 前端列表目前只消费单个 run（用于展示/详情/评测入口）
       const run = normalizedRuns.length > 0 ? normalizedRuns[0] : undefined;
       
       return {

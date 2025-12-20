@@ -882,6 +882,7 @@ export interface GetConversationsParams {
   assistant_id: string;
   cursor?: string;
   limit?: number;
+  archived?: boolean;
 }
 
 export interface ConversationsResponse {

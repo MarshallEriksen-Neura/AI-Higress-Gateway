@@ -82,8 +82,8 @@ export function useSendMessage(conversationId: string | null) {
       throw new Error('Conversation ID is required');
     }
 
-    // 使用字符串 key 确保与 useMessages 一致
-    const messagesKey = `/v1/conversations/${conversationId}/messages`;
+    // 使用字符串 key 确保与 MessageList/useMessages 默认第一页一致（limit=50）
+    const messagesKey = `/v1/conversations/${conversationId}/messages?limit=50`;
 
     // 创建乐观更新的用户消息
     const optimisticMessage = {
@@ -94,7 +94,7 @@ export function useSendMessage(conversationId: string | null) {
         content: request.content,
         created_at: new Date().toISOString(),
       },
-      runs: [],
+      run: undefined,
     };
 
     try {

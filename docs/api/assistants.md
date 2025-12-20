@@ -21,6 +21,7 @@ Response:
       "assistant_id": "uuid",
       "project_id": "uuid",
       "name": "默认助手",
+      "system_prompt": "你是一个严谨的助手",
       "default_logical_model": "gpt-4.1",
       "created_at": "2025-12-19T00:00:00Z",
       "updated_at": "2025-12-19T00:00:00Z"
@@ -84,6 +85,18 @@ Errors:
 - `404 not_found`：项目不存在或无权访问（`project_id` 传错）
 - `403 forbidden`：助手不属于当前项目
 
+Response（摘要）:
+```json
+{
+  "conversation_id": "uuid",
+  "assistant_id": "uuid",
+  "project_id": "uuid",
+  "title": "可选标题",
+  "last_activity_at": "datetime",
+  "archived_at": null
+}
+```
+
 ### GET `/v1/conversations?assistant_id=...`
 
 按助手查询会话列表（摘要）。
@@ -92,6 +105,7 @@ Query:
 - `assistant_id` (required): UUID
 - `cursor` (optional): string
 - `limit` (optional): 1-100
+- `archived` (optional): bool，默认为 `false`（仅返回未归档会话）；传 `true` 返回已归档会话
 
 ### PUT `/v1/conversations/{conversation_id}`
 

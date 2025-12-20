@@ -50,7 +50,7 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "react-hook-form": "^7.67.0",
-    "react-resizable-panels": "^4.0.8",
+    "react-resizable-panels": "^4.0.11",
     "recharts": "2.15.4",
     "sonner": "^2.0.7",
     "swr": "^2.3.7",
