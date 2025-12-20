@@ -2,15 +2,18 @@
 
 import { useParams } from "next/navigation";
 import dynamic from "next/dynamic";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { MessageList } from "@/components/chat/message-list";
 import { MessageInput } from "@/components/chat/message-input";
 import { useConversationFromList } from "@/lib/swr/use-conversations";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useI18n } from "@/lib/i18n-context";
 import { useCreateEval } from "@/lib/swr/use-evals";
 import { useAuth } from "@/components/providers/auth-provider";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
+import { useMemo } from "react";
 
 // 动态导入评测面板（代码分割）
 const EvalPanel = dynamic(
@@ -40,7 +43,23 @@ export default function ConversationPage() {
   // 从会话列表中获取会话详情（后端不提供单独的会话详情接口）
   const conversation = useConversationFromList(conversationId, assistantId);
   const { selectedProjectId, activeEvalId, setActiveEval } = useChatStore();
+  const storedVerticalLayout = useChatLayoutStore((s) => s.chatVerticalLayout);
+  const setChatVerticalLayout = useChatLayoutStore((s) => s.setChatVerticalLayout);
   const createEval = useCreateEval();
+
+  // 验证并准备垂直布局
+  const defaultVerticalLayout = useMemo(() => {
+    if (!storedVerticalLayout) return undefined;
+    
+    const isValid =
+      storedVerticalLayout &&
+      typeof storedVerticalLayout === 'object' &&
+      "message-list" in storedVerticalLayout &&
+      "message-input" in storedVerticalLayout &&
+      Object.keys(storedVerticalLayout).length === 2;
+    
+    return isValid ? storedVerticalLayout : undefined;
+  }, [storedVerticalLayout]);
 
   const handleTriggerEval = async (messageId: string, baselineRunId: string) => {
     if (!user || !selectedProjectId) return;
@@ -89,20 +108,39 @@ export default function ConversationPage() {
         </div>
       )}
 
-      {/* 消息列表 */}
+      {/* 可拖动的垂直布局：消息列表 + 输入框 */}
       <div className="flex-1 overflow-hidden">
-        <MessageList
-          conversationId={conversationId}
-          onTriggerEval={handleTriggerEval}
-        />
-      </div>
+        <ResizablePanelGroup
+          id="chat-vertical-layout"
+          direction="vertical"
+          defaultLayout={defaultVerticalLayout}
+          onLayoutChange={setChatVerticalLayout}
+        >
+          {/* 消息列表 */}
+          <ResizablePanel id="message-list" defaultSize="70" minSize="50" maxSize="85">
+            <div className="h-full overflow-hidden">
+              <MessageList
+                conversationId={conversationId}
+                onTriggerEval={handleTriggerEval}
+              />
+            </div>
+          </ResizablePanel>
 
-      {/* 消息输入框 */}
-      <div className="border-t p-4">
-        <MessageInput
-          conversationId={conversationId}
-          disabled={isArchived}
-        />
+          {/* 拖动手柄 */}
+          <ResizableHandle withHandle />
+
+          {/* 消息输入框 */}
+          <ResizablePanel id="message-input" defaultSize="30" minSize="15" maxSize="50">
+            <div className="flex h-full flex-col bg-background">
+              <div className="flex-1" />
+              <MessageInput
+                conversationId={conversationId}
+                disabled={isArchived}
+                className="border-t-0"
+              />
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
       {/* 评测面板 */}

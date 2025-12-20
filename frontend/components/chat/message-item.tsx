@@ -5,6 +5,7 @@ import { zhCN, enUS } from "date-fns/locale";
 import { User, Bot, Eye, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { useI18n } from "@/lib/i18n-context";
 import type { Message, RunSummary } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
@@ -12,6 +13,9 @@ import { cn } from "@/lib/utils";
 export interface MessageItemProps {
   message: Message;
   runs?: RunSummary[]; // 改为 runs 数组
+  runSourceMessageId?: string; // runs 所属的 user message_id（用于创建 eval）
+  userAvatarUrl?: string | null;
+  userDisplayName?: string | null;
   onViewDetails?: (runId: string) => void;
   onTriggerEval?: (messageId: string, runId: string) => void; // 添加 messageId 参数
   showEvalButton?: boolean;
@@ -20,6 +24,9 @@ export interface MessageItemProps {
 export function MessageItem({
   message,
   runs = [], // 默认为空数组
+  runSourceMessageId,
+  userAvatarUrl,
+  userDisplayName,
   onViewDetails,
   onTriggerEval,
   showEvalButton = true,
@@ -163,7 +170,9 @@ export function MessageItem({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => onTriggerEval(message.message_id, primaryRun.run_id)}
+                  onClick={() =>
+                    onTriggerEval(runSourceMessageId ?? message.message_id, primaryRun.run_id)
+                  }
                   title={t("chat.message.trigger_eval")}
                 >
                   <Sparkles className="size-3.5" />
@@ -177,9 +186,14 @@ export function MessageItem({
       {/* 用户头像 */}
       {isUser && (
         <div className="flex-shrink-0 mt-1">
-          <div className="flex size-8 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <User className="size-4" />
-          </div>
+          <Avatar aria-label={userDisplayName || t("chat.message.user")}>
+            {userAvatarUrl ? (
+              <AvatarImage src={userAvatarUrl} alt={userDisplayName || t("chat.message.user")} />
+            ) : null}
+            <AvatarFallback className="text-muted-foreground">
+              <User className="size-4" />
+            </AvatarFallback>
+          </Avatar>
         </div>
       )}
     </div>

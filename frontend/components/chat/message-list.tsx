@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n-context";
 import { useMessages } from "@/lib/swr/use-messages";
 import { useCachePreloader } from "@/lib/swr/cache";
 import { messageService } from "@/http/message";
+import { useAuth } from "@/components/providers/auth-provider";
 import type { Message, RunSummary } from "@/lib/api-types";
 
 export interface MessageListProps {
@@ -26,6 +27,7 @@ export function MessageList({
   showEvalButton = true,
 }: MessageListProps) {
   const { t } = useI18n();
+  const { user } = useAuth();
   const { preloadData } = useCachePreloader();
   const [cursor, setCursor] = useState<string | undefined>();
   const [allMessages, setAllMessages] = useState<
@@ -80,9 +82,39 @@ export function MessageList({
     return [...allMessages].reverse();
   }, [allMessages]);
 
+  // 将 user message 的 run 关联到其后一个 assistant message（便于在回复旁展示，并确保 eval 使用 user message_id）
+  const displayRows = useMemo(() => {
+    const rows: Array<{
+      message: Message;
+      runs: RunSummary[];
+      runSourceMessageId?: string;
+    }> = [];
+
+    let lastUserMessageId: string | undefined;
+    let lastUserRuns: RunSummary[] = [];
+
+    for (const item of displayMessages) {
+      if (item.message.role === "user") {
+        lastUserMessageId = item.message.message_id;
+        lastUserRuns = item.run ? [item.run] : [];
+        rows.push({ message: item.message, runs: [] });
+        continue;
+      }
+
+      rows.push({
+        message: item.message,
+        runs: lastUserRuns,
+        runSourceMessageId: lastUserMessageId,
+      });
+      lastUserRuns = [];
+    }
+
+    return rows;
+  }, [displayMessages]);
+
   // 虚拟列表配置
   const rowVirtualizer = useVirtualizer({
-    count: displayMessages.length,
+    count: displayRows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 100, // 估计每条消息的高度
     overscan: 5, // 预渲染的消息数量
@@ -104,13 +136,13 @@ export function MessageList({
 
   // 初始加载完成后滚动到底部（显示最新消息）
   useEffect(() => {
-    if (!isLoading && displayMessages.length > 0 && !cursor) {
+    if (!isLoading && displayRows.length > 0 && !cursor) {
       setTimeout(scrollToBottom, 100);
     }
-  }, [isLoading, displayMessages.length, cursor]);
+  }, [isLoading, displayRows.length, cursor]);
 
   // 空状态
-  if (!isLoading && displayMessages.length === 0) {
+  if (!isLoading && displayRows.length === 0) {
     return (
       <div 
         className="flex flex-col items-center justify-center h-full text-center p-8"
@@ -192,7 +224,7 @@ export function MessageList({
           }}
         >
           {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const item = displayMessages[virtualItem.index];
+            const item = displayRows[virtualItem.index];
             if (!item) return null;
 
             return (
@@ -211,7 +243,10 @@ export function MessageList({
                 <div className="pb-6">
                   <MessageItem
                     message={item.message}
-                    runs={item.run ? [item.run] : []}
+                    runs={item.runs}
+                    runSourceMessageId={item.runSourceMessageId}
+                    userAvatarUrl={user?.avatar ?? null}
+                    userDisplayName={user?.display_name ?? user?.username ?? null}
                     onViewDetails={onViewDetails}
                     onTriggerEval={onTriggerEval}
                     showEvalButton={showEvalButton}
@@ -224,7 +259,7 @@ export function MessageList({
       </div>
 
       {/* 初始加载状态 */}
-      {isLoading && displayMessages.length === 0 && (
+      {isLoading && displayRows.length === 0 && (
         <div 
           className="flex items-center justify-center h-full"
           role="status"

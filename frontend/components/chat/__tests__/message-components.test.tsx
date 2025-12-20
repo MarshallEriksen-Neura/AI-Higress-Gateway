@@ -49,14 +49,14 @@ describe('MessageItem', () => {
   });
 
   it('renders assistant message with run summary', () => {
-    render(<MessageItem message={mockAssistantMessage} run={mockRun} />);
+    render(<MessageItem message={mockAssistantMessage} runs={[mockRun]} />);
     expect(screen.getByText('Hello! How can I help you?')).toBeInTheDocument();
     expect(screen.getByText('gpt-4')).toBeInTheDocument();
     expect(screen.getByText('1500ms')).toBeInTheDocument();
   });
 
   it('shows status badge for assistant message', () => {
-    render(<MessageItem message={mockAssistantMessage} run={mockRun} />);
+    render(<MessageItem message={mockAssistantMessage} runs={[mockRun]} />);
     expect(screen.getByText('chat.run.status_succeeded')).toBeInTheDocument();
   });
 });

@@ -8,8 +8,10 @@ import type {
 } from '@/lib/api-types';
 import {
   normalizeMessagesResponse,
+  normalizeSendMessageResponse,
   normalizeRunDetail,
   type MessagesResponseBackend,
+  type SendMessageResponseBackend,
   type RunDetailBackend,
 } from '@/lib/normalizers/chat-normalizers';
 
@@ -37,11 +39,11 @@ export const messageService = {
     conversationId: string,
     request: SendMessageRequest
   ): Promise<SendMessageResponse> => {
-    const { data } = await httpClient.post(
+    const { data } = await httpClient.post<SendMessageResponseBackend>(
       `/v1/conversations/${conversationId}/messages`,
       request
     );
-    return data;
+    return normalizeSendMessageResponse(data);
   },
 
   /**

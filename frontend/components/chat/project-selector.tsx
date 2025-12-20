@@ -1,20 +1,21 @@
 "use client";
 
+import { useEffect } from "react";
 import { useApiKeys } from "@/lib/swr/use-api-keys";
 import { useChatStore } from "@/lib/stores/chat-store";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from "@/components/ui/select";
 import { useI18n } from "@/lib/i18n-context";
 import { Loader2 } from "lucide-react";
 
 /**
  * 项目选择器组件
- * 
+ *
  * 用于选择当前使用的项目（API Key）
  * 切换项目时会清空助手和会话选择
  */
@@ -22,6 +23,17 @@ export function ProjectSelector() {
   const { t } = useI18n();
   const { apiKeys, loading } = useApiKeys();
   const { selectedProjectId, setSelectedProjectId } = useChatStore();
+
+  // 验证持久化的项目 ID 是否仍然有效
+  useEffect(() => {
+    if (!loading && apiKeys && apiKeys.length > 0) {
+      // 如果没有选中项目，或者选中的项目不在列表中，自动选择第一个
+      const firstKey = apiKeys[0];
+      if (firstKey && (!selectedProjectId || !apiKeys.find(key => key.id === selectedProjectId))) {
+        setSelectedProjectId(firstKey.id);
+      }
+    }
+  }, [apiKeys, loading, selectedProjectId, setSelectedProjectId]);
 
   // 加载状态
   if (loading) {

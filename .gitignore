@@ -91,13 +91,14 @@ frontend/.pnpm-debug.log*
 .serena/
 .codebuddy/
 
+
 # ============================================
 # Project-specific
 # ============================================
 CODEBUDDY.md
 specs/
 .specs/
-
+plans/
 # ============================================
 # Old directories (can be removed after migration)
 # ============================================

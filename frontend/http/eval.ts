@@ -5,6 +5,10 @@ import type {
   SubmitRatingRequest,
   RatingResponse,
 } from '@/lib/api-types';
+import {
+  normalizeEvalResponse,
+  type EvalResponseBackend,
+} from '@/lib/normalizers/chat-normalizers';
 
 /**
  * 评测服务 HTTP client
@@ -20,8 +24,8 @@ export const evalService = {
     if (!data.message_id) {
       throw new Error('message_id is required to create eval');
     }
-    const response = await httpClient.post<EvalResponse>('/v1/evals', data);
-    return response.data;
+    const response = await httpClient.post<EvalResponseBackend>('/v1/evals', data);
+    return normalizeEvalResponse(response.data);
   },
 
   /**
@@ -29,8 +33,8 @@ export const evalService = {
    * 查询评测的当前状态和所有 challenger runs 的状态
    */
   async getEval(evalId: string): Promise<EvalResponse> {
-    const response = await httpClient.get<EvalResponse>(`/v1/evals/${evalId}`);
-    return response.data;
+    const response = await httpClient.get<EvalResponseBackend>(`/v1/evals/${evalId}`);
+    return normalizeEvalResponse(response.data);
   },
 
   /**

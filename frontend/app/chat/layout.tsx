@@ -2,6 +2,7 @@
 
 import dynamic from "next/dynamic";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { AssistantList } from "@/components/chat/assistant-list";
 import { ConversationList } from "@/components/chat/conversation-list";
 import { ProjectSelector } from "@/components/chat/project-selector";
@@ -10,7 +11,7 @@ import { useChatStore } from "@/lib/stores/chat-store";
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useRouter } from "next/navigation";
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import {
   useAssistants,
   useCreateAssistant,
@@ -57,6 +58,8 @@ export default function ChatLayout({
   const { selectedProjectId, selectedAssistantId, setSelectedAssistant, setSelectedConversation } = useChatStore();
   const storedLayout = useChatLayoutStore((s) => s.layout);
   const setLayout = useChatLayoutStore((s) => s.setLayout);
+  const activeTab = useChatLayoutStore((s) => s.activeTab);
+  const setActiveTab = useChatLayoutStore((s) => s.setActiveTab);
 
   // 验证并准备默认布局
   const defaultLayout = useMemo(() => {
@@ -77,6 +80,9 @@ export default function ChatLayout({
   const [editingAssistant, setEditingAssistant] = useState<Assistant | null>(null);
   const [deleteConfirmAssistant, setDeleteConfirmAssistant] = useState<string | null>(null);
   const [deleteConfirmConversation, setDeleteConfirmConversation] = useState<string | null>(null);
+
+  // 标记是否已完成初始加载
+  const hasInitialized = useRef(false);
 
   // 获取助手列表（仅当已登录且选中项目时）
   const { assistants, isLoading: isLoadingAssistants, error: assistantsError, mutate: mutateAssistants } = useAssistants(
@@ -137,6 +143,14 @@ export default function ChatLayout({
     }
   }, [user, isLoading, router]);
 
+  // 页面初始加载时，如果已选中助手，自动切换到会话 Tab（仅执行一次）
+  useEffect(() => {
+    if (!hasInitialized.current && selectedAssistantId && activeTab === "assistants") {
+      setActiveTab("conversations");
+      hasInitialized.current = true;
+    }
+  }, [selectedAssistantId, activeTab, setActiveTab]);
+
   // 加载中或未登录时不渲染
   if (isLoading || !user) {
     return null;
@@ -146,6 +160,7 @@ export default function ChatLayout({
   const handleSelectAssistant = (assistantId: string) => {
     setSelectedAssistant(assistantId);
     setSelectedConversation(null);
+    setActiveTab("conversations"); // 自动切换到会话 Tab
     router.push(`/chat/${assistantId}`);
   };
 
@@ -208,6 +223,7 @@ export default function ChatLayout({
   const handleSelectConversation = (conversationId: string) => {
     if (!selectedAssistantId) return;
     setSelectedConversation(conversationId);
+    setActiveTab("conversations"); // 确保在会话 Tab
     router.push(`/chat/${selectedAssistantId}/${conversationId}`);
   };
 
@@ -262,15 +278,23 @@ export default function ChatLayout({
               defaultLayout={defaultLayout}
               onLayoutChange={setLayout}
             >
-              {/* 左侧边栏：助手列表 + 会话列表 */}
+              {/* 左侧边栏：助手和会话 Tab 切换 */}
               <ResizablePanel id="chat-sidebar" defaultSize="25%" minSize="20%" maxSize="50%">
-                <div className="flex flex-col h-full border-r">
-                  {/* 助手列表区域 */}
-                  <div className="flex-1 overflow-y-auto border-b">
+                <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "assistants" | "conversations")} className="flex flex-col h-full border-r">
+                  <div className="border-b px-4 pt-4">
+                    <TabsList className="w-full">
+                      <TabsTrigger value="assistants" className="flex-1">
+                        {t('chat.assistant.title')}
+                      </TabsTrigger>
+                      <TabsTrigger value="conversations" className="flex-1" disabled={!selectedAssistantId}>
+                        {t('chat.conversation.title')}
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+                  
+                  <TabsContent value="assistants" className="flex-1 overflow-y-auto p-4 mt-0">
                     {assistantsError ? (
-                      <div className="p-4">
-                        <ErrorAlert error={assistantsError} />
-                      </div>
+                      <ErrorAlert error={assistantsError} />
                     ) : (
                       <AssistantList
                         assistants={assistants}
@@ -282,27 +306,22 @@ export default function ChatLayout({
                         onDeleteAssistant={handleDeleteAssistant}
                       />
                     )}
-                  </div>
-
-                  {/* 会话列表区域 */}
-                  {selectedAssistantId && (
-                    <div className="flex-1 overflow-y-auto">
-                      {conversationsError ? (
-                        <div className="p-4">
-                          <ErrorAlert error={conversationsError} />
-                        </div>
-                      ) : (
-                        <ConversationList
-                          conversations={conversations}
-                          isLoading={isLoadingConversations}
-                          onSelectConversation={handleSelectConversation}
-                          onCreateConversation={handleCreateConversation}
-                          onDeleteConversation={handleDeleteConversation}
-                        />
-                      )}
-                    </div>
-                  )}
-                </div>
+                  </TabsContent>
+                  
+                  <TabsContent value="conversations" className="flex-1 overflow-y-auto p-4 mt-0">
+                    {conversationsError ? (
+                      <ErrorAlert error={conversationsError} />
+                    ) : (
+                      <ConversationList
+                        conversations={conversations}
+                        isLoading={isLoadingConversations}
+                        onSelectConversation={handleSelectConversation}
+                        onCreateConversation={handleCreateConversation}
+                        onDeleteConversation={handleDeleteConversation}
+                      />
+                    )}
+                  </TabsContent>
+                </Tabs>
               </ResizablePanel>
 
               {/* 调整宽度的手柄 */}

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 /**
  * 聊天模块状态管理
@@ -33,25 +34,33 @@ const initialState = {
   activeEvalId: null,
 };
 
-export const useChatStore = create<ChatState>((set) => ({
-  ...initialState,
+export const useChatStore = create<ChatState>()(
+  persist(
+    (set) => ({
+      ...initialState,
 
-  setSelectedProjectId: (projectId) =>
-    set({ 
-      selectedProjectId: projectId,
-      // 切换项目时清空助手和会话选择
-      selectedAssistantId: null,
-      selectedConversationId: null,
+      setSelectedProjectId: (projectId) =>
+        set({
+          selectedProjectId: projectId,
+          // 切换项目时清空助手和会话选择
+          selectedAssistantId: null,
+          selectedConversationId: null,
+        }),
+
+      setSelectedAssistant: (assistantId) =>
+        set({ selectedAssistantId: assistantId }),
+
+      setSelectedConversation: (conversationId) =>
+        set({ selectedConversationId: conversationId }),
+
+      setActiveEval: (evalId) =>
+        set({ activeEvalId: evalId }),
+
+      reset: () => set(initialState),
     }),
-
-  setSelectedAssistant: (assistantId) =>
-    set({ selectedAssistantId: assistantId }),
-
-  setSelectedConversation: (conversationId) =>
-    set({ selectedConversationId: conversationId }),
-
-  setActiveEval: (evalId) =>
-    set({ activeEvalId: evalId }),
-
-  reset: () => set(initialState),
-}));
+    {
+      name: 'chat-store',
+      version: 1,
+    }
+  )
+);

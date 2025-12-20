@@ -17,7 +17,7 @@ export interface AssistantBackend {
   system_prompt?: string;
   default_logical_model: string;
   model_preset?: Record<string, any>;
-  archived_at: string | null; // 后端使用 datetime 或 null
+  archived_at?: string | null; // 列表接口可能省略该字段
   created_at: string;
   updated_at: string;
 }
