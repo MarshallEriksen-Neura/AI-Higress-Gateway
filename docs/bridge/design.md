@@ -206,7 +206,12 @@ graph TD
 
 当前实现状态（本仓库）:
 - 已实现“单实例无 Redis MVP”（内存连接表 + 内网 HTTP 下发 + SSE events 回传）。
-- 云端 Redis（Registry/Streams/PubSub）接入属于后续扩展阶段；Redis 仅部署在云端，不要求用户本地安装。
+- 已实现“可选云端 Redis 模式”（不影响用户侧安装即用）：
+  - Registry：`agent_online:{agent_id}`（TTL 续租，支持跨实例路由查询）
+  - Commands：消费 `bridge:cmd:{gateway_id}` Streams（后端可按 registry 路由到正确 gateway）
+  - Events：Pub/Sub（`bridge:evt` / `bridge:evt:agent:{agent_id}`）
+  - Results：KV 持久化（`bridge:result:{req_id}` + TTL），并以“写入成功”为准发送 `RESULT_ACK`
+  - 通过 `bridge gateway serve --redis-url <redis_url>` 启用
 
 ### 5.1 Registry（在线注册）
 - Key: `agent_online:{agent_id}`
@@ -265,6 +270,9 @@ server:
 agent:
   id: "aws-dev-server"
   label: "AWS Dev Server"
+  # 背压相关：避免网络慢导致阻塞工具输出；满了会丢弃并上报 dropped_*
+  chunk_buffer_bytes: 4194304     # 4MB
+  chunk_max_frame_bytes: 16384    # 16KB
 
 mcp_servers:
   - name: "calculator"

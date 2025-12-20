@@ -11,7 +11,9 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
+	"bridge/internal/backpressure"
 	"bridge/internal/config"
 	"bridge/internal/logging"
 	"bridge/internal/mcpbridge"
@@ -103,7 +105,14 @@ type agentSession struct {
 	agg     *mcpbridge.Aggregator
 	rt      *agentRuntime
 
+	chunkQ             *backpressure.BoundedBytesChannel
+	chunkMaxFrameBytes int
+
 	writeMu sync.Mutex
+
+	chunkMu      sync.Mutex
+	droppedBytes int64
+	droppedLines int64
 
 	cancelMu sync.Mutex
 	cancels  map[string]context.CancelFunc
@@ -159,19 +168,25 @@ func runAgent(ctx context.Context, configFile string) error {
 func connectAndServe(ctx context.Context, cfg *config.Config, rt *agentRuntime) error {
 	logger := logging.FromContext(ctx)
 
-	conn, _, err := websocket.Dial(ctx, cfg.Server.URL, nil)
+	sessionCtx, sessionCancel := context.WithCancel(ctx)
+	defer sessionCancel()
+
+	conn, _, err := websocket.Dial(sessionCtx, cfg.Server.URL, nil)
 	if err != nil {
 		return fmt.Errorf("dial tunnel: %w", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	session := &agentSession{
-		agentID: cfg.Agent.ID,
-		conn:    conn,
-		agg:     rt.agg,
-		rt:      rt,
-		cancels: make(map[string]context.CancelFunc),
+		agentID:            cfg.Agent.ID,
+		conn:               conn,
+		agg:                rt.agg,
+		rt:                 rt,
+		cancels:            make(map[string]context.CancelFunc),
+		chunkQ:             backpressure.NewBoundedBytesChannel(cfg.Agent.ChunkBufferBytes, 512),
+		chunkMaxFrameBytes: cfg.Agent.ChunkMaxFrameBytes,
 	}
+	go session.chunkWriter(sessionCtx)
 
 	connSessionID := "ws_" + uuid.NewString()
 	now := time.Now().Unix()
@@ -219,9 +234,30 @@ func connectAndServe(ctx context.Context, cfg *config.Config, rt *agentRuntime) 
 		_ = session.sendEnvelope(ctx, env)
 	}
 
-	go session.pingLoop(ctx, 25*time.Second)
-	go session.progressLoop(ctx)
-	return session.readLoop(ctx)
+	go session.pingLoop(sessionCtx, 25*time.Second)
+	go session.progressLoop(sessionCtx)
+	go session.logLoop(sessionCtx)
+	return session.readLoop(sessionCtx)
+}
+
+func (s *agentSession) chunkWriter(ctx context.Context) {
+	logger := logging.FromContext(ctx)
+	if s == nil || s.chunkQ == nil {
+		return
+	}
+	for {
+		msg, ok := s.chunkQ.Receive(ctx)
+		if !ok {
+			return
+		}
+		s.writeMu.Lock()
+		err := s.conn.Write(ctx, websocket.MessageText, msg)
+		s.writeMu.Unlock()
+		if err != nil {
+			logger.Debug("chunk writer stopped", "err", err.Error())
+			return
+		}
+	}
 }
 
 func (s *agentSession) pingLoop(ctx context.Context, interval time.Duration) {
@@ -274,6 +310,47 @@ func (s *agentSession) progressLoop(ctx context.Context) {
 	}
 }
 
+func (s *agentSession) logLoop(ctx context.Context) {
+	logger := logging.FromContext(ctx)
+	if s.agg == nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-s.agg.LogEvents():
+			reqID := s.singleActiveReqID()
+			raw, err := json.Marshal(ev.Data)
+			if err != nil {
+				raw = []byte(fmt.Sprintf("%v", ev.Data))
+			}
+			prefix := ""
+			if ev.ServerName != "" {
+				prefix = "[" + ev.ServerName + "] "
+			}
+			if ev.Level != "" {
+				prefix = prefix + "(" + ev.Level + ") "
+			}
+			if err := s.sendChunk(ctx, reqID, "stderr", prefix+string(raw)+"\n"); err != nil {
+				logger.Debug("send log chunk failed", "err", err.Error())
+			}
+		}
+	}
+}
+
+func (s *agentSession) singleActiveReqID() string {
+	s.cancelMu.Lock()
+	defer s.cancelMu.Unlock()
+	if len(s.cancels) != 1 {
+		return ""
+	}
+	for reqID := range s.cancels {
+		return reqID
+	}
+	return ""
+}
+
 func (s *agentSession) sendTools(ctx context.Context) error {
 	var tools []protocol.ToolDescriptor
 	if s.agg != nil {
@@ -290,6 +367,9 @@ func (s *agentSession) sendTools(ctx context.Context) error {
 
 func (s *agentSession) readLoop(ctx context.Context) error {
 	logger := logging.FromContext(ctx)
+	if s.chunkQ != nil {
+		defer s.chunkQ.Close()
+	}
 	defer s.cancelAll()
 	for {
 		_, data, err := s.conn.Read(ctx)
@@ -483,14 +563,60 @@ func (s *agentSession) handleCancel(ctx context.Context, env *protocol.Envelope)
 }
 
 func (s *agentSession) sendChunk(ctx context.Context, reqID string, channel string, data string) error {
-	return s.sendEnvelope(ctx, protocol.Envelope{
-		V:       1,
-		Type:    protocol.TypeChunk,
-		AgentID: s.agentID,
-		ReqID:   reqID,
-		Ts:      time.Now().Unix(),
-		Payload: mustMarshalJSON(protocol.ChunkPayload{Channel: channel, Data: data}),
-	})
+	if s == nil || s.chunkQ == nil {
+		return nil
+	}
+	if data == "" {
+		return nil
+	}
+	if s.chunkMaxFrameBytes <= 0 {
+		s.chunkMaxFrameBytes = 16 * 1024
+	}
+
+	parts := splitUTF8StringByBytes(data, s.chunkMaxFrameBytes)
+	for _, part := range parts {
+		if part == "" {
+			continue
+		}
+		partBytes := int64(len([]byte(part)))
+		partLines := countNewlines(part)
+
+		s.chunkMu.Lock()
+		droppedBytes := s.droppedBytes
+		droppedLines := s.droppedLines
+
+		env := protocol.Envelope{
+			V:       1,
+			Type:    protocol.TypeChunk,
+			AgentID: s.agentID,
+			ReqID:   reqID,
+			Ts:      time.Now().Unix(),
+			Payload: mustMarshalJSON(protocol.ChunkPayload{
+				Channel:      channel,
+				Data:         part,
+				DroppedBytes: droppedBytes,
+				DroppedLines: droppedLines,
+			}),
+		}
+		msg, err := protocol.EncodeEnvelope(env)
+		if err != nil {
+			s.chunkMu.Unlock()
+			return err
+		}
+
+		if ok := s.chunkQ.TrySend(msg); ok {
+			s.droppedBytes = 0
+			s.droppedLines = 0
+			s.chunkMu.Unlock()
+			continue
+		}
+
+		// Queue full: drop this CHUNK and accumulate loss for observability.
+		s.droppedBytes += partBytes
+		s.droppedLines += partLines
+		s.chunkMu.Unlock()
+	}
+	return nil
 }
 
 func (s *agentSession) sendResult(ctx context.Context, reqID string, payload protocol.ResultPayload) error {
@@ -548,6 +674,47 @@ func (s *agentSession) cancelAll() {
 		}
 	}
 	s.cancels = make(map[string]context.CancelFunc)
+}
+
+func splitUTF8StringByBytes(s string, maxBytes int) []string {
+	if s == "" {
+		return nil
+	}
+	if maxBytes <= 0 || len(s) <= maxBytes {
+		return []string{s}
+	}
+
+	b := []byte(s)
+	out := make([]string, 0, (len(b)/maxBytes)+1)
+	for len(b) > 0 {
+		n := maxBytes
+		if n > len(b) {
+			n = len(b)
+		}
+		for n > 0 && !utf8.Valid(b[:n]) {
+			n--
+		}
+		if n <= 0 {
+			_, size := utf8.DecodeRune(b)
+			if size <= 0 {
+				break
+			}
+			n = size
+		}
+		out = append(out, string(b[:n]))
+		b = b[n:]
+	}
+	return out
+}
+
+func countNewlines(s string) int64 {
+	var n int64
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			n++
+		}
+	}
+	return n
 }
 
 func hostname() string {

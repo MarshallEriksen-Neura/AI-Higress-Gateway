@@ -30,6 +30,13 @@ type ProgressEvent struct {
 	Total      float64
 }
 
+type LogEvent struct {
+	ServerName string
+	Level      string
+	Message    string
+	Data       any
+}
+
 type Aggregator struct {
 	logger logging.Logger
 
@@ -39,6 +46,7 @@ type Aggregator struct {
 	toolDescs map[string]protocol.ToolDescriptor
 
 	progressCh chan ProgressEvent
+	logCh      chan LogEvent
 }
 
 type toolRef struct {
@@ -59,11 +67,16 @@ func NewAggregator(logger logging.Logger) *Aggregator {
 		tools:      make(map[string]toolRef),
 		toolDescs:  make(map[string]protocol.ToolDescriptor),
 		progressCh: make(chan ProgressEvent, 256),
+		logCh:      make(chan LogEvent, 256),
 	}
 }
 
 func (a *Aggregator) ProgressEvents() <-chan ProgressEvent {
 	return a.progressCh
+}
+
+func (a *Aggregator) LogEvents() <-chan LogEvent {
+	return a.logCh
 }
 
 func (a *Aggregator) Start(ctx context.Context, servers []config.MCPServerConfig) error {
@@ -261,7 +274,17 @@ func (a *Aggregator) connectCommandServer(ctx context.Context, cfg config.MCPSer
 			if req == nil || req.Params == nil {
 				return
 			}
-			a.logger.Debug("mcp log", "server", cfg.Name, "level", string(req.Params.Level), "data", req.Params.Data)
+			level := string(req.Params.Level)
+			select {
+			case a.logCh <- LogEvent{
+				ServerName: cfg.Name,
+				Level:      level,
+				Message:    "",
+				Data:       req.Params.Data,
+			}:
+			default:
+			}
+			a.logger.Debug("mcp log", "server", cfg.Name, "level", level, "data", req.Params.Data)
 		},
 		KeepAlive: 30 * time.Second,
 	})

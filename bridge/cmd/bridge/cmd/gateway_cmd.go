@@ -39,6 +39,8 @@ func newGatewayServeCmd() *cobra.Command {
 	var redisURL string
 	var redisKeyPrefix string
 	var redisTTLSeconds int
+	var redisResultKeyPrefix string
+	var redisResultTTLSeconds int
 
 	c := &cobra.Command{
 		Use:   "serve",
@@ -48,13 +50,15 @@ func newGatewayServeCmd() *cobra.Command {
 			defer stop()
 
 			server := newGatewayServer(gatewayOptions{
-				ListenAddr:     listen,
-				TunnelPath:     tunnelPath,
-				InternalToken:  internalToken,
-				GatewayID:      gatewayID,
-				RedisURL:       redisURL,
-				RedisKeyPrefix: redisKeyPrefix,
-				RedisTTL:       time.Duration(redisTTLSeconds) * time.Second,
+				ListenAddr:           listen,
+				TunnelPath:           tunnelPath,
+				InternalToken:        internalToken,
+				GatewayID:            gatewayID,
+				RedisURL:             redisURL,
+				RedisKeyPrefix:       redisKeyPrefix,
+				RedisTTL:             time.Duration(redisTTLSeconds) * time.Second,
+				RedisResultKeyPrefix: redisResultKeyPrefix,
+				RedisResultTTL:       time.Duration(redisResultTTLSeconds) * time.Second,
 			})
 			return server.run(ctx)
 		},
@@ -66,6 +70,8 @@ func newGatewayServeCmd() *cobra.Command {
 	c.Flags().StringVar(&redisURL, "redis-url", "", "redis connection URL for HA routing (optional)")
 	c.Flags().StringVar(&redisKeyPrefix, "redis-key-prefix", "agent_online:", "redis key prefix for registry")
 	c.Flags().IntVar(&redisTTLSeconds, "redis-ttl-seconds", 30, "redis registry TTL seconds")
+	c.Flags().StringVar(&redisResultKeyPrefix, "redis-result-key-prefix", "bridge:result:", "redis key prefix for persisted results (optional)")
+	c.Flags().IntVar(&redisResultTTLSeconds, "redis-result-ttl-seconds", 86400, "redis TTL seconds for persisted results (optional)")
 	return c
 }
 
@@ -77,6 +83,9 @@ type gatewayOptions struct {
 	RedisURL       string
 	RedisKeyPrefix string
 	RedisTTL       time.Duration
+
+	RedisResultKeyPrefix string
+	RedisResultTTL       time.Duration
 }
 
 type gatewayServer struct {
@@ -118,6 +127,12 @@ func newGatewayServer(opts gatewayOptions) *gatewayServer {
 	if opts.RedisKeyPrefix == "" {
 		opts.RedisKeyPrefix = "agent_online:"
 	}
+	if opts.RedisResultKeyPrefix == "" {
+		opts.RedisResultKeyPrefix = "bridge:result:"
+	}
+	if opts.RedisResultTTL <= 0 {
+		opts.RedisResultTTL = 24 * time.Hour
+	}
 	return &gatewayServer{
 		opts:   opts,
 		agents: make(map[string]*agentConn),
@@ -145,6 +160,7 @@ func (s *gatewayServer) run(ctx context.Context) error {
 	mux.HandleFunc("/internal/bridge/invoke", s.handleInvoke)
 	mux.HandleFunc("/internal/bridge/cancel", s.handleCancel)
 	mux.HandleFunc("/internal/bridge/events", s.handleEventsSSE)
+	mux.HandleFunc("/internal/bridge/results/", s.handleResultGet)
 
 	httpServer := &http.Server{
 		Addr:              s.opts.ListenAddr,
@@ -246,14 +262,19 @@ func (s *gatewayServer) handleTunnelWS(w http.ResponseWriter, r *http.Request) {
 				s.upsertRegistry(ctx, registered.agentID, registered.connSessionID)
 			}
 			if env.Type == protocol.TypeResult {
-				_ = s.sendToConn(ctx, conn, protocol.Envelope{
-					V:       1,
-					Type:    protocol.TypeResultAck,
-					AgentID: env.AgentID,
-					ReqID:   env.ReqID,
-					Ts:      time.Now().Unix(),
-					Payload: []byte("{}"),
-				})
+				// If Redis is enabled, persist the RESULT before ACK to keep "strong final state" semantics.
+				if err := s.persistResult(ctx, env); err != nil {
+					logger.Warn("persist result failed (skip ack)", "req_id", env.ReqID, "err", err.Error())
+				} else {
+					_ = s.sendToConn(ctx, conn, protocol.Envelope{
+						V:       1,
+						Type:    protocol.TypeResultAck,
+						AgentID: env.AgentID,
+						ReqID:   env.ReqID,
+						Ts:      time.Now().Unix(),
+						Payload: []byte("{}"),
+					})
+				}
 			}
 			s.publishEvent(env)
 		default:
@@ -605,6 +626,59 @@ func (s *gatewayServer) publishRedisEvent(env *protocol.Envelope, rawJSON []byte
 	if env.AgentID != "" {
 		_ = s.redis.Publish(context.Background(), "bridge:evt:agent:"+env.AgentID, rawJSON).Err()
 	}
+}
+
+func (s *gatewayServer) resultKey(reqID string) string {
+	return s.opts.RedisResultKeyPrefix + reqID
+}
+
+func (s *gatewayServer) persistResult(ctx context.Context, env *protocol.Envelope) error {
+	if env == nil || env.ReqID == "" {
+		return nil
+	}
+	if s.redis == nil {
+		// Single-instance mode: no persistence, ACK immediately.
+		return nil
+	}
+	raw, err := json.Marshal(env)
+	if err != nil {
+		return err
+	}
+	return s.redis.Set(ctx, s.resultKey(env.ReqID), raw, s.opts.RedisResultTTL).Err()
+}
+
+func (s *gatewayServer) handleResultGet(w http.ResponseWriter, r *http.Request) {
+	if !s.checkInternalAuth(w, r) {
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+
+	reqID := strings.TrimPrefix(r.URL.Path, "/internal/bridge/results/")
+	reqID = strings.Trim(reqID, "/")
+	if reqID == "" {
+		http.NotFound(w, r)
+		return
+	}
+	if s.redis == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]string{"error": "redis_not_enabled"})
+		return
+	}
+
+	raw, err := s.redis.Get(r.Context(), s.resultKey(reqID)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not_found"})
+			return
+		}
+		writeJSON(w, http.StatusBadGateway, map[string]string{"error": "redis_error"})
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
 }
 
 func newRedisClient(redisURL string) (*redis.Client, error) {

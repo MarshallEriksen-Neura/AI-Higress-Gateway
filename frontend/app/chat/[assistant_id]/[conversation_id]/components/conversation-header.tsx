@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { Maximize2, Minimize2 } from "lucide-react";
+import { Maximize2, Minimize2, PlugZap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -42,6 +42,8 @@ export function ConversationHeader({
 
   const isImmersive = useChatLayoutStore((s) => s.isImmersive);
   const setIsImmersive = useChatLayoutStore((s) => s.setIsImmersive);
+  const isBridgePanelOpen = useChatLayoutStore((s) => s.isBridgePanelOpen);
+  const setIsBridgePanelOpen = useChatLayoutStore((s) => s.setIsBridgePanelOpen);
 
   const {
     conversationModelOverrides,
@@ -89,6 +91,19 @@ export function ConversationHeader({
       </div>
 
       <div className="flex items-center gap-2">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant={isBridgePanelOpen ? "secondary" : "ghost"}
+              size="icon"
+              onClick={() => setIsBridgePanelOpen(!isBridgePanelOpen)}
+              className="h-9 w-9"
+            >
+              <PlugZap className="h-4 w-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t("chat.bridge.toggle")}</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

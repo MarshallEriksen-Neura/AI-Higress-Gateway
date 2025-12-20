@@ -28,6 +28,14 @@ type ServerConfig struct {
 type AgentConfig struct {
 	ID    string `mapstructure:"id"`
 	Label string `mapstructure:"label"`
+
+	// ChunkBufferBytes limits queued CHUNK messages in-memory for backpressure.
+	// When full, logs are dropped and accounted via dropped_bytes/dropped_lines.
+	ChunkBufferBytes int64 `mapstructure:"chunk_buffer_bytes"`
+
+	// ChunkMaxFrameBytes limits a single CHUNK frame size (payload data), to avoid
+	// oversized WS frames and reduce buffering spikes.
+	ChunkMaxFrameBytes int `mapstructure:"chunk_max_frame_bytes"`
 }
 
 type MCPServerConfig struct {
@@ -66,6 +74,8 @@ func Load(opts LoadOptions) (*Config, error) {
 
 	v.SetDefault("server.reconnect_initial", "1s")
 	v.SetDefault("server.reconnect_max", "60s")
+	v.SetDefault("agent.chunk_buffer_bytes", 4*1024*1024)
+	v.SetDefault("agent.chunk_max_frame_bytes", 16*1024)
 
 	if err := v.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("read config: %w", err)
@@ -96,6 +106,15 @@ func (c *Config) Validate() error {
 	}
 	if c.Server.ReconnectMax < c.Server.ReconnectInitial {
 		return errors.New("server.reconnect_max must be >= server.reconnect_initial")
+	}
+	if c.Agent.ChunkBufferBytes <= 0 {
+		return errors.New("agent.chunk_buffer_bytes must be > 0")
+	}
+	if c.Agent.ChunkMaxFrameBytes <= 0 {
+		return errors.New("agent.chunk_max_frame_bytes must be > 0")
+	}
+	if c.Agent.ChunkMaxFrameBytes < 1024 || c.Agent.ChunkMaxFrameBytes > 256*1024 {
+		return errors.New("agent.chunk_max_frame_bytes must be between 1024 and 262144")
 	}
 	for i, s := range c.MCPServers {
 		if s.Name == "" {

@@ -26,6 +26,7 @@ import { cliConfigTranslations } from "./cli-config";
 import { themeTranslations } from "./theme";
 import { dashboardV2Translations } from "./dashboard";
 import { chatTranslations } from "./chat";
+import { bridgeTranslations } from "./bridge";
 
 // Function to merge translation objects
 const mergeTranslations = (
@@ -73,7 +74,8 @@ export const allTranslations = mergeTranslations(
   cliConfigTranslations,
   themeTranslations,
   dashboardV2Translations,
-  chatTranslations
+  chatTranslations,
+  bridgeTranslations
 );
 
 // Export individual translation modules for dynamic loading
@@ -105,4 +107,5 @@ export {
   themeTranslations,
   dashboardV2Translations,
   chatTranslations,
+  bridgeTranslations,
 };

@@ -92,6 +92,7 @@ export const chatTranslations: Record<Language, Record<string, string>> = {
     "chat.header.model_placeholder": "Select model",
     "chat.header.model_inherit": "Follow assistant default",
     "chat.settings.open": "Chat settings",
+    "chat.bridge.toggle": "Toggle Bridge panel",
 
     // ===== Chat Settings Page =====
     "chat.settings.title": "Chat Settings",
@@ -373,6 +374,7 @@ export const chatTranslations: Record<Language, Record<string, string>> = {
     "chat.header.model_placeholder": "选择模型",
     "chat.header.model_inherit": "跟随助手默认",
     "chat.settings.open": "聊天设置",
+    "chat.bridge.toggle": "打开/关闭 Bridge 面板",
 
     // ===== 聊天设置页 =====
     "chat.settings.title": "聊天设置",

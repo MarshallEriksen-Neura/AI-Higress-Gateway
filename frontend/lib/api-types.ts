@@ -1038,3 +1038,64 @@ export interface UpdateEvalConfigRequest {
   project_ai_enabled?: boolean;
   project_ai_provider_model?: string;
 }
+
+// ============= Bridge / MCP =============
+
+export interface BridgeAgent {
+  agent_id: string;
+  status: "online" | "offline" | string;
+  last_seen_at?: number;
+  connected_at?: number;
+}
+
+export interface BridgeAgentsResponse {
+  agents: BridgeAgent[];
+}
+
+export interface BridgeToolDescriptor {
+  name: string;
+  description?: string;
+  input_schema?: Record<string, any>;
+  meta?: Record<string, string>;
+}
+
+export interface BridgeToolsResponse {
+  agent_id: string;
+  tools: BridgeToolDescriptor[];
+}
+
+export interface BridgeInvokeRequest {
+  req_id?: string;
+  agent_id: string;
+  tool_name: string;
+  arguments?: Record<string, any>;
+  timeout_ms?: number;
+  stream?: boolean;
+}
+
+export interface BridgeInvokeResponse {
+  req_id: string;
+  status: string;
+}
+
+export interface BridgeCancelRequest {
+  req_id: string;
+  agent_id: string;
+  reason?: string;
+}
+
+export interface BridgeCancelResponse {
+  req_id: string;
+  status: string;
+}
+
+export interface BridgeEnvelope {
+  v: number;
+  type: string;
+  agent_id?: string;
+  req_id?: string;
+  conn_session_id?: string;
+  seq?: number;
+  ts?: number;
+  payload?: any;
+}

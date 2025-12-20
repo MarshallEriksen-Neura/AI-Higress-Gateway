@@ -31,8 +31,8 @@ AI-Higress-Gateway 接入 MCP（Bridge）设计说明
   - SSE 输出：将“工具执行日志/状态/终态结果”以 SSE 事件推送给前端。
 - `bridge/`（Go，已落地 MVP）:
   - `cmd/bridge`：单入口 CLI（`bridge config|agent|gateway`）。
-  - `bridge agent start`：Bridge Agent（运行在用户机器/服务器）连接云端并执行 MCP（当前先用内置 echo 做端到端验证，后续接入真实 MCP 聚合）。
-  - `bridge gateway serve`：Tunnel Gateway（云端连接层）维护 Agent WSS 连接与路由（当前为单实例无 Redis MVP）。
+  - `bridge agent start`：Bridge Agent（运行在用户机器/服务器）连接云端并执行 MCP（已支持配置多 MCP 子 server；同时保留内置 `bridge__echo` 用于端到端验证）。
+  - `bridge gateway serve`：Tunnel Gateway（云端连接层）维护 Agent WSS 连接与路由（默认单实例无 Redis；可选启用云端 Redis 做 HA/持久化）。
 
 数据流（端到端）
 --------------
@@ -65,7 +65,12 @@ AI-Higress-Gateway 接入 MCP（Bridge）设计说明
 
 当前实现状态（本仓库）:
 - 已实现“单实例无 Redis MVP”：Tunnel Gateway 内存连接表 + 内网 HTTP 下发 + SSE events 回传。
-- 云端 Redis 的 Registry/Streams/PubSub 尚未接入代码，需要后续在“云端部署扩展/多实例”阶段接入（Redis 只部署在云端）。
+- 已实现“可选云端 Redis 模式”（Redis 只部署在云端，不影响用户侧安装即用）：
+  - Registry：`agent_online:{agent_id}`（TTL 续租）
+  - Commands：消费 `bridge:cmd:{gateway_id}` Streams（用于跨实例下发）
+  - Events：Pub/Sub（`bridge:evt` / `bridge:evt:agent:{agent_id}`）
+  - Results：KV 持久化（`bridge:result:{req_id}` + TTL），并以“写入成功”为准发送 `RESULT_ACK`
+  - 通过 `bridge gateway serve --redis-url <redis_url>` 启用
 
 MVP（推荐先做，零额外依赖）:
 - Tunnel Gateway 单实例部署（内存连接表）。
