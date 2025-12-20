@@ -175,6 +175,7 @@ export function normalizeRunSummary(backend: RunSummaryBackend): RunSummary {
     output_preview: backend.output_preview,
     latency: backend.latency_ms, // 映射字段名
     error_code: backend.error_code,
+    tool_invocations: Array.isArray(backend.tool_invocations) ? backend.tool_invocations : undefined,
   };
 }
 

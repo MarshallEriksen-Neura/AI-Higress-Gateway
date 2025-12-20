@@ -922,6 +922,12 @@ export interface RunSummary {
   output_preview?: string;
   latency?: number;
   error_code?: string;
+  tool_invocations?: Array<{
+    req_id: string;
+    agent_id: string;
+    tool_name: string;
+    tool_call_id?: string | null;
+  }>;
 }
 
 export interface RunDetail extends RunSummary {
@@ -938,6 +944,7 @@ export interface SendMessageRequest {
   content: string;
   override_logical_model?: string;
   model_preset?: Record<string, any>;
+  bridge_agent_id?: string;
 }
 
 export interface SendMessageResponse {

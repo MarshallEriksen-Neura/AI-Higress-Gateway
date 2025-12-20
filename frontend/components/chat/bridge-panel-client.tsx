@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -14,18 +14,43 @@ import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/lib/i18n-context";
 import { useBridgeEvents } from "@/lib/hooks/use-bridge-events";
 import { useBridgeAgents, useBridgeCancel, useBridgeInvoke, useBridgeTools } from "@/lib/swr/use-bridge";
+import { useChatStore } from "@/lib/stores/chat-store";
 
-export function BridgePanelClient({ onClose }: { onClose?: () => void }) {
+export function BridgePanelClient({
+  onClose,
+  conversationId,
+}: {
+  onClose?: () => void;
+  conversationId?: string;
+}) {
   const { t } = useI18n();
 
   const { agents } = useBridgeAgents();
-  const [agentId, setAgentId] = useState<string | null>(null);
+  const storedAgentId = useChatStore((s) =>
+    conversationId ? (s.conversationBridgeAgentIds[conversationId] ?? null) : null
+  );
+  const setConversationBridgeAgentId = useChatStore((s) => s.setConversationBridgeAgentId);
+
+  const [agentId, setAgentId] = useState<string | null>(storedAgentId);
 
   const { tools } = useBridgeTools(agentId);
   const [toolName, setToolName] = useState<string | null>(null);
 
   const [argsText, setArgsText] = useState<string>(t("bridge.invoke.args_placeholder") || "{}");
-  const [activeReqId, setActiveReqId] = useState<string | null>(null);
+  const storedActiveReqId = useChatStore((s) =>
+    conversationId ? (s.conversationBridgeActiveReqIds[conversationId] ?? null) : null
+  );
+  const setConversationBridgeActiveReqId = useChatStore((s) => s.setConversationBridgeActiveReqId);
+
+  const [activeReqId, setActiveReqId] = useState<string | null>(storedActiveReqId);
+
+  useEffect(() => {
+    setAgentId(storedAgentId);
+  }, [storedAgentId]);
+
+  useEffect(() => {
+    setActiveReqId(storedActiveReqId);
+  }, [storedActiveReqId]);
 
   const invoke = useBridgeInvoke();
   const cancel = useBridgeCancel();
@@ -106,6 +131,9 @@ export function BridgePanelClient({ onClose }: { onClose?: () => void }) {
       timeout_ms: 60000,
     });
     setActiveReqId(resp.req_id);
+    if (conversationId) {
+      setConversationBridgeActiveReqId(conversationId, resp.req_id);
+    }
   };
 
   const cancelActive = async () => {
@@ -116,6 +144,9 @@ export function BridgePanelClient({ onClose }: { onClose?: () => void }) {
   const clear = () => {
     events.clear();
     setActiveReqId(null);
+    if (conversationId) {
+      setConversationBridgeActiveReqId(conversationId, null);
+    }
   };
 
   return (
@@ -142,7 +173,16 @@ export function BridgePanelClient({ onClose }: { onClose?: () => void }) {
             <CardDescription>{t("bridge.agents.select")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Select value={agentId ?? ""} onValueChange={(v) => setAgentId(v || null)}>
+            <Select
+              value={agentId ?? ""}
+              onValueChange={(v) => {
+                const next = v || null;
+                setAgentId(next);
+                if (conversationId) {
+                  setConversationBridgeAgentId(conversationId, next);
+                }
+              }}
+            >
               <SelectTrigger>
                 <SelectValue placeholder={t("bridge.agents.select")} />
               </SelectTrigger>

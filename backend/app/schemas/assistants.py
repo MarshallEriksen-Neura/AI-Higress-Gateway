@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -101,6 +102,7 @@ class MessageCreateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=20000)
     override_logical_model: str | None = Field(default=None, min_length=1, max_length=128)
     model_preset: dict | None = None
+    bridge_agent_id: str | None = Field(default=None, min_length=1, max_length=128)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -117,6 +119,7 @@ class RunSummary(BaseModel):
     output_preview: str | None = None
     latency_ms: int | None = None
     error_code: str | None = None
+    tool_invocations: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class MessageItem(BaseModel):

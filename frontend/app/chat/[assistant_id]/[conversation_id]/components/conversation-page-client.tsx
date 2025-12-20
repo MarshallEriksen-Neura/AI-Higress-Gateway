@@ -272,7 +272,10 @@ export function ConversationPageClient({
             )}
             {isBridgePanelOpen && (
               <div className="absolute inset-y-0 right-0 w-96 border-l bg-background shadow-lg z-[105] overflow-hidden">
-                <BridgePanelClient onClose={() => setIsBridgePanelOpen(false)} />
+                <BridgePanelClient
+                  conversationId={conversationId}
+                  onClose={() => setIsBridgePanelOpen(false)}
+                />
               </div>
             )}
           </div>
@@ -287,7 +290,10 @@ export function ConversationPageClient({
 
       {isBridgePanelOpen && !isImmersive && (
         <div className="fixed inset-y-0 right-0 w-96 border-l bg-background shadow-lg z-40 overflow-hidden">
-          <BridgePanelClient onClose={() => setIsBridgePanelOpen(false)} />
+          <BridgePanelClient
+            conversationId={conversationId}
+            onClose={() => setIsBridgePanelOpen(false)}
+          />
         </div>
       )}
     </>

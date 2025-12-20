@@ -60,11 +60,13 @@ export const SWRProviderContext = createContext<SWRConfiguration>(defaultSWRConf
 interface SWRProviderProps {
   children: React.ReactNode;
   config?: SWRProviderConfig;
+  fallback?: Record<string, any>; // 支持服务端预取数据
 }
 
 export const SWRProvider: React.FC<SWRProviderProps> = ({ 
   children, 
-  config = {} 
+  config = {},
+  fallback = {}
 }) => {
   // 合并默认配置和自定义配置
   const mergedConfig = {
@@ -72,6 +74,11 @@ export const SWRProvider: React.FC<SWRProviderProps> = ({
     ...config,
     // 确保始终有 fetcher
     fetcher: config.fetcher || defaultSWRConfig.fetcher,
+    // 合并 fallback 数据
+    fallback: {
+      ...config.fallback,
+      ...fallback,
+    },
   };
 
   return (

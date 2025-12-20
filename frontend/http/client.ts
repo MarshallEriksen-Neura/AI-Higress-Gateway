@@ -69,7 +69,7 @@ const refreshAccessToken = async (): Promise<string> => {
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      body: JSON.stringify({}), // HttpOnly Cookie handles the token
     });
 
     if (!response.ok) {
@@ -81,9 +81,8 @@ const refreshAccessToken = async (): Promise<string> => {
     
     // 更新 tokens
     tokenManager.setAccessToken(access_token);
-    if (new_refresh_token) {
-      tokenManager.setRefreshToken(new_refresh_token);
-    }
+    // 更新 refresh token 标记 (即使 new_refresh_token 为 null，也会设置标记为 true)
+    tokenManager.setRefreshToken(new_refresh_token);
     
     return access_token;
   } catch (error) {

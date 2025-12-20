@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+import httpx
 
 from app.jwt_auth import require_jwt_token
+from app.errors import bad_request, not_found, service_unavailable
 from app.services.bridge_gateway_client import BridgeGatewayClient
+from app.services.sse_parser import iter_sse_events
 
 router = APIRouter(
     prefix="/v1/bridge",
@@ -44,14 +48,32 @@ async def invoke_tool(payload: dict[str, Any]) -> dict[str, Any]:
     stream = bool(payload.get("stream", True))
 
     client = BridgeGatewayClient()
-    return await client.invoke(
-        req_id=req_id,
-        agent_id=agent_id,
-        tool_name=tool_name,
-        arguments=arguments,
-        timeout_ms=timeout_ms,
-        stream=stream,
-    )
+    if not agent_id:
+        raise bad_request("缺少 agent_id")
+    if not tool_name:
+        raise bad_request("缺少 tool_name")
+
+    try:
+        return await client.invoke(
+            req_id=req_id,
+            agent_id=agent_id,
+            tool_name=tool_name,
+            arguments=arguments,
+            timeout_ms=timeout_ms,
+            stream=stream,
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            try:
+                body = exc.response.json()
+                if isinstance(body, dict) and body.get("error") == "agent_offline":
+                    raise not_found("Agent 离线", details={"code": "agent_offline", "agent_id": agent_id})
+            except Exception:
+                pass
+        raise service_unavailable(
+            "Bridge Gateway 调用失败",
+            details={"code": "bridge_gateway_error", "status_code": exc.response.status_code if exc.response else None},
+        )
 
 
 @router.post("/cancel")
@@ -60,7 +82,24 @@ async def cancel_tool(payload: dict[str, Any]) -> dict[str, Any]:
     agent_id = str(payload.get("agent_id") or "").strip()
     reason = str(payload.get("reason") or "user_cancel").strip()
     client = BridgeGatewayClient()
-    return await client.cancel(req_id=req_id, agent_id=agent_id, reason=reason)
+    if not req_id:
+        raise bad_request("缺少 req_id")
+    if not agent_id:
+        raise bad_request("缺少 agent_id")
+    try:
+        return await client.cancel(req_id=req_id, agent_id=agent_id, reason=reason)
+    except httpx.HTTPStatusError as exc:
+        if exc.response is not None and exc.response.status_code == 404:
+            try:
+                body = exc.response.json()
+                if isinstance(body, dict) and body.get("error") == "agent_offline":
+                    raise not_found("Agent 离线", details={"code": "agent_offline", "agent_id": agent_id})
+            except Exception:
+                pass
+        raise service_unavailable(
+            "Bridge Gateway 调用失败",
+            details={"code": "bridge_gateway_error", "status_code": exc.response.status_code if exc.response else None},
+        )
 
 
 @router.get("/events")
@@ -71,6 +110,108 @@ async def bridge_events() -> StreamingResponse:
     client = BridgeGatewayClient()
     return StreamingResponse(client.stream_events(), media_type="text/event-stream")
 
+@router.get("/tool-events")
+async def bridge_tool_events() -> StreamingResponse:
+    """
+    将 Gateway 的原始 Envelope 流，转换为前端约定的 tool_* SSE 事件。
+
+    事件：
+    - tool_status: sent|acked|running|canceled|done|error
+    - tool_log: stdout/stderr + dropped 计数
+    - tool_result: 终态结果（与 RESULT payload 同构）
+
+    说明：该流用于 UI 展示；并不改变 Gateway/Agent 的底层协议。
+    """
+    gateway = BridgeGatewayClient()
+
+    async def gen():
+        async for msg in iter_sse_events(gateway.stream_events()):
+            if msg.event == "ready":
+                yield "event: ready\ndata: {}\n\n"
+                continue
+            if msg.event != "bridge":
+                continue
+            try:
+                env = json.loads(msg.data)
+            except Exception:
+                continue
+            if not isinstance(env, dict):
+                continue
+
+            env_type = str(env.get("type") or "").strip()
+            agent_id = str(env.get("agent_id") or "").strip()
+            req_id = str(env.get("req_id") or "").strip()
+            payload = env.get("payload") if isinstance(env.get("payload"), dict) else {}
+
+            def _emit(event: str, data: dict[str, Any]) -> str:
+                return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+            if env_type == "INVOKE_ACK":
+                accepted = bool(payload.get("accepted", True))
+                if accepted:
+                    yield _emit(
+                        "tool_status",
+                        {"req_id": req_id, "agent_id": agent_id, "state": "acked", "message": ""},
+                    )
+                else:
+                    yield _emit(
+                        "tool_status",
+                        {
+                            "req_id": req_id,
+                            "agent_id": agent_id,
+                            "state": "error",
+                            "message": str(payload.get("reason") or "rejected"),
+                        },
+                    )
+                continue
+
+            if env_type == "CHUNK":
+                yield _emit(
+                    "tool_log",
+                    {
+                        "req_id": req_id,
+                        "agent_id": agent_id,
+                        "channel": str(payload.get("channel") or "stdout"),
+                        "data": str(payload.get("data") or ""),
+                        "dropped_bytes": int(payload.get("dropped_bytes") or 0),
+                        "dropped_lines": int(payload.get("dropped_lines") or 0),
+                    },
+                )
+                continue
+
+            if env_type == "RESULT":
+                yield _emit(
+                    "tool_result",
+                    {
+                        "req_id": req_id,
+                        "agent_id": agent_id,
+                        "ok": bool(payload.get("ok", False)),
+                        "exit_code": int(payload.get("exit_code") or 0),
+                        "canceled": bool(payload.get("canceled", False)),
+                        "result_json": payload.get("result_json"),
+                        "error": payload.get("error"),
+                    },
+                )
+                yield _emit(
+                    "tool_status",
+                    {"req_id": req_id, "agent_id": agent_id, "state": "done", "message": ""},
+                )
+                continue
+
+            if env_type == "CANCEL_ACK":
+                will_cancel = bool(payload.get("will_cancel", False))
+                yield _emit(
+                    "tool_status",
+                    {
+                        "req_id": req_id,
+                        "agent_id": agent_id,
+                        "state": "canceled" if will_cancel else "done",
+                        "message": str(payload.get("reason") or ""),
+                    },
+                )
+                continue
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
+
 
 __all__ = ["router"]
-

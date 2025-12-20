@@ -79,17 +79,33 @@ export function useSendMessage(
   assistantId?: string | null,
   overrideLogicalModel?: string | null
 ) {
-  const { mutate: globalMutate } = useSWRConfig();
+  const sendMessageToConversation = useSendMessageToConversation(
+    assistantId,
+    overrideLogicalModel
+  );
 
   return async (request: SendMessageRequest) => {
-    if (!conversationId) {
-      throw new Error('Conversation ID is required');
-    }
+    if (!conversationId) throw new Error('Conversation ID is required');
+    return await sendMessageToConversation(conversationId, request);
+  };
+}
 
+/**
+ * 发送消息（通用版本）：由调用方传入 conversationId，适合「先创建会话再发送」等场景。
+ *
+ * - 支持乐观更新与回滚
+ * - 刷新会话列表（用于更新 last_activity_at / title）
+ */
+export function useSendMessageToConversation(
+  assistantId?: string | null,
+  overrideLogicalModel?: string | null
+) {
+  const { mutate: globalMutate } = useSWRConfig();
+
+  return async (conversationId: string, request: SendMessageRequest) => {
     // 使用字符串 key 确保与 MessageList/useMessages 默认第一页一致（limit=50）
     const messagesKey = `/v1/conversations/${conversationId}/messages?limit=50`;
 
-    // 创建乐观更新的用户消息
     const optimisticMessage = {
       message: {
         message_id: `temp-${Date.now()}`,
@@ -102,8 +118,6 @@ export function useSendMessage(
     };
 
     try {
-      // 乐观更新：立即显示用户消息
-      // 因为后端返回倒序，新消息插入到列表开头
       await globalMutate(
         messagesKey,
         async (currentData?: MessagesResponse) => {
@@ -116,19 +130,14 @@ export function useSendMessage(
         { revalidate: false }
       );
 
-      // 发送消息到服务器
       const payload: SendMessageRequest = { ...request };
       if (overrideLogicalModel) {
         payload.override_logical_model = overrideLogicalModel;
       }
       const response = await messageService.sendMessage(conversationId, payload);
 
-      // 更新为真实数据（包含 baseline run 结果）
       await globalMutate(messagesKey);
 
-      // 刷新会话列表（用于更新 last_activity_at / title 等）
-      // key 与 useConversations(assistant_id, limit=50) 保持一致
-      // 注意：assistantId 可能为空（深链场景），此时跳过即可。
       if (assistantId) {
         const queryParams = new URLSearchParams();
         queryParams.set('assistant_id', assistantId);
@@ -138,7 +147,6 @@ export function useSendMessage(
 
       return response;
     } catch (error) {
-      // 回滚乐观更新
       await globalMutate(messagesKey);
       throw error;
     }

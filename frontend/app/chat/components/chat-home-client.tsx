@@ -3,7 +3,7 @@
 import { MessageSquare } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n-context";
-import { MessageInputPlaceholder } from "@/components/chat/message-input-placeholder";
+import { QuickStartChatInput } from "@/components/chat/quick-start-chat-input";
 
 export function ChatHomeClient() {
   const { t } = useI18n();
@@ -34,7 +34,7 @@ export function ChatHomeClient() {
         </div>
       </div>
 
-      <MessageInputPlaceholder hint={t("chat.welcome.hint1")} />
+      <QuickStartChatInput />
     </div>
   );
 }

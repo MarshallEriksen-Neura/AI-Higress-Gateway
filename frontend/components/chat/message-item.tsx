@@ -2,7 +2,7 @@
 
 import { formatDistanceToNow } from "date-fns";
 import { zhCN, enUS } from "date-fns/locale";
-import { User, Bot, Eye, Sparkles } from "lucide-react";
+import { User, Bot, Eye, PlugZap, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
@@ -11,6 +11,8 @@ import type { Message, RunSummary } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 import { MessageContent } from "./message-content";
 import { AdaptiveCard } from "@/components/cards/adaptive-card";
+import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
+import { useChatStore } from "@/lib/stores/chat-store";
 
 export interface MessageItemProps {
   message: Message;
@@ -36,9 +38,13 @@ export function MessageItem({
   const { t, language } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
+  const setIsBridgePanelOpen = useChatLayoutStore((s) => s.setIsBridgePanelOpen);
+  const setConversationBridgeAgentId = useChatStore((s) => s.setConversationBridgeAgentId);
+  const setConversationBridgeActiveReqId = useChatStore((s) => s.setConversationBridgeActiveReqId);
   
   // 获取第一个 run（通常是 baseline run）
   const primaryRun = runs.length > 0 ? runs[0] : undefined;
+  const firstInvocation = primaryRun?.tool_invocations?.[0];
 
   // 格式化时间
   const formattedTime = formatDistanceToNow(new Date(message.created_at), {
@@ -154,6 +160,20 @@ export function MessageItem({
           {/* 助手消息的操作按钮 */}
           {isAssistant && primaryRun && (
             <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              {firstInvocation?.req_id && firstInvocation?.agent_id && (
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => {
+                    setConversationBridgeAgentId(message.conversation_id, firstInvocation.agent_id);
+                    setConversationBridgeActiveReqId(message.conversation_id, firstInvocation.req_id);
+                    setIsBridgePanelOpen(true);
+                  }}
+                  title={t("chat.bridge.toggle")}
+                >
+                  <PlugZap className="size-3.5" />
+                </Button>
+              )}
               {/* 查看详情按钮 */}
               {onViewDetails && (
                 <Button

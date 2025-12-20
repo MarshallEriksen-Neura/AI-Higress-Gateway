@@ -1,15 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Plus, RotateCcw } from "lucide-react";
 import { useI18n } from "@/lib/i18n-context";
 import { useAuthStore } from "@/lib/stores/auth-store";
-import { adminService, Role, Permission } from "@/http/admin";
+import type { Role, Permission } from "@/http/admin";
 import type { UserInfo } from "@/lib/api-types";
-import type { UserPermission } from "@/lib/api-types";
-import { toast } from "sonner";
 import { useActiveRegistrationWindow } from "@/lib/swr/use-registration-windows";
+import { useAdminUsers } from "@/lib/swr/use-admin-users";
+import { useAllRoles, useUserRoles } from "@/lib/swr/use-user-roles";
+import { usePermissions } from "@/lib/swr/use-role-permissions";
+import { useUserPermissions } from "@/lib/swr/use-user-permissions";
 import { RegistrationWindowCard } from "@/components/system/users/registration-window-card";
 import { UsersTable } from "@/components/system/users/users-table";
 import { CreateUserDialog } from "@/components/system/users/create-user-dialog";
@@ -25,10 +27,17 @@ export function UsersPageClient() {
     const currentAuthUser = useAuthStore(state => state.user);
     const isSuperUser = currentAuthUser?.is_superuser === true;
 
-    const [users, setUsers] = useState<UserInfo[]>([]);
-    const [roles, setRoles] = useState<Role[]>([]);
-    const [permissions, setPermissions] = useState<Permission[]>([]);
-    const [loading, setLoading] = useState(true);
+    const {
+        users,
+        loading: usersLoading,
+        refresh: mutateUsers,
+    } = useAdminUsers();
+    const { roles, loading: rolesLoading, refresh: refreshRoles } = useAllRoles();
+    const {
+        permissions,
+        loading: permissionsLoading,
+        refresh: refreshPermissions,
+    } = usePermissions();
 
     // Dialog states
     const [createOpen, setCreateOpen] = useState(false);
@@ -48,56 +57,62 @@ export function UsersPageClient() {
     
     const [selectedRoleIds, setSelectedRoleIds] = useState<string[]>([]);
     const [selectedPermCodes, setSelectedPermCodes] = useState<string[]>([]);
-    const [currentUserPermissions, setCurrentUserPermissions] = useState<UserPermission[]>([]);
     const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
 
     const { refresh: refreshRegistrationWindow } = useActiveRegistrationWindow();
     const [refreshing, setRefreshing] = useState(false);
 
+    const {
+        roles: currentUserRoles,
+        loading: currentUserRolesLoading,
+    } = useUserRoles(currentUser?.id ?? null);
+    const {
+        permissions: currentUserPermissions,
+        loading: currentUserPermissionsLoading,
+    } = useUserPermissions(currentUser?.id ?? null);
+
+    const loading = usersLoading || rolesLoading || permissionsLoading;
+
+    const refreshAllData = useMemo(() => {
+        return async () => {
+            await Promise.allSettled([mutateUsers(), refreshRoles(), refreshPermissions()]);
+        };
+    }, [mutateUsers, refreshRoles, refreshPermissions]);
+
+    const rolesDialogInitUserIdRef = useRef<string | null>(null);
     useEffect(() => {
-        fetchData();
-    }, []);
-
-    const fetchData = async () => {
-        try {
-            setLoading(true);
-            const [usersData, rolesData, permissionsData] = await Promise.all([
-                adminService.getAllUsers(),
-                adminService.getRoles(),
-                adminService.getPermissions(),
-            ]);
-            setUsers(usersData);
-            setRoles(rolesData);
-            setPermissions(permissionsData);
-        } catch (error) {
-            console.error("Failed to fetch data:", error);
-            toast.error("Failed to load users and roles");
-        } finally {
-            setLoading(false);
+        if (!rolesOpen || !currentUser) {
+            rolesDialogInitUserIdRef.current = null;
+            return;
         }
+        if (currentUserRolesLoading) return;
+        if (rolesDialogInitUserIdRef.current === currentUser.id) return;
+        setSelectedRoleIds(currentUserRoles.map((r) => r.id));
+        rolesDialogInitUserIdRef.current = currentUser.id;
+    }, [rolesOpen, currentUser, currentUserRolesLoading, currentUserRoles]);
+
+    const permissionsDialogInitUserIdRef = useRef<string | null>(null);
+    useEffect(() => {
+        if (!permissionsOpen || !currentUser) {
+            permissionsDialogInitUserIdRef.current = null;
+            return;
+        }
+        if (currentUserPermissionsLoading) return;
+        if (permissionsDialogInitUserIdRef.current === currentUser.id) return;
+        setSelectedPermCodes(currentUserPermissions.map((perm) => perm.permission_type));
+        permissionsDialogInitUserIdRef.current = currentUser.id;
+    }, [permissionsOpen, currentUser, currentUserPermissionsLoading, currentUserPermissions]);
+
+    const openRolesDialog = (user: UserInfo) => {
+        setCurrentUser(user);
+        setSelectedRoleIds([]);
+        setRolesOpen(true);
     };
 
-    const openRolesDialog = async (user: UserInfo) => {
+    const openPermissionsDialog = (user: UserInfo) => {
         setCurrentUser(user);
-        try {
-            const userRoles = await adminService.getUserRoles(user.id);
-            setSelectedRoleIds(userRoles.map(r => r.id));
-            setRolesOpen(true);
-        } catch (error) {
-            toast.error("Failed to fetch user roles");
-        }
-    };
-
-    const openPermissionsDialog = async (user: UserInfo) => {
-        setCurrentUser(user);
-        try {
-            const userPerms = await adminService.getUserPermissions(user.id);
-            setCurrentUserPermissions(userPerms);
-            setSelectedPermCodes(userPerms.map((perm) => perm.permission_type));
-            setPermissionsOpen(true);
-        } catch (error) {
-            toast.error(t("users.permissions_load_error"));
-        }
+        setSelectedPermCodes([]);
+        setPermissionsOpen(true);
     };
 
     const openStatusDialog = (user: UserInfo, nextActive: boolean) => {
@@ -109,7 +124,7 @@ export function UsersPageClient() {
     const handleRefreshAll = async () => {
         setRefreshing(true);
         try {
-            await Promise.all([fetchData(), refreshRegistrationWindow()]);
+            await Promise.all([refreshAllData(), refreshRegistrationWindow()]);
         } finally {
             setRefreshing(false);
         }
@@ -171,7 +186,7 @@ export function UsersPageClient() {
             <CreateUserDialog
                 open={createOpen}
                 onOpenChange={setCreateOpen}
-                onSuccess={fetchData}
+                onSuccess={() => void refreshAllData()}
             />
 
             <UserRolesDialog
@@ -181,7 +196,7 @@ export function UsersPageClient() {
                 roles={roles}
                 selectedRoleIds={selectedRoleIds}
                 onSelectedRoleIdsChange={setSelectedRoleIds}
-                onSuccess={fetchData}
+                onSuccess={() => void refreshAllData()}
             />
 
             <UserPermissionsDialog
@@ -192,7 +207,7 @@ export function UsersPageClient() {
                 selectedPermCodes={selectedPermCodes}
                 onSelectedPermCodesChange={setSelectedPermCodes}
                 currentUserPermissions={currentUserPermissions}
-                onSuccess={fetchData}
+                onSuccess={() => void refreshAllData()}
             />
 
             <UserStatusDialog
@@ -201,7 +216,10 @@ export function UsersPageClient() {
                 targetUser={statusTargetUser}
                 targetActive={statusTargetActive}
                 onSuccess={(updatedUser) => {
-                    setUsers((prev) => prev.map((u) => (u.id === updatedUser.id ? updatedUser : u)));
+                    void mutateUsers(
+                        (prev) => prev?.map((u) => (u.id === updatedUser.id ? updatedUser : u)) ?? prev,
+                        { revalidate: false }
+                    );
                     setStatusTargetUser(null);
                     setStatusTargetActive(null);
                 }}
@@ -215,7 +233,7 @@ export function UsersPageClient() {
                         if (!open) setTopupUser(null);
                     }}
                     userId={topupUser.id}
-                    onSuccess={fetchData}
+                    onSuccess={() => void refreshAllData()}
                 />
             )}
 
@@ -228,7 +246,7 @@ export function UsersPageClient() {
                     }}
                     userId={autoTopupUser.id}
                     userLabel={autoTopupUser.display_name || autoTopupUser.email}
-                    onSuccess={fetchData}
+                    onSuccess={() => void refreshAllData()}
                 />
             )}
 
@@ -237,7 +255,7 @@ export function UsersPageClient() {
                     open={autoTopupOpen}
                     onOpenChange={setAutoTopupOpen}
                     userIds={selectedUserIds}
-                    onSuccess={fetchData}
+                    onSuccess={() => void refreshAllData()}
                 />
             )}
         </div>

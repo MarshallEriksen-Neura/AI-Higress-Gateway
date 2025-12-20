@@ -58,6 +58,9 @@ AI Higress 项目的完整 API 接口文档。
 ### [LinuxDo OAuth 接入](./linuxdo-oauth.md)
 **说明**: LinuxDo Connect OAuth 登录流程、配置及回调接口
 
+### [Bridge / MCP](./bridge.md)
+**说明**: `/v1/bridge/*`（Agent 列表、工具调用、事件流、tool_* SSE）
+
 ---
 
 ## 🔍 快速查找

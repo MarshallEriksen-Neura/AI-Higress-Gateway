@@ -94,6 +94,12 @@ export interface RunSummaryBackend {
   latency_ms?: number; // 后端使用 latency_ms
   cost_credits?: number; // 后端使用 cost_credits
   error_code?: string;
+  tool_invocations?: Array<{
+    req_id: string;
+    agent_id: string;
+    tool_name: string;
+    tool_call_id?: string | null;
+  }>;
 }
 
 /**

@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useMessages, useRun, useSendMessage } from '../use-messages';
+import { useMessages, useRun, useSendMessage, useSendMessageToConversation } from '../use-messages';
 import { messageService } from '@/http/message';
 import type { MessagesResponse, RunDetail, SendMessageResponse } from '@/lib/api-types';
 
@@ -188,5 +188,62 @@ describe('useSendMessage', () => {
     await expect(result.current({ content: 'Hello' })).rejects.toThrow(
       'Failed to send message'
     );
+  });
+});
+
+describe('useSendMessageToConversation', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should send message with provided conversationId', async () => {
+    const mockResponse: SendMessageResponse = {
+      message_id: 'msg-2',
+      baseline_run: {
+        run_id: 'run-2',
+        requested_logical_model: 'gpt-4',
+        status: 'succeeded',
+        output_preview: 'Hi there!',
+        latency: 1200,
+      },
+    };
+
+    vi.mocked(messageService.sendMessage).mockResolvedValue(mockResponse);
+
+    const { result } = renderHook(() => useSendMessageToConversation(), { wrapper });
+
+    const response = await result.current('conv-1', { content: 'Hello' });
+
+    expect(response).toEqual(mockResponse);
+    expect(messageService.sendMessage).toHaveBeenCalledWith('conv-1', {
+      content: 'Hello',
+    });
+  });
+
+  it('should pass override_logical_model when provided', async () => {
+    const mockResponse: SendMessageResponse = {
+      message_id: 'msg-2',
+      baseline_run: {
+        run_id: 'run-2',
+        requested_logical_model: 'gpt-4',
+        status: 'succeeded',
+        output_preview: 'Hi there!',
+        latency: 1200,
+      },
+    };
+
+    vi.mocked(messageService.sendMessage).mockResolvedValue(mockResponse);
+
+    const { result } = renderHook(
+      () => useSendMessageToConversation(undefined, 'test-model'),
+      { wrapper }
+    );
+
+    await result.current('conv-1', { content: 'Hello' });
+
+    expect(messageService.sendMessage).toHaveBeenCalledWith('conv-1', {
+      content: 'Hello',
+      override_logical_model: 'test-model',
+    });
   });
 });

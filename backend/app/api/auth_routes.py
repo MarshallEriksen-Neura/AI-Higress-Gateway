@@ -6,7 +6,7 @@ from typing import Optional
 from uuid import UUID
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, Cookie, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -62,6 +62,7 @@ from app.services.registration_window_service import (
 
 router = APIRouter(tags=["authentication"], prefix="/auth")
 
+REFRESH_TOKEN_COOKIE_NAME = "refresh_token"
 
 def _request_base_url(request: Request | None) -> str | None:
     """提取请求基址（去掉末尾斜杠），用于拼接头像 URL。"""
@@ -145,6 +146,7 @@ async def _issue_token_pair(
     user: User,
     redis: Redis,
     device_info: DeviceInfo,
+    response: Response,
 ) -> TokenResponse:
     access_token_data = {"sub": str(user.id)}
     refresh_token_data = {"sub": str(user.id)}
@@ -177,9 +179,20 @@ async def _issue_token_pair(
         settings.max_sessions_per_user,
     )
 
+    # Set HttpOnly cookie
+    response.set_cookie(
+        key=REFRESH_TOKEN_COOKIE_NAME,
+        value=refresh_token,
+        httponly=True,
+        secure=True,  # Always secure as we expect HTTPS in prod, and localhost is considered secure context
+        samesite="lax", # or 'strict'
+        max_age=JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+        path="/", # Global path to ensure it's available for auth endpoints
+    )
+
     return TokenResponse(
         access_token=access_token,
-        refresh_token=refresh_token,
+        refresh_token=None, # Do not return in body
         expires_in=JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
     )
 
@@ -237,6 +250,7 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     request: LoginRequest,
+    response: Response,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
     user_agent: Optional[str] = Header(None),
@@ -270,7 +284,7 @@ async def login(
         )
     
     device_info = _build_device_info(user_agent, x_forwarded_for)
-    return await _issue_token_pair(user, redis, device_info)
+    return await _issue_token_pair(user, redis, device_info, response)
 
 
 @router.get("/oauth/linuxdo/authorize", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
@@ -296,6 +310,7 @@ async def linuxdo_oauth_authorize(
 async def linuxdo_oauth_callback(
     payload: OAuthCallbackRequest,
     request: Request,
+    response: Response,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
     client: httpx.AsyncClient = Depends(get_http_client),
@@ -329,7 +344,7 @@ async def linuxdo_oauth_callback(
         )
 
     device_info = _build_device_info(user_agent, x_forwarded_for)
-    token_pair = await _issue_token_pair(user, redis, device_info)
+    token_pair = await _issue_token_pair(user, redis, device_info, response)
     user_response = _build_user_response(
         db,
         user.id,
@@ -347,11 +362,13 @@ async def linuxdo_oauth_callback(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(
-    request: RefreshTokenRequest,
+    response: Response,
     db: Session = Depends(get_db),
     redis: Redis = Depends(get_redis),
     user_agent: Optional[str] = Header(None),
     x_forwarded_for: Optional[str] = Header(None, alias="X-Forwarded-For"),
+    cookie_refresh_token: Optional[str] = Cookie(None, alias=REFRESH_TOKEN_COOKIE_NAME),
+    body: Optional[RefreshTokenRequest] = None,
 ) -> TokenResponse:
     """
     使用刷新令牌获取新的访问令牌
@@ -362,23 +379,23 @@ async def refresh_token(
     - 生成新的 token 对
     - 撤销旧的 refresh token
     
-    Args:
-        request: 刷新令牌请求
-        db: 数据库会话
-        redis: Redis 连接
-        user_agent: 用户代理字符串
-        x_forwarded_for: 客户端 IP 地址
-        
-    Returns:
-        新的JWT访问令牌和刷新令牌
-        
-    Raises:
-        HTTPException: 如果刷新令牌无效或检测到重用
+    优先使用 Cookie 中的 refresh_token，其次尝试 Request Body。
     """
+    
+    current_refresh_token = cookie_refresh_token
+    if not current_refresh_token and body:
+        current_refresh_token = body.refresh_token
+        
+    if not current_refresh_token:
+         raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="未提供刷新令牌",
+            )
+
     try:
         # 验证刷新令牌
         from app.services.jwt_auth_service import decode_token
-        payload = decode_token(request.refresh_token)
+        payload = decode_token(current_refresh_token)
         
         # 检查令牌类型
         if payload.get("type") != "refresh":
@@ -471,9 +488,20 @@ async def refresh_token(
             settings.max_sessions_per_user,
         )
         
+        # Set HttpOnly cookie
+        response.set_cookie(
+            key=REFRESH_TOKEN_COOKIE_NAME,
+            value=new_refresh_token,
+            httponly=True,
+            secure=True,
+            samesite="lax",
+            max_age=JWT_REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60,
+            path="/",
+        )
+        
         return TokenResponse(
             access_token=access_token,
-            refresh_token=new_refresh_token,
+            refresh_token=None,
             expires_in=JWT_ACCESS_TOKEN_EXPIRE_MINUTES * 60,
         )
     except HTTPException:
@@ -509,6 +537,7 @@ async def get_current_user(
 
 @router.post("/logout")
 async def logout(
+    response: Response,
     current_user: AuthenticatedUser = Depends(require_jwt_token),
     redis: Redis = Depends(get_redis),
     authorization: Optional[str] = Header(None),
@@ -528,6 +557,9 @@ async def logout(
     Returns:
         登出结果
     """
+    # Clear cookie
+    response.delete_cookie(REFRESH_TOKEN_COOKIE_NAME)
+
     # 提取当前 token
     token = None
     if authorization:
@@ -538,29 +570,20 @@ async def logout(
         token = x_auth_token.strip()
     
     if not token:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无法获取当前 token"
-        )
+        # If no access token is provided, just return success if we cleared the cookie
+        # But we require_jwt_token so we should have a user.
+        # Actually require_jwt_token already validates the token.
+        # If the user is authenticated, we should have a token.
+        pass
     
-    # 提取 JTI
-    jti = extract_jti_from_token(token)
-    if not jti:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="无效的 token"
-        )
-    
-    # 撤销 token
-    token_service = TokenRedisService(redis)
-    success = await token_service.revoke_token(jti, reason="user_logout")
-    
-    if not success:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Token 撤销失败"
-        )
-    
+    if token:
+        # 提取 JTI
+        jti = extract_jti_from_token(token)
+        if jti:
+            # 撤销 token
+            token_service = TokenRedisService(redis)
+            await token_service.revoke_token(jti, reason="user_logout")
+
     return {"message": "已成功登出"}
 
 

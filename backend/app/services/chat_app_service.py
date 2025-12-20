@@ -1,10 +1,20 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+
+from app.services.bridge_gateway_client import BridgeGatewayClient
+from app.services.bridge_tool_runner import (
+    BridgeToolInvocation,
+    bridge_tools_to_openai_tools,
+    extract_openai_tool_calls,
+    invoke_bridge_tool_and_wait,
+    tool_call_to_args,
+)
 
 try:
     from redis.asyncio import Redis
@@ -224,6 +234,7 @@ async def send_message_and_run_baseline(
     content: str,
     override_logical_model: str | None = None,
     model_preset: dict | None = None,
+    bridge_agent_id: str | None = None,
 ) -> tuple[UUID, UUID]:
     """
     创建 user message 并同步执行 baseline run，随后写入 assistant message（用于历史上下文）。
@@ -322,6 +333,24 @@ async def send_message_and_run_baseline(
         model_preset_override=model_preset,
     )
 
+    bridge_tools: list[dict[str, Any]] = []
+    openai_tools: list[dict[str, Any]] = []
+    effective_bridge_agent_id = (bridge_agent_id or "").strip() or None
+    if effective_bridge_agent_id:
+        try:
+            bridge = BridgeGatewayClient()
+            tools_resp = await bridge.list_tools(effective_bridge_agent_id)
+            if isinstance(tools_resp, dict) and isinstance(tools_resp.get("tools"), list):
+                bridge_tools = [t for t in tools_resp["tools"] if isinstance(t, dict)]
+            openai_tools = bridge_tools_to_openai_tools(bridge_tools)
+            if openai_tools:
+                payload = dict(payload)
+                payload["tools"] = openai_tools
+                payload["tool_choice"] = "auto"
+        except Exception:
+            # Best-effort: do not block baseline chat if bridge tools cannot be loaded.
+            openai_tools = []
+
     run = create_run_record(
         db,
         user_id=UUID(str(current_user.id)),
@@ -344,7 +373,115 @@ async def send_message_and_run_baseline(
         run=run,
         requested_logical_model=requested_model,
         model_preset_override=model_preset,
+        payload_override=payload,
     )
+
+    # Tool-calling loop (best-effort; only when bridge_agent_id is provided).
+    if run.status == "succeeded" and effective_bridge_agent_id and openai_tools:
+        tool_calls = extract_openai_tool_calls(run.response_payload)
+        if tool_calls:
+            invocations: list[BridgeToolInvocation] = []
+            tool_messages: list[dict[str, Any]] = []
+            for tc in tool_calls:
+                tool_name, args, tool_call_id = tool_call_to_args(tc)
+                if not tool_name:
+                    continue
+                req_id = "req_" + uuid.uuid4().hex
+                invocations.append(
+                    BridgeToolInvocation(
+                        req_id=req_id,
+                        agent_id=effective_bridge_agent_id,
+                        tool_name=tool_name,
+                        tool_call_id=tool_call_id,
+                    )
+                )
+                tool_result = await invoke_bridge_tool_and_wait(
+                    req_id=req_id,
+                    agent_id=effective_bridge_agent_id,
+                    tool_name=tool_name,
+                    arguments=args,
+                    timeout_ms=60000,
+                    result_timeout_seconds=120.0,
+                )
+                tool_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id or req_id,
+                        "content": json.dumps(
+                            {
+                                "req_id": req_id,
+                                "agent_id": effective_bridge_agent_id,
+                                "tool_name": tool_name,
+                                "ok": tool_result.ok,
+                                "exit_code": tool_result.exit_code,
+                                "canceled": tool_result.canceled,
+                                "result_json": tool_result.result_json,
+                                "error": tool_result.error,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                )
+
+            if invocations and tool_messages:
+                # Follow-up call: append assistant tool_calls message and tool outputs.
+                follow_payload = dict(payload)
+                follow_messages = list(payload.get("messages") or [])
+                follow_messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+                follow_messages.extend(tool_messages)
+                follow_payload["messages"] = follow_messages
+                follow_payload["tool_choice"] = "none"
+
+                handler = RequestHandler(api_key=auth_key, db=db, redis=redis, client=client)
+                resp = await handler.handle(
+                    payload=follow_payload,
+                    requested_model=requested_model,
+                    lookup_model_id=requested_model,
+                    api_style="openai",
+                    effective_provider_ids=effective_provider_ids,
+                    session_id=str(conv.id),
+                    assistant_id=UUID(str(getattr(assistant, "id", None))) if getattr(assistant, "id", None) else None,
+                    billing_reason="chat_tool_loop",
+                    idempotency_key=f"chat:{run.id}:tool_loop",
+                )
+
+                follow_response_payload: dict[str, Any] | None = None
+                try:
+                    raw = resp.body.decode("utf-8", errors="ignore")
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        follow_response_payload = parsed
+                except Exception:
+                    follow_response_payload = None
+
+                output_text = _extract_first_choice_text(follow_response_payload)
+                if output_text and output_text.strip():
+                    run.output_text = output_text
+                    run.output_preview = output_text.strip()[:380].rstrip()
+                else:
+                    run.status = "failed"
+                    run.error_code = "TOOL_LOOP_FAILED"
+                    run.error_message = "tool loop finished without assistant content"
+
+                run.response_payload = {
+                    "bridge": {
+                        "agent_id": effective_bridge_agent_id,
+                        "tool_invocations": [
+                            {
+                                "req_id": it.req_id,
+                                "agent_id": it.agent_id,
+                                "tool_name": it.tool_name,
+                                "tool_call_id": it.tool_call_id,
+                            }
+                            for it in invocations
+                        ],
+                    },
+                    "first_response": run.response_payload,
+                    "final_response": follow_response_payload,
+                }
+                db.add(run)
+                db.commit()
+                db.refresh(run)
 
     # baseline 成功时写入 assistant message，作为后续上下文
     if run.status == "succeeded" and run.output_text:

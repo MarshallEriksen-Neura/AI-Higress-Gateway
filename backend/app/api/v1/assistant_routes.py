@@ -81,6 +81,15 @@ def _conversation_to_item(obj) -> dict:
 
 
 def _run_to_summary(run) -> RunSummary:
+    tool_invocations: list[dict[str, Any]] = []
+    try:
+        payload = getattr(run, "response_payload", None)
+        if isinstance(payload, dict):
+            bridge = payload.get("bridge")
+            if isinstance(bridge, dict) and isinstance(bridge.get("tool_invocations"), list):
+                tool_invocations = [it for it in bridge["tool_invocations"] if isinstance(it, dict)]
+    except Exception:
+        tool_invocations = []
     return RunSummary(
         run_id=run.id,
         requested_logical_model=run.requested_logical_model,
@@ -88,6 +97,7 @@ def _run_to_summary(run) -> RunSummary:
         output_preview=run.output_preview,
         latency_ms=run.latency_ms,
         error_code=run.error_code,
+        tool_invocations=tool_invocations,
     )
 
 
@@ -275,6 +285,7 @@ async def create_message_endpoint(
         content=payload.content,
         override_logical_model=payload.override_logical_model,
         model_preset=payload.model_preset,
+        bridge_agent_id=payload.bridge_agent_id,
     )
     run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
     return MessageCreateResponse(message_id=message_id, baseline_run=_run_to_summary(run))

@@ -1,7 +1,7 @@
 import Cookies from 'js-cookie';
 
 const ACCESS_TOKEN_KEY = 'access_token';
-const REFRESH_TOKEN_KEY = 'refresh_token';
+const REFRESH_TOKEN_KEY = 'has_refresh_token';
 const PERSISTENCE_KEY = 'auth_persistence';
 
 type RememberOption = { remember?: boolean };
@@ -79,24 +79,33 @@ export const tokenManager = {
     }
   },
 
-  // Refresh Token - 记住时持久 Cookie，不记住时会话 Cookie
-  setRefreshToken: (token: string, options?: RememberOption) => {
+  // Refresh Token - 仅存储标记，实际 Token 存 HttpOnly Cookie
+  setRefreshToken: (token: string | null | undefined, options?: RememberOption) => {
+    const storage = resolveAccessTokenStorage(options?.remember);
+    if (!storage) return;
+
+    // 存储标记，表示我们拥有 refresh token (在 HttpOnly cookie 中)
+    storage.setItem(REFRESH_TOKEN_KEY, 'true');
+
+    // 保持单一存储位置
+    const otherStorage = storage === localStorage ? sessionStorage : localStorage;
+    otherStorage.removeItem(REFRESH_TOKEN_KEY);
+
     const remember = resolveRemember(options?.remember);
-    Cookies.set(REFRESH_TOKEN_KEY, token, {
-      expires: remember ? 7 : undefined, // 7天或会话
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      path: '/',
-    });
     setPersistence(remember);
   },
 
   getRefreshToken: (): string | undefined => {
-    return Cookies.get(REFRESH_TOKEN_KEY);
+    if (typeof window === 'undefined') return undefined;
+    const val = localStorage.getItem(REFRESH_TOKEN_KEY) ?? sessionStorage.getItem(REFRESH_TOKEN_KEY);
+    return val ? 'true' : undefined;
   },
 
   clearRefreshToken: () => {
-    Cookies.remove(REFRESH_TOKEN_KEY);
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem(REFRESH_TOKEN_KEY);
+      sessionStorage.removeItem(REFRESH_TOKEN_KEY);
+    }
     clearPersistence();
   },
 

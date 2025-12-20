@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import { ErrorHandler } from "@/lib/errors";
 import type { Message } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
+import { useChatStore } from "@/lib/stores/chat-store";
 
 // 表单验证 schema
 const messageSchema = z.object({
@@ -43,6 +44,7 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
+  const bridgeAgentId = useChatStore((s) => s.conversationBridgeAgentIds[conversationId] ?? null);
 
   // 表单管理
   const {
@@ -87,6 +89,7 @@ export function MessageInput({
     try {
       const response = await sendMessage({
         content: data.content.trim(),
+        bridge_agent_id: bridgeAgentId || undefined,
       });
 
       // 清空输入框

@@ -185,9 +185,15 @@ Request:
 {
   "content": "你好",
   "override_logical_model": "gpt-4.1",
-  "model_preset": {"temperature": 0.2}
+  "model_preset": {"temperature": 0.2},
+  "bridge_agent_id": "aws-dev-server"
 }
 ```
+
+说明：
+- `bridge_agent_id`（可选）：指定本次对话的目标 Agent，用于开启 MCP/Bridge 的工具调用能力（LLM tool_calls -> Bridge INVOKE -> tool_result -> 继续生成）。
+  - 不传则保持原有“纯聊天 baseline”行为。
+  - 当前实现为 MVP：工具调用发生时，tool 输出日志通过 `/v1/bridge/events` 或 `/v1/bridge/tool-events` 另行查看。
 
 Response:
 ```json
@@ -197,7 +203,15 @@ Response:
     "run_id": "uuid",
     "requested_logical_model": "gpt-4.1",
     "status": "succeeded",
-    "output_preview": "…"
+    "output_preview": "…",
+    "tool_invocations": [
+      {
+        "req_id": "req_...",
+        "agent_id": "aws-dev-server",
+        "tool_name": "filesystem__readFile",
+        "tool_call_id": "call_..."
+      }
+    ]
   }
 }
 ```

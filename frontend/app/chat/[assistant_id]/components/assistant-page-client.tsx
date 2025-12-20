@@ -4,7 +4,7 @@ import { MessageSquarePlus } from "lucide-react";
 
 import { useAssistant } from "@/lib/swr/use-assistants";
 import { useI18n } from "@/lib/i18n-context";
-import { MessageInputPlaceholder } from "@/components/chat/message-input-placeholder";
+import { QuickStartChatInput } from "@/components/chat/quick-start-chat-input";
 
 export function AssistantPageClient({ assistantId }: { assistantId: string }) {
   const { t } = useI18n();
@@ -59,7 +59,7 @@ export function AssistantPageClient({ assistantId }: { assistantId: string }) {
         </div>
       </div>
 
-      <MessageInputPlaceholder hint={t("chat.conversation.select_prompt")} />
+      <QuickStartChatInput assistantId={assistantId} />
     </div>
   );
 }
