@@ -10,6 +10,9 @@
 
 列出在线 Agent。
 
+Errors（标准错误体）:
+- `503 service_unavailable`: Gateway 不可用/调用失败（`details.code=bridge_gateway_error`，`details.reason` 可能为 `ConnectError/ReadTimeout/...`）
+
 Response:
 ```json
 {
@@ -27,6 +30,10 @@ Response:
 ### GET `/v1/bridge/agents/{agent_id}/tools`
 
 获取某个 Agent 的工具列表（工具名已命名空间化：`{server}__{tool}`）。
+
+Errors（标准错误体）:
+- `404 not_found`: Agent 离线（`details.code=agent_offline`）
+- `503 service_unavailable`: Gateway 不可用/调用失败（`details.code=bridge_gateway_error`，`details.reason` 可能为 `ConnectError/ReadTimeout/...`）
 
 Response:
 ```json
@@ -94,11 +101,16 @@ Response（接受）:
 Errors（标准错误体）:
 - `400 bad_request`: 缺少必要字段
 - `404 not_found`: Agent 离线（`details.code=agent_offline`）
-- `503 service_unavailable`: Gateway 调用失败（`details.code=bridge_gateway_error`）
+- `503 service_unavailable`: Gateway 不可用/调用失败（`details.code=bridge_gateway_error`，`details.reason` 可能为 `ConnectError/ReadTimeout/...`）
 
 ### POST `/v1/bridge/cancel`
 
 请求取消某个 `req_id`。
+
+Errors（标准错误体）:
+- `400 bad_request`: 缺少必要字段
+- `404 not_found`: Agent 离线（`details.code=agent_offline`）
+- `503 service_unavailable`: Gateway 不可用/调用失败（`details.code=bridge_gateway_error`，`details.reason` 可能为 `ConnectError/ReadTimeout/...`）
 
 Request:
 ```json

@@ -142,11 +142,12 @@ function MarkdownContent({
         ),
         img: ({ alt, src }) => {
           if (!src) return null;
+          const srcString = typeof src === 'string' ? src : URL.createObjectURL(src);
           const resolvedAlt = alt && alt.trim().length > 0 ? alt : defaultImageAlt;
           return (
-            <a href={src} target="_blank" rel="noreferrer" className="block">
+            <a href={srcString} target="_blank" rel="noreferrer" className="block">
               <img
-                src={src}
+                src={srcString}
                 alt={resolvedAlt}
                 loading="lazy"
                 className="mt-2 max-w-full rounded-md border bg-muted/10"

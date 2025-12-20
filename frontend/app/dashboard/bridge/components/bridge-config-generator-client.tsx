@@ -12,6 +12,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/lib/i18n-context";
 import { useBridgeAgentToken } from "@/lib/swr/use-bridge";
 
+// Polyfill for crypto.randomUUID in environments where it's not available
+function generateUUID(): string {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  // Fallback implementation
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 type MCPServerForm = {
   id: string;
   name: string;
@@ -24,7 +37,11 @@ function defaultTunnelUrl(): string {
   const envUrl = process.env.NEXT_PUBLIC_BRIDGE_TUNNEL_URL;
   if (envUrl && envUrl.trim()) return envUrl.trim();
 
-  const base = typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_BASE_URL;
+  const apiBaseUrl =
+    process.env.NEXT_PUBLIC_API_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    (typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_BASE_URL);
+  const base = apiBaseUrl;
   if (base && base.trim()) {
     try {
       const u = new URL(base.trim());
@@ -144,7 +161,7 @@ export function BridgeConfigGeneratorClient() {
 
   const [servers, setServers] = useState<MCPServerForm[]>([
     {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       name: "filesystem",
       command: "npx",
       argsText: "-y\n@modelcontextprotocol/server-filesystem\n/Users/me/Documents",
@@ -230,6 +247,7 @@ export function BridgeConfigGeneratorClient() {
           <div className="grid gap-2">
             <div className="text-sm font-medium">{t("bridge.config.server_url")}</div>
             <Input value={serverUrl} onChange={(e) => setServerUrl(e.target.value)} />
+            <div className="text-xs text-muted-foreground">{t("bridge.config.server_url_help")}</div>
           </div>
           <div className="grid gap-2">
             <div className="text-sm font-medium">{t("bridge.config.token")}</div>
@@ -305,7 +323,7 @@ export function BridgeConfigGeneratorClient() {
                 setServers((prev) => [
                   ...prev,
                   {
-                    id: crypto.randomUUID(),
+                    id: generateUUID(),
                     name: "",
                     command: "",
                     argsText: "",

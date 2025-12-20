@@ -7,6 +7,8 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,14 +28,16 @@ export function BridgePanelClient({
   const { t } = useI18n();
 
   const { agents } = useBridgeAgents();
-  const storedAgentId = useChatStore((s) =>
-    conversationId ? (s.conversationBridgeAgentIds[conversationId] ?? null) : null
+  const storedAgentIds = useChatStore((s) =>
+    conversationId ? (s.conversationBridgeAgentIds[conversationId] ?? []) : []
   );
-  const setConversationBridgeAgentId = useChatStore((s) => s.setConversationBridgeAgentId);
+  const setConversationBridgeAgentIds = useChatStore((s) => s.setConversationBridgeAgentIds);
 
-  const [agentId, setAgentId] = useState<string | null>(storedAgentId);
+  const [selectedAgentIds, setSelectedAgentIds] = useState<string[]>(storedAgentIds);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(storedAgentIds[0] ?? null);
+  const [agentPopoverOpen, setAgentPopoverOpen] = useState(false);
 
-  const { tools } = useBridgeTools(agentId);
+  const { tools } = useBridgeTools(activeAgentId);
   const [toolName, setToolName] = useState<string | null>(null);
 
   const [argsText, setArgsText] = useState<string>(t("bridge.invoke.args_placeholder") || "{}");
@@ -45,8 +49,12 @@ export function BridgePanelClient({
   const [activeReqId, setActiveReqId] = useState<string | null>(storedActiveReqId);
 
   useEffect(() => {
-    setAgentId(storedAgentId);
-  }, [storedAgentId]);
+    setSelectedAgentIds(storedAgentIds);
+    setActiveAgentId((prev) => {
+      if (prev && storedAgentIds.includes(prev)) return prev;
+      return storedAgentIds[0] ?? null;
+    });
+  }, [storedAgentIds]);
 
   useEffect(() => {
     setActiveReqId(storedActiveReqId);
@@ -59,13 +67,13 @@ export function BridgePanelClient({
   const filteredEvents = useMemo(() => {
     return events.events
       .filter((e) => {
-        if (agentId && e.agent_id && e.agent_id !== agentId) return false;
+        if (activeAgentId && e.agent_id && e.agent_id !== activeAgentId) return false;
         if (activeReqId && e.req_id && e.req_id !== activeReqId) return false;
         return true;
       })
       .slice()
       .reverse();
-  }, [events.events, agentId, activeReqId]);
+  }, [events.events, activeAgentId, activeReqId]);
 
   const logLines = useMemo(() => {
     const lines: Array<{ key: string; tone: "muted" | "stdout" | "stderr"; text: string }> = [];
@@ -112,7 +120,7 @@ export function BridgePanelClient({
   }, [filteredEvents, t]);
 
   const submit = async () => {
-    if (!agentId || !toolName) return;
+    if (!activeAgentId || !toolName) return;
 
     let args: Record<string, any> = {};
     if (argsText.trim()) {
@@ -124,7 +132,7 @@ export function BridgePanelClient({
       }
     }
     const resp = await invoke.trigger({
-      agent_id: agentId,
+      agent_id: activeAgentId,
       tool_name: toolName,
       arguments: args,
       stream: true,
@@ -137,8 +145,8 @@ export function BridgePanelClient({
   };
 
   const cancelActive = async () => {
-    if (!agentId || !activeReqId) return;
-    await cancel.trigger({ agent_id: agentId, req_id: activeReqId, reason: "user_cancel" });
+    if (!activeAgentId || !activeReqId) return;
+    await cancel.trigger({ agent_id: activeAgentId, req_id: activeReqId, reason: "user_cancel" });
   };
 
   const clear = () => {
@@ -173,24 +181,61 @@ export function BridgePanelClient({
             <CardDescription>{t("bridge.agents.select")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Select
-              value={agentId ?? ""}
-              onValueChange={(v) => {
-                const next = v || null;
-                setAgentId(next);
-                if (conversationId) {
-                  setConversationBridgeAgentId(conversationId, next);
-                }
-              }}
-            >
+            <Popover open={agentPopoverOpen} onOpenChange={setAgentPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" role="combobox" aria-expanded={agentPopoverOpen} className="justify-between">
+                  {selectedAgentIds.length
+                    ? `${t("bridge.agents.select")} (${selectedAgentIds.length})`
+                    : t("bridge.agents.select")}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[360px] p-3" align="start">
+                <ScrollArea className="h-56 pr-2">
+                  {agents.length ? (
+                    <div className="space-y-2">
+                      {agents.map((a) => (
+                        <label
+                          key={a.agent_id}
+                          className="flex items-center gap-3 rounded-md px-2 py-2 hover:bg-muted/50"
+                        >
+                          <Checkbox
+                            checked={selectedAgentIds.includes(a.agent_id)}
+                            onCheckedChange={() => {
+                              const next = selectedAgentIds.includes(a.agent_id)
+                                ? selectedAgentIds.filter((x) => x !== a.agent_id)
+                                : [...selectedAgentIds, a.agent_id];
+                              setSelectedAgentIds(next);
+                              if (conversationId) {
+                                setConversationBridgeAgentIds(conversationId, next.length ? next : null);
+                              }
+                              setActiveAgentId((prev) => {
+                                if (prev && next.includes(prev)) return prev;
+                                return next[0] ?? null;
+                              });
+                            }}
+                          />
+                          <span className="text-sm">{a.agent_id}</span>
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground py-2">{t("bridge.agents.empty")}</div>
+                  )}
+                </ScrollArea>
+              </PopoverContent>
+            </Popover>
+
+            <div className="text-xs text-muted-foreground">{t("bridge.agents.multi_help")}</div>
+
+            <Select value={activeAgentId ?? ""} onValueChange={(v) => setActiveAgentId(v || null)} disabled={!selectedAgentIds.length}>
               <SelectTrigger>
-                <SelectValue placeholder={t("bridge.agents.select")} />
+                <SelectValue placeholder={t("bridge.agents.active")} />
               </SelectTrigger>
               <SelectContent>
-                {agents.length ? (
-                  agents.map((a) => (
-                    <SelectItem key={a.agent_id} value={a.agent_id}>
-                      {a.agent_id}
+                {selectedAgentIds.length ? (
+                  selectedAgentIds.map((id) => (
+                    <SelectItem key={id} value={id}>
+                      {id}
                     </SelectItem>
                   ))
                 ) : (
@@ -209,7 +254,7 @@ export function BridgePanelClient({
             <CardDescription>{t("bridge.tools.select")}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-2">
-            <Select value={toolName ?? ""} onValueChange={(v) => setToolName(v || null)} disabled={!agentId}>
+            <Select value={toolName ?? ""} onValueChange={(v) => setToolName(v || null)} disabled={!activeAgentId}>
               <SelectTrigger>
                 <SelectValue placeholder={t("bridge.tools.select")} />
               </SelectTrigger>
@@ -241,7 +286,7 @@ export function BridgePanelClient({
                 <Button variant="outline" size="sm" onClick={cancelActive} disabled={!activeReqId || cancel.submitting}>
                   {t("bridge.invoke.cancel")}
                 </Button>
-                <Button size="sm" onClick={submit} disabled={!agentId || !toolName || invoke.submitting}>
+                <Button size="sm" onClick={submit} disabled={!activeAgentId || !toolName || invoke.submitting}>
                   {t("bridge.invoke.submit")}
                 </Button>
               </div>

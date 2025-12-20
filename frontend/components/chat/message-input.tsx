@@ -44,7 +44,7 @@ export function MessageInput({
   const [isSending, setIsSending] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
-  const bridgeAgentId = useChatStore((s) => s.conversationBridgeAgentIds[conversationId] ?? null);
+  const bridgeAgentIds = useChatStore((s) => s.conversationBridgeAgentIds[conversationId] ?? []);
 
   // 表单管理
   const {
@@ -89,7 +89,7 @@ export function MessageInput({
     try {
       const response = await sendMessage({
         content: data.content.trim(),
-        bridge_agent_id: bridgeAgentId || undefined,
+        bridge_agent_ids: bridgeAgentIds.length ? bridgeAgentIds : undefined,
       });
 
       // 清空输入框

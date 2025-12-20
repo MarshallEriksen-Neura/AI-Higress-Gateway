@@ -45,6 +45,7 @@ def install_inmemory_db(app, *, token_plain: str = "timeline") -> sessionmaker[S
     app.dependency_overrides[get_db_session] = override_get_db
 
     redis = InMemoryRedis()
+    setattr(app.state, "_test_redis", redis)
 
     async def override_get_redis():
         return redis

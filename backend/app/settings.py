@@ -795,7 +795,41 @@ class Settings(BaseSettings):
             return self.api_docs_override
         return self.environment.lower() != "production"
 
+_WEAK_SECRET_KEY_VALUES = {
+    "please-change-me",
+    "change-me-secret-key",
+    "your-secret-key",
+}
+_MIN_SECRET_KEY_LENGTH = 32
+
+
+def _validate_production_secret_key(cfg: Settings) -> None:
+    if cfg.environment.lower() != "production":
+        return
+
+    secret_key = (cfg.secret_key or "").strip()
+    if not secret_key:
+        raise RuntimeError(
+            "APP_ENV=production 时必须设置 SECRET_KEY；"
+            "请使用 POST /system/secret-key/generate 生成随机值并写入 .env。"
+        )
+
+    lowered = secret_key.lower()
+    if secret_key in _WEAK_SECRET_KEY_VALUES or "please-change-me" in lowered or "change-me" in lowered:
+        raise RuntimeError(
+            "检测到不安全的 SECRET_KEY 默认/占位符；"
+            "生产环境请使用 POST /system/secret-key/generate 生成强随机值并写入 .env。"
+        )
+
+    if len(secret_key) < _MIN_SECRET_KEY_LENGTH:
+        raise RuntimeError(
+            f"SECRET_KEY 长度过短（需至少 {_MIN_SECRET_KEY_LENGTH} 字符）；"
+            "生产环境请使用 POST /system/secret-key/generate 生成强随机值。"
+        )
+
+
 settings = Settings()  # Reads from environment if available
+_validate_production_secret_key(settings)
 
 
 def build_upstream_headers() -> dict[str, str]:

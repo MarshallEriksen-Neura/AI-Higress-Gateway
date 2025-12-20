@@ -186,13 +186,16 @@ Request:
   "content": "你好",
   "override_logical_model": "gpt-4.1",
   "model_preset": {"temperature": 0.2},
-  "bridge_agent_id": "aws-dev-server"
+  "bridge_agent_id": "aws-dev-server",
+  "bridge_agent_ids": ["aws-dev-server", "home-nas"]
 }
 ```
 
 说明：
-- `bridge_agent_id`（可选）：指定本次对话的目标 Agent，用于开启 MCP/Bridge 的工具调用能力（LLM tool_calls -> Bridge INVOKE -> tool_result -> 继续生成）。
+- `bridge_agent_id`（可选，兼容字段）：指定本次对话的目标 Agent，用于开启 MCP/Bridge 的工具调用能力（LLM tool_calls -> Bridge INVOKE -> tool_result -> 继续生成）。
+- `bridge_agent_ids`（可选，推荐）：指定本次对话的目标 Agent 列表（多选）。
   - 不传则保持原有“纯聊天 baseline”行为。
+  - 当传入多个 Agent 时，后端会合并所有工具并注入模型；为了避免重名，会对工具名做别名映射（模型看到的是别名），实际执行时仍会路由到对应 Agent 的原始工具名。
   - 当前实现为 MVP：工具调用发生时，tool 输出日志通过 `/v1/bridge/events` 或 `/v1/bridge/tool-events` 另行查看。
 
 Response:

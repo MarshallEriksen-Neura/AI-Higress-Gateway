@@ -20,8 +20,8 @@ interface ChatState {
   // 会话级模型覆盖：conversationId -> logical model（null 表示跟随助手默认）
   conversationModelOverrides: Record<string, string>;
 
-  // 会话级 Bridge Agent 选择：conversationId -> agent_id
-  conversationBridgeAgentIds: Record<string, string>;
+  // 会话级 Bridge Agent 选择（可多选）：conversationId -> agent_ids
+  conversationBridgeAgentIds: Record<string, string[]>;
 
   // 会话级 Bridge 面板聚焦的 req_id：conversationId -> req_id
   conversationBridgeActiveReqIds: Record<string, string>;
@@ -33,7 +33,7 @@ interface ChatState {
   setActiveEval: (evalId: string | null) => void;
   setConversationModelOverride: (conversationId: string, logicalModel: string | null) => void;
   clearConversationModelOverrides: () => void;
-  setConversationBridgeAgentId: (conversationId: string, agentId: string | null) => void;
+  setConversationBridgeAgentIds: (conversationId: string, agentIds: string[] | null) => void;
   setConversationBridgeActiveReqId: (conversationId: string, reqId: string | null) => void;
   
   // 重置状态
@@ -46,7 +46,7 @@ const initialState = {
   selectedConversationId: null,
   activeEvalId: null,
   conversationModelOverrides: {} as Record<string, string>,
-  conversationBridgeAgentIds: {} as Record<string, string>,
+  conversationBridgeAgentIds: {} as Record<string, string[]>,
   conversationBridgeActiveReqIds: {} as Record<string, string>,
 };
 
@@ -88,13 +88,14 @@ export const useChatStore = create<ChatState>()(
 
       clearConversationModelOverrides: () => set({ conversationModelOverrides: {} }),
 
-      setConversationBridgeAgentId: (conversationId, agentId) =>
+      setConversationBridgeAgentIds: (conversationId, agentIds) =>
         set((state) => {
           const next = { ...state.conversationBridgeAgentIds };
-          if (!agentId) {
+          const normalized = (agentIds || []).map((x) => x.trim()).filter(Boolean);
+          if (!normalized.length) {
             delete next[conversationId];
           } else {
-            next[conversationId] = agentId;
+            next[conversationId] = normalized;
           }
           return { conversationBridgeAgentIds: next };
         }),
@@ -114,16 +115,28 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'chat-store',
-      version: 4,
+      version: 5,
       migrate: (persistedState: any) => {
         // v1 -> v2: add conversationModelOverrides
         // v2 -> v3: add conversationBridgeAgentIds
         // v3 -> v4: add conversationBridgeActiveReqIds
+        // v4 -> v5: conversationBridgeAgentIds from string -> string[]
         if (persistedState && typeof persistedState === 'object') {
+          const rawAgentIds = persistedState.conversationBridgeAgentIds ?? {};
+          const nextAgentIds: Record<string, string[]> = {};
+          if (rawAgentIds && typeof rawAgentIds === 'object') {
+            for (const [k, v] of Object.entries(rawAgentIds)) {
+              if (Array.isArray(v)) {
+                nextAgentIds[k] = v.map((x) => String(x)).filter(Boolean);
+              } else if (typeof v === 'string' && v.trim()) {
+                nextAgentIds[k] = [v.trim()];
+              }
+            }
+          }
           return {
             ...persistedState,
             conversationModelOverrides: persistedState.conversationModelOverrides ?? {},
-            conversationBridgeAgentIds: persistedState.conversationBridgeAgentIds ?? {},
+            conversationBridgeAgentIds: nextAgentIds,
             conversationBridgeActiveReqIds: persistedState.conversationBridgeActiveReqIds ?? {},
           };
         }

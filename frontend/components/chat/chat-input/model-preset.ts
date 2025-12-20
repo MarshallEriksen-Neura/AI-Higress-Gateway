@@ -1,7 +1,7 @@
-import type { ModelParameterKey, ModelParameters } from "./types";
+import type { TunableModelParameterKey, ModelParameters } from "./types";
 
 export function buildModelPreset(
-  enabled: Partial<Record<ModelParameterKey, boolean>>,
+  enabled: Partial<Record<TunableModelParameterKey, boolean>>,
   parameters: ModelParameters
 ): Record<string, number> | undefined {
   const preset: Record<string, number> = {};

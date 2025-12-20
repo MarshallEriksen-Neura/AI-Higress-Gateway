@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.services.bridge_gateway_client import BridgeGatewayClient
 from app.services.bridge_tool_runner import (
     BridgeToolInvocation,
-    bridge_tools_to_openai_tools,
+    bridge_tools_by_agent_to_openai_tools,
     extract_openai_tool_calls,
     invoke_bridge_tool_and_wait,
     tool_call_to_args,
@@ -235,6 +235,7 @@ async def send_message_and_run_baseline(
     override_logical_model: str | None = None,
     model_preset: dict | None = None,
     bridge_agent_id: str | None = None,
+    bridge_agent_ids: list[str] | None = None,
 ) -> tuple[UUID, UUID]:
     """
     创建 user message 并同步执行 baseline run，随后写入 assistant message（用于历史上下文）。
@@ -333,16 +334,35 @@ async def send_message_and_run_baseline(
         model_preset_override=model_preset,
     )
 
-    bridge_tools: list[dict[str, Any]] = []
+    bridge_tools_by_agent: dict[str, list[dict[str, Any]]] = {}
     openai_tools: list[dict[str, Any]] = []
-    effective_bridge_agent_id = (bridge_agent_id or "").strip() or None
-    if effective_bridge_agent_id:
+    tool_name_map: dict[str, tuple[str, str]] = {}  # openai_tool_name -> (agent_id, bridge_tool_name)
+
+    # bridge_agent_ids takes precedence; bridge_agent_id is legacy.
+    effective_bridge_agent_ids: list[str] = []
+    if isinstance(bridge_agent_ids, list) and bridge_agent_ids:
+        effective_bridge_agent_ids = [str(x).strip() for x in bridge_agent_ids if str(x).strip()]
+    elif (bridge_agent_id or "").strip():
+        effective_bridge_agent_ids = [str(bridge_agent_id).strip()]
+
+    # Hard cap to prevent oversized tool injection.
+    if len(effective_bridge_agent_ids) > 5:
+        effective_bridge_agent_ids = effective_bridge_agent_ids[:5]
+
+    if effective_bridge_agent_ids:
         try:
             bridge = BridgeGatewayClient()
-            tools_resp = await bridge.list_tools(effective_bridge_agent_id)
-            if isinstance(tools_resp, dict) and isinstance(tools_resp.get("tools"), list):
-                bridge_tools = [t for t in tools_resp["tools"] if isinstance(t, dict)]
-            openai_tools = bridge_tools_to_openai_tools(bridge_tools)
+            for aid in effective_bridge_agent_ids:
+                try:
+                    tools_resp = await bridge.list_tools(aid)
+                except Exception:
+                    continue
+                if isinstance(tools_resp, dict) and isinstance(tools_resp.get("tools"), list):
+                    bridge_tools_by_agent[aid] = [t for t in tools_resp["tools"] if isinstance(t, dict)]
+
+            openai_tools, tool_name_map = bridge_tools_by_agent_to_openai_tools(
+                bridge_tools_by_agent=bridge_tools_by_agent,
+            )
             if openai_tools:
                 payload = dict(payload)
                 payload["tools"] = openai_tools
@@ -376,8 +396,8 @@ async def send_message_and_run_baseline(
         payload_override=payload,
     )
 
-    # Tool-calling loop (best-effort; only when bridge_agent_id is provided).
-    if run.status == "succeeded" and effective_bridge_agent_id and openai_tools:
+    # Tool-calling loop (best-effort; only when bridge_agent_ids is provided).
+    if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
         tool_calls = extract_openai_tool_calls(run.response_payload)
         if tool_calls:
             invocations: list[BridgeToolInvocation] = []
@@ -386,19 +406,26 @@ async def send_message_and_run_baseline(
                 tool_name, args, tool_call_id = tool_call_to_args(tc)
                 if not tool_name:
                     continue
+                mapped = tool_name_map.get(tool_name)
+                if mapped:
+                    target_agent_id, target_tool_name = mapped
+                else:
+                    # Backward compatibility: when only one agent is selected, allow direct tool name.
+                    target_agent_id = effective_bridge_agent_ids[0]
+                    target_tool_name = tool_name
                 req_id = "req_" + uuid.uuid4().hex
                 invocations.append(
                     BridgeToolInvocation(
                         req_id=req_id,
-                        agent_id=effective_bridge_agent_id,
-                        tool_name=tool_name,
+                        agent_id=target_agent_id,
+                        tool_name=target_tool_name,
                         tool_call_id=tool_call_id,
                     )
                 )
                 tool_result = await invoke_bridge_tool_and_wait(
                     req_id=req_id,
-                    agent_id=effective_bridge_agent_id,
-                    tool_name=tool_name,
+                    agent_id=target_agent_id,
+                    tool_name=target_tool_name,
                     arguments=args,
                     timeout_ms=60000,
                     result_timeout_seconds=120.0,
@@ -410,8 +437,9 @@ async def send_message_and_run_baseline(
                         "content": json.dumps(
                             {
                                 "req_id": req_id,
-                                "agent_id": effective_bridge_agent_id,
-                                "tool_name": tool_name,
+                                "agent_id": target_agent_id,
+                                "tool_name": target_tool_name,
+                                "model_tool_name": tool_name,
                                 "ok": tool_result.ok,
                                 "exit_code": tool_result.exit_code,
                                 "canceled": tool_result.canceled,
@@ -465,7 +493,7 @@ async def send_message_and_run_baseline(
 
                 run.response_payload = {
                     "bridge": {
-                        "agent_id": effective_bridge_agent_id,
+                        "agent_ids": effective_bridge_agent_ids,
                         "tool_invocations": [
                             {
                                 "req_id": it.req_id,

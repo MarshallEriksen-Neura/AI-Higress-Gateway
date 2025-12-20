@@ -35,6 +35,7 @@ def test_conversation_features(client: TestClient, db_session: Session):
         default_logical_model="gpt-4",
         model_preset={}
     )
+    assert assistant.title_logical_model is None
     assistant_id = assistant.id
     
     # 2. Create 3 conversations

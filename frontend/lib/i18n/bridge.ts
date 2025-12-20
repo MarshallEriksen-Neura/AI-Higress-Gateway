@@ -32,6 +32,7 @@ export const bridgeTranslations: Record<Language, Record<string, string>> = {
     "bridge.config.title": "Generate config.yaml",
     "bridge.config.description": "Generate a local config file in browser (not uploaded)",
     "bridge.config.server_url": "Server URL",
+    "bridge.config.server_url_help": "This is the Tunnel Gateway WebSocket URL (Agent connects outbound). It is NOT the backend HTTP API URL.",
     "bridge.config.token": "Token",
     "bridge.config.token_generate": "Generate",
     "bridge.config.token_generating": "Generating...",
@@ -53,6 +54,8 @@ export const bridgeTranslations: Record<Language, Record<string, string>> = {
     "bridge.config.env_placeholder": "{\"GITHUB_TOKEN\":\"ghp_xxx\"}",
     "bridge.config.preview": "Preview",
     "bridge.config.download": "Download config.yaml",
+    "bridge.agents.active": "Active Agent",
+    "bridge.agents.multi_help": "Selected agents will be injected into the model as tools. Manual invocation below uses the Active Agent.",
   },
   zh: {
     "bridge.title": "Bridge",
@@ -85,6 +88,7 @@ export const bridgeTranslations: Record<Language, Record<string, string>> = {
     "bridge.config.title": "生成 config.yaml",
     "bridge.config.description": "在浏览器本地生成配置文件（不会上传云端）",
     "bridge.config.server_url": "服务端地址",
+    "bridge.config.server_url_help": "这里填写的是 Tunnel Gateway 的 WebSocket 隧道地址（Agent 主动出站连接），不是后端 HTTP API 地址。",
     "bridge.config.token": "Token",
     "bridge.config.token_generate": "生成",
     "bridge.config.token_generating": "生成中…",
@@ -106,5 +110,7 @@ export const bridgeTranslations: Record<Language, Record<string, string>> = {
     "bridge.config.env_placeholder": "{\"GITHUB_TOKEN\":\"ghp_xxx\"}",
     "bridge.config.preview": "预览",
     "bridge.config.download": "下载 config.yaml",
+    "bridge.agents.active": "当前 Agent",
+    "bridge.agents.multi_help": "选中的 Agent 会作为可用工具注入模型；下面的“工具执行”仅针对当前 Agent。",
   },
 };

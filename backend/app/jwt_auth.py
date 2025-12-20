@@ -16,6 +16,7 @@ except ModuleNotFoundError:
 
 from app.deps import get_db, get_redis
 from app.models import User
+from app.settings import settings
 from app.services.jwt_auth_service import verify_token
 from app.services.token_redis_service import TokenRedisService
 from app.services.avatar_service import build_avatar_url
@@ -121,11 +122,19 @@ async def require_jwt_token(
             detail="Invalid token payload",
         )
     
-    # 如果 token 带有 JTI，则按“有状态模式”在 Redis 中进一步校验；
-    # 否则回退为仅基于签名和过期时间的无状态校验（主要用于测试和兼容旧 token）。
-    token_service = TokenRedisService(redis)
-    
-    if jti:
+    # 如果 token 带有 JTI，则按“有状态模式”在 Redis 中进一步校验。
+    #
+    # 注意：生产环境必须要求 token 包含 JTI，以确保撤销/黑名单/会话控制有效。
+    # 非生产环境允许缺省 JTI，主要用于测试与兼容旧 token（仅验签名+过期时间）。
+    if not jti:
+        if settings.environment.lower() == "production":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+    else:
+        token_service = TokenRedisService(redis)
         # 检查黑名单
         if await token_service.is_token_blacklisted(jti):
             raise HTTPException(

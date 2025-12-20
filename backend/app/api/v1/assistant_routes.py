@@ -297,6 +297,7 @@ async def create_message_endpoint(
         override_logical_model=payload.override_logical_model,
         model_preset=payload.model_preset,
         bridge_agent_id=payload.bridge_agent_id,
+        bridge_agent_ids=payload.bridge_agent_ids,
     )
     run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
     return MessageCreateResponse(message_id=message_id, baseline_run=_run_to_summary(run))

@@ -31,7 +31,7 @@ interface AssistantFormData {
   name: string;
   system_prompt?: string;
   default_logical_model: string;
-  title_logical_model: string;
+  title_logical_model?: string;
 }
 
 interface AssistantFormProps {

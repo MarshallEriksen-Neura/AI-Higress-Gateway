@@ -21,7 +21,7 @@ export function ConversationChatInput({
   className?: string;
   onMcpAction?: () => void;
 }) {
-  const bridgeAgentId = useChatStore((s) => s.conversationBridgeAgentIds[conversationId] ?? null);
+  const bridgeAgentIds = useChatStore((s) => s.conversationBridgeAgentIds[conversationId] ?? []);
 
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
   const clearConversationMessages = useClearConversationMessages(assistantId);
@@ -31,10 +31,10 @@ export function ConversationChatInput({
       await sendMessage({
         content: payload.content,
         model_preset: payload.model_preset,
-        bridge_agent_id: bridgeAgentId || undefined,
+        bridge_agent_ids: bridgeAgentIds.length ? bridgeAgentIds : undefined,
       });
     },
-    [sendMessage, bridgeAgentId]
+    [sendMessage, bridgeAgentIds]
   );
 
   const handleClearHistory = useCallback(async () => {
@@ -50,7 +50,12 @@ export function ConversationChatInput({
       assistantId={assistantId}
       disabled={disabled}
       className={className}
-      onSend={async ({ content, model_preset }) => handleSend({ content, model_preset })}
+      onSend={async (payload: {
+        content: string;
+        images: string[];
+        model_preset?: Record<string, number>;
+        parameters: any;
+      }) => handleSend({ content: payload.content, model_preset: payload.model_preset })}
       onClearHistory={handleClearHistory}
       onMcpAction={onMcpAction}
     />

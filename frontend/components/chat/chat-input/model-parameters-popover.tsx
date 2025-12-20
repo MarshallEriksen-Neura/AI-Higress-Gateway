@@ -9,9 +9,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Slider } from "@/components/ui/slider";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 
-import type { ModelParameterKey, ModelParameters } from "./types";
+import type { TunableModelParameterKey, ModelParameters } from "./types";
 
-export type ModelParameterEnabled = Partial<Record<ModelParameterKey, boolean>>;
+export type ModelParameterEnabled = Partial<Record<TunableModelParameterKey, boolean>>;
 
 export type ModelParametersPopoverProps = {
   idPrefix: string;
@@ -23,7 +23,7 @@ export type ModelParametersPopoverProps = {
   onReset: () => void;
   title: string;
   resetLabel: string;
-  labels: Record<ModelParameterKey, string>;
+  labels: Record<TunableModelParameterKey, string>;
 };
 
 export function ModelParametersPopover({
@@ -45,11 +45,11 @@ export function ModelParametersPopover({
       enabled.presence_penalty
   );
 
-  const toggle = (key: ModelParameterKey, value: boolean) => {
+  const toggle = (key: TunableModelParameterKey, value: boolean) => {
     onEnabledChange({ ...enabled, [key]: value });
   };
 
-  const setValue = (key: ModelParameterKey, value: number | undefined) => {
+  const setValue = (key: TunableModelParameterKey, value: number | undefined) => {
     if (value == null) return;
     onParametersChange({ ...parameters, [key]: value });
   };

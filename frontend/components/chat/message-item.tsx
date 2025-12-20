@@ -39,7 +39,7 @@ export function MessageItem({
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
   const setIsBridgePanelOpen = useChatLayoutStore((s) => s.setIsBridgePanelOpen);
-  const setConversationBridgeAgentId = useChatStore((s) => s.setConversationBridgeAgentId);
+  const setConversationBridgeAgentIds = useChatStore((s) => s.setConversationBridgeAgentIds);
   const setConversationBridgeActiveReqId = useChatStore((s) => s.setConversationBridgeActiveReqId);
   
   // 获取第一个 run（通常是 baseline run）
@@ -165,7 +165,7 @@ export function MessageItem({
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => {
-                    setConversationBridgeAgentId(message.conversation_id, firstInvocation.agent_id);
+                    setConversationBridgeAgentIds(message.conversation_id, [firstInvocation.agent_id]);
                     setConversationBridgeActiveReqId(message.conversation_id, firstInvocation.req_id);
                     setIsBridgePanelOpen(true);
                   }}

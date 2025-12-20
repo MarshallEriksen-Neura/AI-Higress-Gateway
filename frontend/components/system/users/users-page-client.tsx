@@ -5,7 +5,6 @@ import { Button } from "@/components/ui/button";
 import { Plus, RotateCcw } from "lucide-react";
 import { useI18n } from "@/lib/i18n-context";
 import { useAuthStore } from "@/lib/stores/auth-store";
-import type { Role, Permission } from "@/http/admin";
 import type { UserInfo } from "@/lib/api-types";
 import { useActiveRegistrationWindow } from "@/lib/swr/use-registration-windows";
 import { useAdminUsers } from "@/lib/swr/use-admin-users";

@@ -4,7 +4,7 @@ import json
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 import httpx
 
@@ -25,17 +25,68 @@ router = APIRouter(
     dependencies=[Depends(require_jwt_token)],
 )
 
+def _bridge_request_failed_details(exc: httpx.RequestError) -> dict[str, Any]:
+    return {
+        "code": "bridge_gateway_error",
+        "reason": exc.__class__.__name__,
+        "message": str(exc),
+    }
+
+
+def _bridge_service_unavailable(exc: httpx.RequestError) -> HTTPException:
+    return service_unavailable(
+        "Bridge Gateway 不可用",
+        details=_bridge_request_failed_details(exc),
+    )
+
+
+def _maybe_agent_offline(exc: httpx.HTTPStatusError, *, agent_id: str) -> HTTPException | None:
+    if exc.response is None or exc.response.status_code != 404:
+        return None
+    try:
+        body = exc.response.json()
+    except Exception:
+        return None
+    if isinstance(body, dict) and body.get("error") == "agent_offline":
+        return not_found("Agent 离线", details={"code": "agent_offline", "agent_id": agent_id})
+    return None
+
 
 @router.get("/agents")
 async def list_agents() -> dict[str, Any]:
     client = BridgeGatewayClient()
-    return await client.list_agents()
+    try:
+        return await client.list_agents()
+    except httpx.RequestError as exc:
+        raise _bridge_service_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        raise service_unavailable(
+            "Bridge Gateway 调用失败",
+            details={
+                "code": "bridge_gateway_error",
+                "status_code": exc.response.status_code if exc.response else None,
+            },
+        )
 
 
 @router.get("/agents/{agent_id}/tools")
 async def list_agent_tools(agent_id: str) -> dict[str, Any]:
     client = BridgeGatewayClient()
-    return await client.list_tools(agent_id)
+    try:
+        return await client.list_tools(agent_id)
+    except httpx.RequestError as exc:
+        raise _bridge_service_unavailable(exc)
+    except httpx.HTTPStatusError as exc:
+        offline = _maybe_agent_offline(exc, agent_id=agent_id)
+        if offline is not None:
+            raise offline
+        raise service_unavailable(
+            "Bridge Gateway 调用失败",
+            details={
+                "code": "bridge_gateway_error",
+                "status_code": exc.response.status_code if exc.response else None,
+            },
+        )
 
 @router.post("/agent-token")
 async def issue_agent_token(
@@ -92,14 +143,12 @@ async def invoke_tool(payload: dict[str, Any]) -> dict[str, Any]:
             timeout_ms=timeout_ms,
             stream=stream,
         )
+    except httpx.RequestError as exc:
+        raise _bridge_service_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response is not None and exc.response.status_code == 404:
-            try:
-                body = exc.response.json()
-                if isinstance(body, dict) and body.get("error") == "agent_offline":
-                    raise not_found("Agent 离线", details={"code": "agent_offline", "agent_id": agent_id})
-            except Exception:
-                pass
+        offline = _maybe_agent_offline(exc, agent_id=agent_id)
+        if offline is not None:
+            raise offline
         raise service_unavailable(
             "Bridge Gateway 调用失败",
             details={"code": "bridge_gateway_error", "status_code": exc.response.status_code if exc.response else None},
@@ -118,14 +167,12 @@ async def cancel_tool(payload: dict[str, Any]) -> dict[str, Any]:
         raise bad_request("缺少 agent_id")
     try:
         return await client.cancel(req_id=req_id, agent_id=agent_id, reason=reason)
+    except httpx.RequestError as exc:
+        raise _bridge_service_unavailable(exc)
     except httpx.HTTPStatusError as exc:
-        if exc.response is not None and exc.response.status_code == 404:
-            try:
-                body = exc.response.json()
-                if isinstance(body, dict) and body.get("error") == "agent_offline":
-                    raise not_found("Agent 离线", details={"code": "agent_offline", "agent_id": agent_id})
-            except Exception:
-                pass
+        offline = _maybe_agent_offline(exc, agent_id=agent_id)
+        if offline is not None:
+            raise offline
         raise service_unavailable(
             "Bridge Gateway 调用失败",
             details={"code": "bridge_gateway_error", "status_code": exc.response.status_code if exc.response else None},

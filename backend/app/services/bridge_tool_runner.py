@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -31,27 +33,91 @@ class BridgeToolResult:
 
 
 def bridge_tools_to_openai_tools(bridge_tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Backward-compatible helper for single-agent mode.
+    """
+    openai_tools, _ = bridge_tools_by_agent_to_openai_tools(
+        bridge_tools_by_agent={"__single__": bridge_tools or []},
+        force_plain_tool_names=True,
+    )
+    return openai_tools
+
+
+_SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9_\\-]+")
+
+
+def _sanitize_name(value: str) -> str:
+    s = (value or "").strip()
+    s = s.replace(".", "_").replace(":", "_").replace("/", "_").replace("\\", "_")
+    s = s.replace("-", "_")
+    s = _SAFE_NAME_RE.sub("_", s)
+    s = s.strip("_")
+    return s or "tool"
+
+
+def _make_tool_alias(*, agent_id: str, tool_name: str, max_len: int = 64) -> str:
+    agent_part = _sanitize_name(agent_id)[:16]
+    tool_part = _sanitize_name(tool_name)[:32]
+    h = hashlib.sha1(f"{agent_id}:{tool_name}".encode("utf-8")).hexdigest()[:10]
+
+    base = f"bridge__{agent_part}__{tool_part}__{h}"
+    if len(base) <= max_len:
+        return base
+    # Extremely conservative fallback.
+    return f"bridge__{h}"
+
+
+def bridge_tools_by_agent_to_openai_tools(
+    *,
+    bridge_tools_by_agent: dict[str, list[dict[str, Any]]],
+    force_plain_tool_names: bool = False,
+) -> tuple[list[dict[str, Any]], dict[str, tuple[str, str]]]:
+    """
+    Convert Bridge tools to OpenAI function tools.
+
+    Returns:
+      (openai_tools, tool_name_map)
+        - openai_tools: list of {"type":"function", ...}
+        - tool_name_map: openai_tool_name -> (agent_id, bridge_tool_name)
+    """
     tools: list[dict[str, Any]] = []
-    for t in bridge_tools or []:
-        if not isinstance(t, dict):
+    tool_name_map: dict[str, tuple[str, str]] = {}
+
+    # If only one agent is present, keep the original tool names for stability.
+    agent_ids = [k for k in (bridge_tools_by_agent or {}).keys() if k != "__single__"]
+    single_agent = len(agent_ids) == 1
+
+    for agent_id, bridge_tools in (bridge_tools_by_agent or {}).items():
+        if not isinstance(bridge_tools, list):
             continue
-        name = str(t.get("name") or "").strip()
-        if not name:
-            continue
-        input_schema = t.get("input_schema")
-        if not isinstance(input_schema, dict):
-            input_schema = {"type": "object", "properties": {}}
-        tools.append(
-            {
-                "type": "function",
-                "function": {
-                    "name": name,
-                    "description": str(t.get("description") or ""),
-                    "parameters": input_schema,
-                },
-            }
-        )
-    return tools
+        for t in bridge_tools or []:
+            if not isinstance(t, dict):
+                continue
+            raw_name = str(t.get("name") or "").strip()
+            if not raw_name:
+                continue
+            input_schema = t.get("input_schema")
+            if not isinstance(input_schema, dict):
+                input_schema = {"type": "object", "properties": {}}
+
+            if force_plain_tool_names or single_agent:
+                openai_name = raw_name
+            else:
+                openai_name = _make_tool_alias(agent_id=agent_id, tool_name=raw_name)
+                tool_name_map[openai_name] = (agent_id, raw_name)
+
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": openai_name,
+                        "description": str(t.get("description") or ""),
+                        "parameters": input_schema,
+                    },
+                }
+            )
+
+    return tools, tool_name_map
 
 
 def _safe_json_loads(value: str) -> Any:

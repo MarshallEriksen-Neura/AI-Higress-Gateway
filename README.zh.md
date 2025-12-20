@@ -140,9 +140,47 @@ pytest
 - API 文档：`docs/api/`
 - 后端设计：`docs/backend/`
 - 前端设计：`docs/fronted/`
+- Bridge / MCP：`docs/bridge/design.md` + `specs/004-mcp-bridge/quickstart.md` + `docs/api/bridge.md`
 - UI 规范：`ui-prompt.md`
 - 前端文案与 i18n：`frontend/lib/i18n/`
 - 设计/截图资源：`docs/images/`
+
+## 🔌 Bridge（MCP）使用说明（快速上手）
+
+Bridge 用于在浏览器无法直连本地 MCP 的前提下，通过“反向 WSS 隧道 + 本地 Agent”让 Web 侧安全调用用户机器/内网的 MCP 工具。
+
+### 1) 启动云端 Tunnel Gateway（Go）
+```bash
+cd bridge
+go run ./cmd/bridge gateway serve --listen :8088 --agent-token-secret "$BRIDGE_AGENT_TOKEN_SECRET"
+```
+
+### 2) 配置后端（FastAPI -> Gateway）
+推荐在后端 `.env` 设置：
+- `BRIDGE_GATEWAY_URL=http://127.0.0.1:8088`
+- `BRIDGE_GATEWAY_INTERNAL_TOKEN`（可选；如果你设置了 Gateway 的 `--internal-token`，两边必须一致）
+- `BRIDGE_AGENT_TOKEN_SECRET`（推荐；与 Gateway 的 `--agent-token-secret` 保持一致）
+
+### 3) 网页生成用户侧配置文件（不上传密钥）
+在管理台打开 `/dashboard/bridge` → `配置` Tab：
+- 点击“生成 Token”（写入 `server.token`）
+- 下载 `config.yaml`
+
+### 4) 用户机器/服务器运行 Agent
+```bash
+bridge agent start --config ~/.ai-bridge/config.yaml
+```
+然后回到 Chat 会话选择 `agent_id`，后端会自动拉取工具列表并注入模型（tool-calling）。
+
+### 5) 其他 MCP 客户端（Claude Desktop/Cursor）直连（stdio）
+如果你想让本地的 Claude Desktop/Cursor 直接用这个聚合后的 MCP 工具（不走云端隧道）：
+```bash
+bridge agent serve-mcp --config ~/.ai-bridge/config.yaml
+```
+
+### 6) 构建与发布（Windows/macOS/Linux）
+- 本地打包：`make build-bridge-dist`（产物在 `dist/bridge/*`）
+- 自动发布到 GitHub Release：推送 `bridge-v*` 标签（例如 `bridge-v0.1.0`，见 `.github/workflows/bridge-release.yml`）
 
 ## 🤝 贡献指南
 - 遵循 PEP 8、类型注解；函数/变量 snake_case，类 PascalCase。

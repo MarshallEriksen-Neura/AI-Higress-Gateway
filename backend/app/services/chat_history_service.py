@@ -48,8 +48,8 @@ def create_assistant(
     name: str,
     system_prompt: str,
     default_logical_model: str,
-    title_logical_model: str | None,
     model_preset: dict | None,
+    title_logical_model: str | None = None,
 ) -> AssistantPreset:
     if project_id is not None:
         _ensure_project_accessible(db, user_id=user_id, project_id=project_id)

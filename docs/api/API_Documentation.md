@@ -3610,6 +3610,10 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 Authorization: Bearer {access_token}
 ```
 
+**重要（生产环境校验规则）**：
+- 当 `APP_ENV=production` 时，后端会要求 `access_token` 必须包含 `jti` 且该 token 必须在 Redis 中有登记记录（登录/刷新接口签发的 token 默认满足）。
+- 缺少 `jti` 或 Redis 无记录/已撤销时将返回 `401 Unauthorized`，以保证撤销/黑名单/会话控制有效。
+
 ### API 密钥认证
 
 对于需要 API 密钥认证的 API，需要在请求头中添加明文 API Key，支持两种写法：

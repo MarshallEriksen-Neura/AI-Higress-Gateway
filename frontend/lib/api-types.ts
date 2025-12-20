@@ -945,6 +945,7 @@ export interface SendMessageRequest {
   override_logical_model?: string;
   model_preset?: Record<string, any>;
   bridge_agent_id?: string;
+  bridge_agent_ids?: string[];
 }
 
 export interface SendMessageResponse {

@@ -130,11 +130,41 @@ Alembic migrations auto-run when `AUTO_APPLY_DB_MIGRATIONS=true` and `ENABLE_AUT
 - API docs: `docs/api/`
 - Backend design: `docs/backend/`
 - Frontend design: `docs/fronted/`
+- Bridge / MCP: `docs/bridge/design.md` + `specs/004-mcp-bridge/quickstart.md` + `docs/api/bridge.md`
 - Screenshots/assets: `docs/images/`
 
 ### 🧱 Tech Stack & Deps
 - Python 3.12, FastAPI, SQLAlchemy, PostgreSQL, Redis (context/cache), Celery (optional async tasks).
 - Frontend: Next.js (App Router), Tailwind CSS, shadcn/ui, SWR data layer.
+- Bridge (Go): Agent + Tunnel Gateway for MCP tool execution.
+
+### 🔌 Bridge / MCP (Quick usage)
+Bridge lets the Web app call MCP tools running on user machines/servers via a reverse WSS tunnel (browser never connects to localhost).
+
+1) Start Tunnel Gateway (cloud):
+```bash
+cd bridge
+go run ./cmd/bridge gateway serve --listen :8088 --agent-token-secret "$BRIDGE_AGENT_TOKEN_SECRET"
+```
+2) Configure backend to reach the gateway:
+- `BRIDGE_GATEWAY_URL=http://127.0.0.1:8088`
+- `BRIDGE_GATEWAY_INTERNAL_TOKEN` (optional; must match `--internal-token` if you set it)
+- `BRIDGE_AGENT_TOKEN_SECRET` (recommended; same value as gateway `--agent-token-secret`)
+3) In the dashboard: open `/dashboard/bridge` → Config tab, generate `config.yaml` (includes server URL + token).
+4) On the user machine/server: run the agent:
+```bash
+bridge agent start --config ~/.ai-bridge/config.yaml
+```
+5) In Chat: select `agent_id` and the backend will inject tools into the model automatically.
+
+Local MCP server mode (for Claude Desktop/Cursor via stdio):
+```bash
+bridge agent serve-mcp --config ~/.ai-bridge/config.yaml
+```
+
+Build/release Bridge binaries:
+- Local: `make build-bridge-dist` (outputs `dist/bridge/*`)
+- GitHub Release automation: push a tag like `bridge-v0.1.0` (see `.github/workflows/bridge-release.yml`)
 
 ### 🤝 Contributing
 - Follow PEP 8, type hints, snake_case; keep commits focused.
