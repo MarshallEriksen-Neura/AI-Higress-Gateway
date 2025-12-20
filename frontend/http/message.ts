@@ -47,6 +47,13 @@ export const messageService = {
   },
 
   /**
+   * 清空会话消息历史（保留会话本身）
+   */
+  clearConversationMessages: async (conversationId: string): Promise<void> => {
+    await httpClient.delete(`/v1/conversations/${conversationId}/messages`);
+  },
+
+  /**
    * 获取 Run 详情（惰性加载完整数据）
    */
   getRun: async (runId: string): Promise<RunDetail> => {

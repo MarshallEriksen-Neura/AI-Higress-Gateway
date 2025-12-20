@@ -30,6 +30,7 @@ from app.schemas import (
 )
 from app.services import chat_app_service
 from app.services.chat_history_service import (
+    clear_conversation_messages,
     create_assistant,
     create_conversation,
     delete_assistant,
@@ -241,6 +242,16 @@ def delete_conversation_endpoint(
     current_user: AuthenticatedUser = Depends(require_jwt_token),
 ) -> Response:
     delete_conversation(db, conversation_id=conversation_id, user_id=UUID(str(current_user.id)))
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.delete("/v1/conversations/{conversation_id}/messages", status_code=status.HTTP_204_NO_CONTENT)
+def clear_conversation_messages_endpoint(
+    conversation_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> Response:
+    clear_conversation_messages(db, conversation_id=conversation_id, user_id=UUID(str(current_user.id)))
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 

@@ -5,6 +5,7 @@ export const navigationTranslations: Record<Language, Record<string, string>> = 
     // Navigation
     "nav.overview": "Overview",
     "nav.chat": "AI Chat",
+    "nav.bridge": "Bridge (MCP)",
     "nav.providers": "Providers",
     "nav.my_providers": "My Providers",
     "nav.notifications": "Notifications",
@@ -41,6 +42,7 @@ export const navigationTranslations: Record<Language, Record<string, string>> = 
     // Navigation
     "nav.overview": "概览",
     "nav.chat": "AI 聊天",
+    "nav.bridge": "Bridge（MCP）",
     "nav.providers": "Provider 目录",
     "nav.my_providers": "我的 Provider",
     "nav.notifications": "通知",

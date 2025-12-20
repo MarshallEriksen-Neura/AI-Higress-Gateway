@@ -18,6 +18,27 @@ type MCPServerForm = {
   envText: string;
 };
 
+function defaultTunnelUrl(): string {
+  const envUrl = process.env.NEXT_PUBLIC_BRIDGE_TUNNEL_URL;
+  if (envUrl && envUrl.trim()) return envUrl.trim();
+
+  const base = typeof window !== "undefined" ? window.location.origin : process.env.NEXT_PUBLIC_BASE_URL;
+  if (base && base.trim()) {
+    try {
+      const u = new URL(base.trim());
+      u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
+      u.pathname = "/bridge/tunnel";
+      u.search = "";
+      u.hash = "";
+      return u.toString();
+    } catch {
+      // fall through
+    }
+  }
+
+  return "wss://api.your-ai-chat.com/bridge/tunnel";
+}
+
 function yamlQuoted(value: string): string {
   return JSON.stringify(String(value ?? ""));
 }
@@ -108,7 +129,7 @@ function buildConfigYaml(input: {
 export function BridgeConfigGeneratorClient() {
   const { t } = useI18n();
 
-  const [serverUrl, setServerUrl] = useState("wss://api.your-ai-chat.com/bridge/tunnel");
+  const [serverUrl, setServerUrl] = useState(() => defaultTunnelUrl());
   const [token, setToken] = useState("");
   const [agentId, setAgentId] = useState("my-agent");
   const [agentLabel, setAgentLabel] = useState("My Agent");

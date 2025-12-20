@@ -3,7 +3,7 @@
 import useSWR, { useSWRConfig } from 'swr';
 import { useMemo } from 'react';
 import { messageService } from '@/http/message';
-import { cacheStrategies } from './cache';
+import { SWRCacheManager, cacheStrategies } from './cache';
 import type {
   GetMessagesParams,
   MessagesResponse,
@@ -149,6 +149,52 @@ export function useSendMessageToConversation(
     } catch (error) {
       await globalMutate(messagesKey);
       throw error;
+    }
+  };
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * 清空会话消息历史（保留会话本身）
+ *
+ * - 删除该会话下所有分页缓存
+ * - 重新验证当前会话消息与会话列表
+ */
+export function useClearConversationMessages(assistantId?: string | null) {
+  const { mutate: globalMutate, cache } = useSWRConfig();
+  const cacheManager = useMemo(() => new SWRCacheManager(cache), [cache]);
+
+  return async (conversationId: string) => {
+    if (!conversationId) throw new Error('Conversation ID is required');
+
+    const pattern = new RegExp(`^/v1/conversations/${escapeRegExp(conversationId)}/messages`);
+    const messageKeys = cacheManager.getKeysByPattern(pattern);
+    await Promise.all(
+      messageKeys.map((key) =>
+        globalMutate(
+          key,
+          {
+            items: [],
+            next_cursor: undefined,
+          } satisfies MessagesResponse,
+          { revalidate: false }
+        )
+      )
+    );
+
+    try {
+      await messageService.clearConversationMessages(conversationId);
+    } finally {
+      await globalMutate(`/v1/conversations/${conversationId}/messages?limit=50`);
+      if (assistantId) {
+        const queryParams = new URLSearchParams();
+        queryParams.set('assistant_id', assistantId);
+        queryParams.set('limit', '50');
+        await globalMutate(`/v1/conversations?${queryParams.toString()}`);
+      }
     }
   };
 }

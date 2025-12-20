@@ -1,13 +1,10 @@
 "use client";
 
 import { useCallback } from "react";
-import { useRouter } from "next/navigation";
-import { useSWRConfig } from "swr";
 
 import { SlateChatInput } from "@/components/chat/slate-chat-input";
 import { useChatStore } from "@/lib/stores/chat-store";
-import { useCreateConversation, useDeleteConversation } from "@/lib/swr/use-conversations";
-import { useSendMessage } from "@/lib/swr/use-messages";
+import { useClearConversationMessages, useSendMessage } from "@/lib/swr/use-messages";
 
 export function ConversationChatInput({
   conversationId,
@@ -24,21 +21,10 @@ export function ConversationChatInput({
   className?: string;
   onMcpAction?: () => void;
 }) {
-  const router = useRouter();
-  const { mutate: globalMutate } = useSWRConfig();
-
-  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
-  const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
-
-  const setConversationModelOverride = useChatStore((s) => s.setConversationModelOverride);
-  const setConversationBridgeAgentId = useChatStore((s) => s.setConversationBridgeAgentId);
-  const setConversationBridgeActiveReqId = useChatStore((s) => s.setConversationBridgeActiveReqId);
-
   const bridgeAgentId = useChatStore((s) => s.conversationBridgeAgentIds[conversationId] ?? null);
 
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
-  const deleteConversation = useDeleteConversation();
-  const createConversation = useCreateConversation();
+  const clearConversationMessages = useClearConversationMessages(assistantId);
 
   const handleSend = useCallback(
     async (payload: { content: string; model_preset?: Record<string, number> }) => {
@@ -52,41 +38,10 @@ export function ConversationChatInput({
   );
 
   const handleClearHistory = useCallback(async () => {
-    if (!selectedProjectId) {
-      throw new Error("Project not selected");
-    }
-
-    await deleteConversation(conversationId);
-
-    setConversationModelOverride(conversationId, null);
-    setConversationBridgeAgentId(conversationId, null);
-    setConversationBridgeActiveReqId(conversationId, null);
-
-    const newConversation = await createConversation({
-      assistant_id: assistantId,
-      project_id: selectedProjectId,
-    });
-
-    const messagesKey = `/v1/conversations/${conversationId}/messages?limit=50`;
-    const listKey = `/v1/conversations?assistant_id=${assistantId}&limit=50`;
-
-    await globalMutate(messagesKey, undefined, { revalidate: false });
-    await globalMutate(listKey);
-
-    setSelectedConversation(newConversation.conversation_id);
-    router.push(`/chat/${assistantId}/${newConversation.conversation_id}`);
+    await clearConversationMessages(conversationId);
   }, [
-    selectedProjectId,
-    deleteConversation,
+    clearConversationMessages,
     conversationId,
-    setConversationModelOverride,
-    setConversationBridgeAgentId,
-    setConversationBridgeActiveReqId,
-    createConversation,
-    assistantId,
-    globalMutate,
-    setSelectedConversation,
-    router,
   ]);
 
   return (

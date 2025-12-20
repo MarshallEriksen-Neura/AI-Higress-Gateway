@@ -35,6 +35,12 @@ export function MessageList({
   >([]);
   const parentRef = useRef<HTMLDivElement>(null);
 
+  // 切换会话时重置本地分页/聚合状态
+  useEffect(() => {
+    setCursor(undefined);
+    setAllMessages([]);
+  }, [conversationId]);
+
   // 获取消息列表
   const { messages, nextCursor, isLoading, isError, error } = useMessages(
     conversationId,
@@ -76,6 +82,17 @@ export function MessageList({
       });
     }
   }, [messages, cursor]);
+
+  // 当会话被“清空历史”后，SWR 返回空列表；这里需要同步清空本地聚合列表
+  useEffect(() => {
+    if (isLoading || isError) return;
+    if (messages.length !== 0) return;
+
+    if (cursor) {
+      setCursor(undefined);
+    }
+    setAllMessages([]);
+  }, [cursor, isError, isLoading, messages.length]);
 
   // 反转消息顺序：后端返回倒序（新消息在前），前端需要正序（旧消息在上，新消息在下）
   const displayMessages = useMemo(() => {

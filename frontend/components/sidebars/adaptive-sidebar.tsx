@@ -25,6 +25,7 @@ import {
   Megaphone,
   Globe,
   MessageSquare,
+  Plug,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -45,6 +46,11 @@ const navItems: NavItem[] = [
     titleKey: "nav.chat",
     href: "/chat",
     icon: MessageSquare,
+  },
+  {
+    titleKey: "nav.bridge",
+    href: "/dashboard/bridge",
+    icon: Plug,
   },
   {
     titleKey: "nav.my_providers",

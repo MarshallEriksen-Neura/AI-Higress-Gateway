@@ -1096,6 +1096,16 @@ export interface BridgeCancelResponse {
   status: string;
 }
 
+export interface BridgeAgentTokenRequest {
+  agent_id?: string;
+}
+
+export interface BridgeAgentTokenResponse {
+  agent_id: string;
+  token: string;
+  expires_at: string;
+}
+
 export interface BridgeEnvelope {
   v: number;
   type: string;

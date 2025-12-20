@@ -8,8 +8,14 @@ from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 import httpx
 
-from app.jwt_auth import require_jwt_token
+from app.jwt_auth import AuthenticatedUser, require_jwt_token
 from app.errors import bad_request, not_found, service_unavailable
+from app.services.bridge_agent_token_service import (
+    create_bridge_agent_token,
+    generate_agent_id,
+    normalize_agent_id,
+    validate_agent_id,
+)
 from app.services.bridge_gateway_client import BridgeGatewayClient
 from app.services.sse_parser import iter_sse_events
 
@@ -30,6 +36,30 @@ async def list_agents() -> dict[str, Any]:
 async def list_agent_tools(agent_id: str) -> dict[str, Any]:
     client = BridgeGatewayClient()
     return await client.list_tools(agent_id)
+
+@router.post("/agent-token")
+async def issue_agent_token(
+    payload: dict[str, Any],
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> dict[str, Any]:
+    """
+    为用户生成 Bridge Agent 连接 Tunnel Gateway 使用的 token（JWT HS256）。
+
+    说明：
+    - token 仅用于 Agent -> Gateway 的 AUTH（不包含用户 MCP 密钥）。
+    - token 不落库；如需吊销/轮换，可后续引入 DB/Redis revocation。
+    """
+    requested = payload.get("agent_id")
+    agent_id = normalize_agent_id(str(requested) if requested is not None else None)
+    if not agent_id:
+        agent_id = generate_agent_id()
+    try:
+        validate_agent_id(agent_id)
+    except ValueError as exc:
+        raise bad_request("agent_id 不合法", details={"code": "invalid_agent_id", "message": str(exc)})
+
+    token, expires_at = create_bridge_agent_token(user_id=str(current_user.id), agent_id=agent_id)
+    return {"agent_id": agent_id, "token": token, "expires_at": expires_at.isoformat()}
 
 
 @router.post("/invoke")

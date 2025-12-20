@@ -220,6 +220,17 @@ Response:
 
 分页返回消息列表（默认只返回 run 摘要；assistant 正文在 message.content）。
 
+### DELETE `/v1/conversations/{conversation_id}/messages`
+
+清空会话消息历史（保留会话本身）。
+
+说明：
+- 会删除该会话下的全部消息，并级联删除对应的 run / eval 数据。
+- `conversation_id` 不变；会话本身不会被删除。
+- 会话的 `last_message_content` 会被清空，`unread_count` 会归零。
+
+成功响应：204 No Content
+
 ### GET `/v1/runs/{run_id}`
 
 惰性加载 run 详情（包含 request/response payload 与 output_text）。

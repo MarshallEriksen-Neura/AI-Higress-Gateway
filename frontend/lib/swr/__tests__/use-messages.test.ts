@@ -1,6 +1,12 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { useMessages, useRun, useSendMessage, useSendMessageToConversation } from '../use-messages';
+import {
+  useClearConversationMessages,
+  useMessages,
+  useRun,
+  useSendMessage,
+  useSendMessageToConversation,
+} from '../use-messages';
 import { messageService } from '@/http/message';
 import type { MessagesResponse, RunDetail, SendMessageResponse } from '@/lib/api-types';
 
@@ -10,6 +16,7 @@ vi.mock('@/http/message', () => ({
     getMessages: vi.fn(),
     getRun: vi.fn(),
     sendMessage: vi.fn(),
+    clearConversationMessages: vi.fn(),
   },
 }));
 
@@ -245,5 +252,24 @@ describe('useSendMessageToConversation', () => {
       content: 'Hello',
       override_logical_model: 'test-model',
     });
+  });
+});
+
+describe('useClearConversationMessages', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should clear messages and keep conversation id', async () => {
+    vi.mocked(messageService.clearConversationMessages).mockResolvedValue(undefined);
+
+    const { result } = renderHook(
+      () => useClearConversationMessages('assistant-1'),
+      { wrapper }
+    );
+
+    await result.current('conv-1');
+
+    expect(messageService.clearConversationMessages).toHaveBeenCalledWith('conv-1');
   });
 });

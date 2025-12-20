@@ -23,6 +23,7 @@ import {
     Bell,
     Megaphone,
     Globe,
+    Plug,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -45,6 +46,11 @@ const navItems: NavItem[] = [
         titleKey: "nav.overview",
         href: "/dashboard/overview",
         icon: LayoutDashboard,
+    },
+    {
+        titleKey: "nav.bridge",
+        href: "/dashboard/bridge",
+        icon: Plug,
     },
     {
         titleKey: "nav.my_providers",

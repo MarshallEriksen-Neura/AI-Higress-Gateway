@@ -8,6 +8,8 @@ import type {
   BridgeInvokeResponse,
   BridgeCancelRequest,
   BridgeCancelResponse,
+  BridgeAgentTokenRequest,
+  BridgeAgentTokenResponse,
 } from "@/lib/api-types";
 
 export const useBridgeAgents = () => {
@@ -39,3 +41,5 @@ export const useBridgeInvoke = () => useApiPost<BridgeInvokeResponse, BridgeInvo
 
 export const useBridgeCancel = () => useApiPost<BridgeCancelResponse, BridgeCancelRequest>("/v1/bridge/cancel");
 
+export const useBridgeAgentToken = () =>
+  useApiPost<BridgeAgentTokenResponse, BridgeAgentTokenRequest>("/v1/bridge/agent-token");

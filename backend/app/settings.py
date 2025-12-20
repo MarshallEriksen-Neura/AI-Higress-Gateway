@@ -600,6 +600,21 @@ class Settings(BaseSettings):
         alias="BRIDGE_GATEWAY_EVENTS_PATH",
         description="Tunnel Gateway SSE events path (internal)",
     )
+    bridge_agent_token_secret: str = Field(
+        "",
+        alias="BRIDGE_AGENT_TOKEN_SECRET",
+        description=(
+            "Secret used to sign bridge agent tokens (JWT HS256). "
+            "If empty, falls back to SECRET_KEY."
+        ),
+    )
+    bridge_agent_token_expire_days: int = Field(
+        365,
+        alias="BRIDGE_AGENT_TOKEN_EXPIRE_DAYS",
+        description="Bridge agent token 过期天数（JWT exp）",
+        ge=1,
+        le=3650,
+    )
 
     # Browser-mimic headers for upstream (掩护功能)
     mask_as_browser: bool = Field(True, alias="MASK_AS_BROWSER")
