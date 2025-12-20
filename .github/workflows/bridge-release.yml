@@ -18,7 +18,7 @@ jobs:
     if: startsWith(github.event_name == 'release' && github.event.release.tag_name || github.ref_name, 'bridge-v')
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Set up Go
         uses: actions/setup-go@v5
