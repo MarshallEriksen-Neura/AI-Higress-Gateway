@@ -135,6 +135,7 @@ from .assistants import (
 )
 from .evals import EvalCreateRequest, EvalRatingRequest, EvalRatingResponse, EvalResponse
 from .project_eval_config import ProjectEvalConfigResponse, ProjectEvalConfigUpdateRequest
+from .project_chat_settings import ProjectChatSettingsResponse, ProjectChatSettingsUpdateRequest
 
 __all__ = [
     # Note: This module historically exports a large set of schemas.
@@ -256,6 +257,9 @@ __all__ = [
     # New: Project eval config
     "ProjectEvalConfigResponse",
     "ProjectEvalConfigUpdateRequest",
+    # New: Project chat settings
+    "ProjectChatSettingsResponse",
+    "ProjectChatSettingsUpdateRequest",
 ]
 from .routing import CandidateInfo, RoutingDecision, RoutingRequest
 from .routing_metrics import MetricsHistory, RoutingMetrics

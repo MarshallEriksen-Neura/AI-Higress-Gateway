@@ -571,6 +571,7 @@ async def run_user_probe_task_now_endpoint(
             provider=provider,
             client=http_client,
             redis=effective_redis,
+            allow_disabled=True,
         )
     except UserProbeConflictError as exc:
         raise bad_request(str(exc))

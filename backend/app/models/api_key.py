@@ -41,6 +41,18 @@ class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         default=False,
     )
 
+    # Chat defaults (project-level)
+    chat_default_logical_model: Mapped[str | None] = Column(
+        String(128),
+        nullable=True,
+        doc="项目级聊天默认逻辑模型；为空表示默认 auto",
+    )
+    chat_title_logical_model: Mapped[str | None] = Column(
+        String(128),
+        nullable=True,
+        doc="项目级会话标题生成逻辑模型；为空表示不自动命名",
+    )
+
     user: Mapped["User"] = relationship("User", back_populates="api_keys")
     allowed_provider_links: Mapped[list["APIKeyAllowedProvider"]] = relationship(
         "APIKeyAllowedProvider",

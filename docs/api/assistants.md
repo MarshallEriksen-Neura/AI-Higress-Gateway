@@ -40,6 +40,7 @@ Response:
 - `default_logical_model` 支持设置为 `"auto"`：表示由 Bandit（Thompson Sampling）在项目配置的 `candidate_logical_models` 中选择一个模型作为本次 baseline 的实际模型（单路执行，不并行）。
 - 若项目未配置 `candidate_logical_models`，则 `"auto"` 会返回 400。
 - `project_id`（MVP: project_id == api_key_id）可为空；若传入，则后端会校验该项目是否存在且归属当前用户。
+- `default_logical_model` 也支持设置为 `"__project__"`：表示跟随项目级默认模型（见 Project Chat Settings）。
 
 Request:
 ```json
@@ -57,6 +58,7 @@ Request:
 - `title_logical_model`（可选）：会话标题生成模型。
   - 当创建会话时不传 `title`，并且在该会话发送第一条用户消息后，后端会使用该模型基于“首问”自动生成 `Conversation.title`（尽力而为，不影响主聊天流程）。
   - 若不传该字段，则不会自动生成标题（保持 `title` 为空，前端可按无标题展示）。
+  - 传 `"__project__"`：跟随项目级标题模型（见 Project Chat Settings）。
 
 Errors:
 - `404 not_found`：项目不存在或无权访问（`project_id` 传错）
@@ -137,6 +139,40 @@ Request:
 ### DELETE `/v1/conversations/{conversation_id}`
 
 删除会话（硬删除，会级联删除会话消息与 run/eval 数据）。
+
+## Project Chat Settings
+
+### GET `/v1/projects/{project_id}/chat-settings`
+
+获取项目级聊天设置（MVP: `project_id == api_key_id`）。
+
+Response:
+```json
+{
+  "project_id": "uuid",
+  "default_logical_model": "auto",
+  "title_logical_model": "gpt-4.1"
+}
+```
+
+说明：
+- `default_logical_model`：项目默认聊天模型；当助手的 `default_logical_model` 设置为 `"__project__"` 时生效。
+- `title_logical_model`：项目默认标题模型；当助手的 `title_logical_model` 设置为 `"__project__"` 时生效；为空表示不自动命名。
+
+### PUT `/v1/projects/{project_id}/chat-settings`
+
+更新项目级聊天设置（只更新传入字段）。
+
+Request:
+```json
+{
+  "default_logical_model": "auto",
+  "title_logical_model": "gpt-4.1"
+}
+```
+
+说明：
+- 传 `null` 可清空对应字段（恢复默认行为）。
 
 ## Messages / Runs
 

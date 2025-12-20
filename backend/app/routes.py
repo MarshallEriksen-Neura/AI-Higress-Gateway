@@ -45,6 +45,7 @@ from .api.v1.cli_config import router as cli_config_router
 from .api.v1.assistant_routes import router as assistant_router
 from .api.v1.eval_routes import router as eval_router
 from .api.v1.project_eval_config_routes import router as project_eval_config_router
+from .api.v1.project_chat_settings_routes import router as project_chat_settings_router
 from .db import SessionLocal
 from .logging_config import logger
 from .log_sanitizer import sanitize_headers_for_log
@@ -229,6 +230,7 @@ def create_app() -> FastAPI:
     app.include_router(assistant_router)
     app.include_router(eval_router)
     app.include_router(project_eval_config_router)
+    app.include_router(project_chat_settings_router)
 
     # 用户私有 Provider
     app.include_router(private_provider_router)

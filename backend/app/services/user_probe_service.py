@@ -276,11 +276,12 @@ async def run_user_probe_task_once(
     provider: Provider,
     client: CurlCffiClient | httpx.AsyncClient,
     redis: Redis | None = None,
+    allow_disabled: bool = False,
 ) -> UserProbeRun:
     if task.in_progress:
         raise UserProbeConflictError("任务正在执行，请稍后重试")
 
-    if not task.enabled:
+    if not task.enabled and not allow_disabled:
         raise UserProbeServiceError("任务已禁用")
 
     task.in_progress = True

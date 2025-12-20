@@ -31,8 +31,12 @@ from app.services.project_eval_config_service import (
     get_or_default_project_eval_config,
     resolve_project_context,
 )
+from app.services.project_chat_settings_service import DEFAULT_PROJECT_CHAT_MODEL
 from app.api.v1.chat.provider_selector import ProviderSelector
 from app.api.v1.chat.request_handler import RequestHandler
+
+
+PROJECT_INHERIT_SENTINEL = "__project__"
 
 
 def _to_authenticated_api_key(
@@ -131,9 +135,17 @@ async def _maybe_auto_title_conversation(
         # Credit check failures should never block message sending.
         return
 
+    # Use the same project context for billing/provider access.
+    ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
+
     title_model_raw = (getattr(assistant, "title_logical_model", None) or "").strip()
     if not title_model_raw:
         return
+
+    if title_model_raw == PROJECT_INHERIT_SENTINEL:
+        title_model_raw = (getattr(ctx.api_key, "chat_title_logical_model", None) or "").strip()
+        if not title_model_raw:
+            return
 
     title_model = requested_model_for_title_fallback if title_model_raw == "auto" else title_model_raw
     if not title_model:
@@ -165,8 +177,6 @@ async def _maybe_auto_title_conversation(
         "max_tokens": 48,
     }
 
-    # Use the same project context for billing/provider access.
-    ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
     auth_key = _to_authenticated_api_key(api_key=ctx.api_key, current_user=current_user)
 
     handler = RequestHandler(api_key=auth_key, db=db, redis=redis, client=client)
@@ -235,6 +245,8 @@ async def send_message_and_run_baseline(
 
     assistant = get_assistant(db, assistant_id=UUID(str(conv.assistant_id)), user_id=UUID(str(current_user.id)))
     requested_model = override_logical_model or assistant.default_logical_model
+    if requested_model == PROJECT_INHERIT_SENTINEL:
+        requested_model = (getattr(ctx.api_key, "chat_default_logical_model", None) or "").strip() or DEFAULT_PROJECT_CHAT_MODEL
     if not requested_model:
         raise bad_request("未指定模型")
 

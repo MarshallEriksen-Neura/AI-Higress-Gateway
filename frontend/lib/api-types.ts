@@ -893,6 +893,18 @@ export interface ConversationsResponse {
   next_cursor?: string;
 }
 
+// ============= 项目聊天设置（Project Chat Settings） =============
+export interface ProjectChatSettings {
+  project_id: string;
+  default_logical_model: string;
+  title_logical_model?: string | null;
+}
+
+export interface UpdateProjectChatSettingsRequest {
+  default_logical_model?: string | null;
+  title_logical_model?: string | null;
+}
+
 // ============= 消息相关 =============
 export interface Message {
   message_id: string;

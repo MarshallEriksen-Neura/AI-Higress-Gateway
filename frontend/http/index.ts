@@ -66,3 +66,4 @@ export { conversationService } from './conversation';
 export { messageService } from './message';
 export { evalService } from './eval';
 export { evalConfigService } from './eval-config';
+export { projectChatSettingsService } from './project-chat-settings';

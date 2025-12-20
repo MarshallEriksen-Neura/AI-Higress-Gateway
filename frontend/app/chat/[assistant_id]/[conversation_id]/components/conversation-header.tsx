@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Pencil } from "lucide-react";
+import { Pencil, SlidersHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { useSWRConfig } from "swr";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,8 +29,10 @@ import { useChatStore } from "@/lib/stores/chat-store";
 import { useAssistant } from "@/lib/swr/use-assistants";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { useUpdateConversation } from "@/lib/swr/use-conversations";
+import { useProjectChatSettings } from "@/lib/swr/use-project-chat-settings";
 
 const INHERIT_VALUE = "__inherit__";
+const PROJECT_INHERIT_SENTINEL = "__project__";
 
 export function ConversationHeader({
   assistantId,
@@ -50,10 +53,18 @@ export function ConversationHeader({
   const {
     conversationModelOverrides,
     setConversationModelOverride,
+    selectedProjectId,
   } = useChatStore();
+
+  const { settings: projectSettings } = useProjectChatSettings(selectedProjectId);
 
   const currentOverride = conversationModelOverrides[conversationId] ?? null;
   const selectedValue = currentOverride ?? INHERIT_VALUE;
+
+  const effectiveAssistantDefaultModel =
+    assistant?.default_logical_model === PROJECT_INHERIT_SENTINEL
+      ? projectSettings?.default_logical_model || "auto"
+      : assistant?.default_logical_model || "auto";
 
   const availableModels = useMemo(() => {
     const modelSet = new Set<string>();
@@ -67,10 +78,10 @@ export function ConversationHeader({
 
     // Ensure current override is selectable even if filtered out
     if (currentOverride) modelSet.add(currentOverride);
-    if (assistant?.default_logical_model) modelSet.add(assistant.default_logical_model);
+    if (effectiveAssistantDefaultModel) modelSet.add(effectiveAssistantDefaultModel);
 
     return ["auto", ...Array.from(modelSet).filter((m) => m !== "auto").sort()];
-  }, [models, currentOverride, assistant?.default_logical_model]);
+  }, [models, currentOverride, effectiveAssistantDefaultModel]);
 
   const [renameOpen, setRenameOpen] = useState(false);
   const [draftTitle, setDraftTitle] = useState(title || "");
@@ -103,7 +114,7 @@ export function ConversationHeader({
           <div className="truncate text-sm font-medium">{displayTitle}</div>
           <div className="truncate text-xs text-muted-foreground">
             {t("chat.header.model_label")}:{" "}
-            {currentOverride || assistant?.default_logical_model || "auto"}
+            {currentOverride || effectiveAssistantDefaultModel}
           </div>
         </div>
 
@@ -125,8 +136,8 @@ export function ConversationHeader({
               <SelectContent>
                 <SelectItem value={INHERIT_VALUE}>
                   {t("chat.header.model_inherit")}
-                  {assistant?.default_logical_model
-                    ? ` (${assistant.default_logical_model})`
+                  {effectiveAssistantDefaultModel
+                    ? ` (${effectiveAssistantDefaultModel})`
                     : ""}
                 </SelectItem>
                 {availableModels.map((model) => (
@@ -137,6 +148,17 @@ export function ConversationHeader({
               </SelectContent>
             </Select>
           </div>
+
+          <Button
+            asChild
+            variant="ghost"
+            size="icon"
+            aria-label={t("chat.settings.open")}
+          >
+            <Link href="/chat/settings">
+              <SlidersHorizontal className="size-4" />
+            </Link>
+          </Button>
 
           <Button
             variant="ghost"
@@ -179,4 +201,3 @@ export function ConversationHeader({
     </>
   );
 }
-

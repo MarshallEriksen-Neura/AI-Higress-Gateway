@@ -2493,6 +2493,10 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 
 **请求体**: 空对象 `{}`（或不传）
 
+**说明**:
+- 该接口用于“一次性连通性/可用性检查”，不要求任务必须处于启用状态。
+- 当任务 `enabled=false` 时也允许手动运行一次；接口不会修改任务的 `enabled`，也不会为其生成后续调度（即不会开启自动执行）。
+
 **响应**:
 ```json
 {

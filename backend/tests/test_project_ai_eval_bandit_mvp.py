@@ -468,6 +468,85 @@ def test_conversation_auto_title_generated_from_first_message(app_with_mock_chat
         assert found.get("title") == "echo: 你好"
 
 
+def test_project_chat_settings_get_and_update(app_with_mock_chat):
+    app, SessionLocal, _ = app_with_mock_chat
+    user_id, api_key_id = _get_seed_ids(SessionLocal)
+    headers = jwt_auth_headers(str(user_id))
+
+    with TestClient(app) as client:
+        resp = client.get(f"/v1/projects/{api_key_id}/chat-settings", headers=headers)
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["project_id"] == str(api_key_id)
+        assert data["default_logical_model"] == "auto"
+        assert data["title_logical_model"] is None
+
+        resp = client.put(
+            f"/v1/projects/{api_key_id}/chat-settings",
+            headers=headers,
+            json={"default_logical_model": "test-model-2", "title_logical_model": "test-model"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["default_logical_model"] == "test-model-2"
+        assert data["title_logical_model"] == "test-model"
+
+
+def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_chat):
+    app, SessionLocal, _ = app_with_mock_chat
+    user_id, api_key_id = _get_seed_ids(SessionLocal)
+    headers = jwt_auth_headers(str(user_id))
+
+    with TestClient(app) as client:
+        # set project defaults
+        resp = client.put(
+            f"/v1/projects/{api_key_id}/chat-settings",
+            headers=headers,
+            json={"default_logical_model": "test-model-2", "title_logical_model": "test-model"},
+        )
+        assert resp.status_code == 200
+
+        # create assistant that follows project settings
+        resp = client.post(
+            "/v1/assistants",
+            headers=headers,
+            json={
+                "project_id": str(api_key_id),
+                "name": "跟随项目助手",
+                "system_prompt": "你是一个严谨的助手",
+                "default_logical_model": "__project__",
+                "title_logical_model": "__project__",
+            },
+        )
+        assert resp.status_code == 201
+        assistant_id = resp.json()["assistant_id"]
+
+        # create conversation (no title)
+        resp = client.post(
+            "/v1/conversations",
+            headers=headers,
+            json={"assistant_id": assistant_id, "project_id": str(api_key_id)},
+        )
+        assert resp.status_code == 201
+        conversation_id = resp.json()["conversation_id"]
+
+        # send first message (should run with project default model and auto-title via project title model)
+        resp = client.post(
+            f"/v1/conversations/{conversation_id}/messages",
+            headers=headers,
+            json={"content": "你好"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["baseline_run"]["requested_logical_model"] == "test-model-2"
+
+        resp = client.get(f"/v1/conversations?assistant_id={assistant_id}", headers=headers)
+        assert resp.status_code == 200
+        items = resp.json().get("items") or []
+        found = next((it for it in items if it.get("conversation_id") == conversation_id), None)
+        assert found is not None
+        assert found.get("title") == "echo: 你好"
+
+
 def test_eval_streaming_sse_parallel(app_with_mock_chat, monkeypatch):
     app, SessionLocal, redis = app_with_mock_chat
     user_id, api_key_id = _get_seed_ids(SessionLocal)

@@ -57,6 +57,7 @@ export function AssistantForm({
 }: AssistantFormProps) {
   const { t } = useI18n();
   const isEditing = Boolean(editingAssistant);
+  const PROJECT_INHERIT_SENTINEL = "__project__";
 
   // 创建表单验证 schema
   const assistantSchema = useMemo(
@@ -100,7 +101,7 @@ export function AssistantForm({
       : availableModels.filter((m) => m !== "auto")
     ).filter(Boolean);
 
-    const set = new Set<string>(candidates);
+    const set = new Set<string>(candidates.filter((m) => m !== PROJECT_INHERIT_SENTINEL));
     const current = editingAssistant?.title_logical_model ?? null;
     if (current) set.add(current);
     return Array.from(set).sort();
@@ -219,6 +220,9 @@ export function AssistantForm({
                 <SelectValue placeholder={t("chat.assistant.default_model_placeholder")} />
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={PROJECT_INHERIT_SENTINEL}>
+                  {t("chat.assistant.default_model_follow_project")}
+                </SelectItem>
                 {availableModels.map((model) => (
                   <SelectItem key={model} value={model}>
                     {model}
@@ -248,6 +252,9 @@ export function AssistantForm({
               <SelectContent>
                 <SelectItem value="inherit">
                   {t("chat.assistant.title_model_inherit")}
+                </SelectItem>
+                <SelectItem value={PROJECT_INHERIT_SENTINEL}>
+                  {t("chat.assistant.title_model_follow_project")}
                 </SelectItem>
                 {titleModelOptions.map((model) => (
                   <SelectItem key={model} value={model}>

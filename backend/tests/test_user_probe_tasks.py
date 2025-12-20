@@ -47,7 +47,8 @@ def test_user_probe_task_crud_and_run(client: TestClient, db_session, monkeypatc
         "interval_seconds": 300,
         "max_tokens": 8,
         "api_style": "openai",
-        "enabled": True,
+        # 默认不启用调度任务，仍允许“运行一次”做即时连通性检查。
+        "enabled": False,
     }
     resp = client.post(
         f"/users/{user_id}/private-providers/{provider_id}/probe-tasks",
@@ -56,6 +57,7 @@ def test_user_probe_task_crud_and_run(client: TestClient, db_session, monkeypatc
     )
     assert resp.status_code == 201, resp.text
     task_id = resp.json()["id"]
+    assert resp.json()["enabled"] is False
 
     # 3) List tasks.
     resp = client.get(
@@ -91,7 +93,19 @@ def test_user_probe_task_crud_and_run(client: TestClient, db_session, monkeypatc
     assert run["success"] is True
     assert run["response_text"] == "pong"
 
-    # 5) List runs.
+    # 5) Task should remain disabled, without next_run_at, but should have last_run_at.
+    resp = client.get(
+        f"/users/{user_id}/private-providers/{provider_id}/probe-tasks",
+        headers=headers,
+    )
+    assert resp.status_code == 200
+    tasks = resp.json()
+    assert tasks[0]["enabled"] is False
+    assert tasks[0]["next_run_at"] is None
+    assert tasks[0]["last_run_at"] is not None
+    assert tasks[0]["last_run"]["id"] == run["id"]
+
+    # 6) List runs.
     resp = client.get(
         f"/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}/runs?limit=10",
         headers=headers,
@@ -101,16 +115,17 @@ def test_user_probe_task_crud_and_run(client: TestClient, db_session, monkeypatc
     assert len(runs) == 1
     assert runs[0]["id"] == run["id"]
 
-    # 6) Disable task.
+    # 7) Enable task.
     resp = client.put(
         f"/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}",
-        json={"enabled": False},
+        json={"enabled": True},
         headers=headers,
     )
     assert resp.status_code == 200
-    assert resp.json()["enabled"] is False
+    assert resp.json()["enabled"] is True
+    assert resp.json()["next_run_at"] is not None
 
-    # 7) Delete task.
+    # 8) Delete task.
     resp = client.delete(
         f"/users/{user_id}/private-providers/{provider_id}/probe-tasks/{task_id}",
         headers=headers,
