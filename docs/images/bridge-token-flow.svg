@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="820" viewBox="0 0 1400 820" role="img" aria-label="Bridge/MCP Token 流程图">
+  <defs>
+    <style>
+      .bg { fill: #0b0f1a; }
+      .card { fill: #111a2e; stroke: #2b3b66; stroke-width: 2; }
+      .card2 { fill: #0f172a; stroke: #2b3b66; stroke-width: 2; }
+      .title { fill: #e6eefc; font: 700 24px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei"; }
+      .text { fill: #c7d2fe; font: 500 16px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei"; }
+      .muted { fill: #93a4c7; font: 500 14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei"; }
+      .mono { fill: #c7d2fe; font: 600 14px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New"; }
+      .arrow { stroke: #7aa2ff; stroke-width: 2.5; fill: none; }
+      .arrow2 { stroke: #4ade80; stroke-width: 2.5; fill: none; }
+      .arrow3 { stroke: #f59e0b; stroke-width: 2.5; fill: none; }
+      .warn { fill: #fcd34d; font: 600 14px ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "PingFang SC", "Microsoft YaHei"; }
+      .pill { fill: #0b1224; stroke: #2b3b66; stroke-width: 2; }
+    </style>
+    <marker id="arrowHead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#7aa2ff"/>
+    </marker>
+    <marker id="arrowHeadGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#4ade80"/>
+    </marker>
+    <marker id="arrowHeadAmber" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#f59e0b"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1400" height="820"/>
+
+  <text class="title" x="60" y="70">Bridge / MCP 连接与 Token 流程（多用户）</text>
+  <text class="muted" x="60" y="100">核心区分：登录用 JWT（浏览器→后端） vs Agent 连接 Token（Agent→网关）；另外还有内网 Internal Token（后端→网关）。</text>
+
+  <!-- Left: Browser -->
+  <rect class="card" x="60" y="150" rx="14" ry="14" width="420" height="260"/>
+  <text class="text" x="90" y="190">① 用户浏览器（Dashboard）</text>
+  <text class="muted" x="90" y="220">用户登录后，浏览器持有登录 JWT（access_token）</text>
+  <rect class="pill" x="90" y="245" rx="10" ry="10" width="360" height="54"/>
+  <text class="mono" x="110" y="277">Authorization: Bearer &lt;JWT&gt;</text>
+  <text class="muted" x="90" y="330">点击“生成/下载 config.yaml”时：</text>
+  <text class="muted" x="90" y="355">用登录 JWT 调后端生成 Agent 连接 Token</text>
+
+  <!-- Middle: Backend API -->
+  <rect class="card" x="520" y="150" rx="14" ry="14" width="420" height="260"/>
+  <text class="text" x="550" y="190">② 后端 API（FastAPI）</text>
+  <text class="muted" x="550" y="220">受保护接口：</text>
+  <text class="mono" x="550" y="245">POST /v1/bridge/agent-token</text>
+  <text class="muted" x="550" y="275">校验用户登录 JWT → 生成 “bridge_agent JWT”</text>
+  <text class="muted" x="550" y="300">签名密钥来自：</text>
+  <text class="mono" x="550" y="325">SECRET_KEY（HS256）</text>
+  <rect class="pill" x="550" y="345" rx="10" ry="10" width="360" height="46"/>
+  <text class="mono" x="570" y="375">{ token: &lt;bridge_agent JWT&gt; }</text>
+
+  <!-- Right top: Config.yaml -->
+  <rect class="card2" x="980" y="150" rx="14" ry="14" width="360" height="260"/>
+  <text class="text" x="1010" y="190">③ 用户下载的 config.yaml</text>
+  <text class="muted" x="1010" y="220">包含敏感信息（仅在用户侧保存）</text>
+  <text class="mono" x="1010" y="252">server.url: wss://mcp.ethereals.space/bridge/tunnel</text>
+  <text class="mono" x="1010" y="278">server.token: &lt;bridge_agent JWT&gt;</text>
+  <text class="mono" x="1010" y="304">agent.id: &lt;agent_id&gt;</text>
+  <text class="mono" x="1010" y="330">mcp_servers: ...</text>
+  <text class="warn" x="1010" y="372">提示：这里的 token 不是登录 JWT</text>
+
+  <!-- Bottom row: Agent / Nginx / Gateway -->
+  <rect class="card" x="60" y="470" rx="14" ry="14" width="420" height="280"/>
+  <text class="text" x="90" y="510">④ 用户机器：Bridge Agent</text>
+  <text class="muted" x="90" y="540">读取 config.yaml → 连接网关 WS</text>
+  <text class="mono" x="90" y="572">bridge agent start</text>
+  <text class="muted" x="90" y="610">连接并发送：</text>
+  <text class="mono" x="90" y="636">HELLO(agent_id=...)</text>
+  <text class="mono" x="90" y="662">AUTH(token=&lt;bridge_agent JWT&gt;)</text>
+
+  <rect class="card" x="520" y="470" rx="14" ry="14" width="420" height="280"/>
+  <text class="text" x="550" y="510">⑤ Nginx：mcp.ethereals.space</text>
+  <text class="muted" x="550" y="540">TLS 终止 + WebSocket 反向代理</text>
+  <text class="mono" x="550" y="572">/bridge/tunnel → :8088</text>
+  <text class="muted" x="550" y="610">公网需要开放（用户侧 Agent 连接入口）：</text>
+  <text class="mono" x="550" y="636">/bridge/tunnel</text>
+  <text class="muted" x="550" y="662">禁止对公网暴露（后端调用的管理接口）：</text>
+  <text class="mono" x="550" y="688">/internal/bridge/*</text>
+
+  <rect class="card" x="980" y="470" rx="14" ry="14" width="360" height="280"/>
+  <text class="text" x="1010" y="510">⑥ Tunnel Gateway（Go）</text>
+  <text class="muted" x="1010" y="540">校验 AUTH token（可选）</text>
+  <text class="mono" x="1010" y="572">--agent-token-secret=$SECRET_KEY</text>
+  <text class="muted" x="1010" y="610">验证：</text>
+  <text class="muted" x="1010" y="632">- HS256 签名正确</text>
+  <text class="muted" x="1010" y="654">- type=bridge_agent</text>
+  <text class="muted" x="1010" y="676">- agent_id 与 HELLO 一致</text>
+
+  <!-- Arrows: Browser -> Backend -->
+  <path class="arrow" d="M480 270 C520 270 500 270 520 270" marker-end="url(#arrowHead)"/>
+  <text class="muted" x="455" y="250" text-anchor="end">登录 JWT</text>
+  <text class="mono" x="500" y="250">POST /v1/bridge/agent-token</text>
+
+  <!-- Arrows: Backend -> Config -->
+  <path class="arrow2" d="M940 270 C980 270 960 270 980 270" marker-end="url(#arrowHeadGreen)"/>
+  <text class="muted" x="960" y="250" text-anchor="end">返回</text>
+  <text class="mono" x="960" y="250" text-anchor="start">bridge_agent JWT</text>
+
+  <!-- Arrows: Config -> Agent -->
+  <path class="arrow" d="M1060 410 C980 460 640 450 480 520" marker-end="url(#arrowHead)"/>
+  <text class="muted" x="820" y="470">用户下载并导入到本机</text>
+
+  <!-- Arrows: Agent -> Nginx (WS) -->
+  <path class="arrow3" d="M480 620 C520 620 500 620 520 620" marker-end="url(#arrowHeadAmber)"/>
+  <text class="muted" x="455" y="600" text-anchor="end">WSS</text>
+  <text class="mono" x="500" y="600">/bridge/tunnel</text>
+
+  <!-- Arrows: Nginx -> Gateway -->
+  <path class="arrow3" d="M940 620 C980 620 960 620 980 620" marker-end="url(#arrowHeadAmber)"/>
+  <text class="muted" x="960" y="600" text-anchor="end">proxy_pass</text>
+  <text class="mono" x="960" y="600" text-anchor="start">:8088</text>
+
+  <!-- Legend -->
+  <rect class="pill" x="60" y="120" rx="10" ry="10" width="1280" height="18"/>
+  <text class="muted" x="70" y="134">
+    图例：蓝色箭头=浏览器⇄后端（JWT）；绿色箭头=后端返回给浏览器的 Agent 连接 Token；橙色箭头=Agent⇄网关 WSS。
+  </text>
+</svg>

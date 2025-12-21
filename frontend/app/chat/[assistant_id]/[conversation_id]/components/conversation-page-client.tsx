@@ -231,18 +231,23 @@ export function ConversationPageClient({
         }
         const next = [...challengers];
         const prev = next[idx];
-        next[idx] = {
-          ...prev,
-          ...(patch.requested_logical_model
-            ? { requested_logical_model: patch.requested_logical_model }
-            : {}),
-          ...(patch.status ? { status: patch.status } : {}),
-          ...(patch.output_preview !== undefined
-            ? { output_preview: patch.output_preview }
-            : {}),
-          ...(patch.latency !== undefined ? { latency: patch.latency } : {}),
-          ...(patch.error_code !== undefined ? { error_code: patch.error_code } : {}),
-        };
+        const updated = { ...prev } as ChallengerRun;
+        if (patch.requested_logical_model !== undefined) {
+          updated.requested_logical_model = patch.requested_logical_model;
+        }
+        if (patch.status !== undefined) {
+          updated.status = patch.status;
+        }
+        if (patch.output_preview !== undefined) {
+          updated.output_preview = patch.output_preview;
+        }
+        if (patch.latency !== undefined) {
+          updated.latency = patch.latency;
+        }
+        if (patch.error_code !== undefined) {
+          updated.error_code = patch.error_code;
+        }
+        next[idx] = updated;
         return next;
       };
 
