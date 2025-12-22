@@ -3,19 +3,34 @@
 import { memo, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { useRouter } from "next/navigation";
+import { useSWRConfig } from "swr";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { MessageItem } from "./message-item";
 import { ErrorAlert } from "./error-alert";
 import { AddComparisonDialog } from "./add-comparison-dialog";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors/error-display";
-import { useMessages } from "@/lib/swr/use-messages";
+import { useMessages, useSendMessage } from "@/lib/swr/use-messages";
+import { useDeleteConversation } from "@/lib/swr/use-conversations";
 import { useCachePreloader } from "@/lib/swr/cache";
 import { messageService } from "@/http/message";
 import { conversationService } from "@/http/conversation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useAssistant } from "@/lib/swr/use-assistants";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
+import { useChatStore } from "@/lib/stores/chat-store";
 import {
   useChatComparisonStore,
   type ComparisonVariant,
@@ -28,6 +43,8 @@ export interface MessageListProps {
   onViewDetails?: (runId: string) => void;
   onTriggerEval?: (messageId: string, runId: string) => void; // 添加 messageId 参数
   showEvalButton?: boolean;
+  overrideLogicalModel?: string | null;
+  disabledActions?: boolean;
 }
 
 export const MessageList = memo(function MessageList({
@@ -36,13 +53,27 @@ export const MessageList = memo(function MessageList({
   onViewDetails,
   onTriggerEval,
   showEvalButton = true,
+  overrideLogicalModel = null,
+  disabledActions = false,
 }: MessageListProps) {
   const { t, language } = useI18n();
+  const router = useRouter();
+  const { mutate: globalMutate } = useSWRConfig();
   const { user } = useAuth();
   const { assistant } = useAssistant(assistantId);
-  const { models } = useLogicalModels();
+  const projectId = assistant?.project_id ?? null;
+  const { models } = useLogicalModels(projectId);
   const { showError } = useErrorDisplay();
   const { preloadData } = useCachePreloader();
+  const chatStreamingEnabled = useChatStore((s) => s.chatStreamingEnabled);
+  const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
+
+  const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
+  const deleteConversation = useDeleteConversation();
+
+  const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeletingConversation, setIsDeletingConversation] = useState(false);
   const [cursor, setCursor] = useState<string | undefined>();
   const [allMessages, setAllMessages] = useState<
     Array<{ message: Message; run?: RunSummary }>
@@ -103,7 +134,30 @@ export const MessageList = memo(function MessageList({
       setAllMessages((prev) => {
         // 如果是第一次加载或重置
         if (!cursor) {
-          return messages;
+          if (prev.length === 0) return messages;
+
+          // 兜底：当回流数据缺少助手正文时，保留流式阶段已展示的内容，避免气泡变空
+          const prevContentMap = new Map(
+            prev.map((item) => [item.message.message_id, item.message.content])
+          );
+
+          return messages.map((item) => {
+            const existingContent = prevContentMap.get(item.message.message_id);
+            const nextContent = (item.message.content || "").trim();
+
+            if (
+              item.message.role === "assistant" &&
+              !nextContent &&
+              existingContent
+            ) {
+              return {
+                ...item,
+                message: { ...item.message, content: existingContent },
+              };
+            }
+
+            return item;
+          });
         }
         // 追加更早的消息到列表末尾（因为后端倒序，旧消息在后端列表的后面）
         return [...prev, ...messages];
@@ -169,6 +223,87 @@ export const MessageList = memo(function MessageList({
 
     return rows;
   }, [displayMessages]);
+
+  const latestAssistantMessageId = useMemo(() => {
+    for (let idx = displayRows.length - 1; idx >= 0; idx -= 1) {
+      const row = displayRows[idx];
+      if (row?.message.role === "assistant") {
+        return row.message.message_id;
+      }
+    }
+    return null;
+  }, [displayRows]);
+
+  const findUserMessageContent = useCallback(
+    (sourceUserMessageId?: string) => {
+      if (!sourceUserMessageId) return null;
+      const target = displayMessages.find(
+        (item) =>
+          item.message.message_id === sourceUserMessageId && item.message.role === "user"
+      );
+      const content = (target?.message.content || "").trim();
+      return content.length > 0 ? content : null;
+    },
+    [displayMessages]
+  );
+
+  const handleRegenerate = useCallback(
+    async (assistantMessageId: string, sourceUserMessageId?: string) => {
+      const content = findUserMessageContent(sourceUserMessageId);
+      if (!content) {
+        toast.error(t("chat.message.empty_description"));
+        return;
+      }
+
+      setRegeneratingId(assistantMessageId);
+      try {
+        await sendMessage({ content }, { streaming: chatStreamingEnabled });
+        toast.success(t("chat.message.sent"));
+      } catch (error) {
+        showError(error, { context: t("chat.action.retry") });
+      } finally {
+        setRegeneratingId(null);
+      }
+    },
+    [chatStreamingEnabled, findUserMessageContent, sendMessage, showError, t]
+  );
+
+  const handleDeleteConversation = useCallback(() => {
+    setDeleteDialogOpen(true);
+  }, []);
+
+  const confirmDeleteConversation = useCallback(async () => {
+    setIsDeletingConversation(true);
+    try {
+      await deleteConversation(conversationId);
+      setSelectedConversation(null);
+      toast.success(t("chat.conversation.deleted"));
+
+      const conversationsKey = `/v1/conversations?assistant_id=${assistantId}&limit=50`;
+      await globalMutate(conversationsKey);
+      await globalMutate(
+        `/v1/conversations/${conversationId}/messages?limit=50`,
+        undefined,
+        { revalidate: false }
+      );
+
+      router.push(`/chat/${assistantId}`);
+    } catch (error) {
+      showError(error, { context: t("chat.conversation.delete") });
+    } finally {
+      setIsDeletingConversation(false);
+      setDeleteDialogOpen(false);
+    }
+  }, [
+    assistantId,
+    conversationId,
+    deleteConversation,
+    globalMutate,
+    router,
+    setSelectedConversation,
+    showError,
+    t,
+  ]);
 
   const buildComparisonPrompt = useCallback(
     (sourceUserMessageId: string) => {
@@ -476,6 +611,18 @@ export const MessageList = memo(function MessageList({
                         item.runs?.[0]?.requested_logical_model
                       )
                     }
+                    isLatestAssistant={item.message.message_id === latestAssistantMessageId}
+                    onRegenerate={handleRegenerate}
+                    isRegenerating={regeneratingId === item.message.message_id}
+                    onDeleteConversation={
+                      item.message.message_id === latestAssistantMessageId
+                        ? handleDeleteConversation
+                        : undefined
+                    }
+                    isDeletingConversation={isDeletingConversation}
+                    disableActions={disabledActions || isLoading}
+                    enableTypewriter
+                    typewriterKey={`${item.message.conversation_id}:${item.message.created_at}`}
                   />
                 </div>
               </div>
@@ -510,6 +657,32 @@ export const MessageList = memo(function MessageList({
         onConfirm={() => void handleConfirmComparison()}
         isBusy={compareBusy}
       />
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("chat.conversation.delete")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("chat.conversation.delete_confirm")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingConversation}>
+              {t("chat.action.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => void confirmDeleteConversation()}
+              disabled={isDeletingConversation}
+            >
+              {isDeletingConversation ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                t("chat.action.confirm")
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 });

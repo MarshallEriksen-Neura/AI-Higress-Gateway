@@ -130,16 +130,43 @@ export function normalizeConversationsResponse(
  * @param content - 后端返回的消息内容结构
  * @returns 前端使用的消息内容字符串
  */
-export function normalizeMessageContent(content: MessageContent): string {
-  if (content.type === 'text') {
-    return content.text || '';
+export function normalizeMessageContent(content: MessageContent | unknown): string {
+  // 兼容后端返回字符串或未知结构，尽量保留已有文本，避免回流时把流式内容清空
+  if (typeof content === 'string') {
+    return content;
   }
-  if (content.type === 'image') {
-    return `[图片: ${content.image_url}]`;
+
+  if (Array.isArray(content)) {
+    const merged = content
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (item && typeof item === 'object' && typeof (item as any).text === 'string') {
+          return (item as any).text as string;
+        }
+        return '';
+      })
+      .filter(Boolean)
+      .join('');
+    if (merged) return merged;
   }
-  if (content.type === 'file') {
-    return `[文件: ${content.file_url}]`;
+
+  if (!content || typeof content !== 'object') return '';
+
+  const record = content as Record<string, unknown>;
+  if (typeof record.text === 'string' && !record.type) {
+    return record.text;
   }
+
+  if ((record as MessageContent).type === 'text') {
+    return typeof record.text === 'string' ? record.text : '';
+  }
+  if ((record as MessageContent).type === 'image') {
+    return `[图片: ${(record as MessageContent).image_url}]`;
+  }
+  if ((record as MessageContent).type === 'file') {
+    return `[文件: ${(record as MessageContent).file_url}]`;
+  }
+
   return '';
 }
 

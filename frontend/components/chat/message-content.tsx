@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { useTypewriter } from "@/hooks/use-typewriter";
 
 type MessageRole = "user" | "assistant" | "system";
 
@@ -30,6 +31,8 @@ interface MessageContentProps {
   role: MessageRole;
   options?: Partial<MessageRenderOptions>;
   className?: string;
+  enableTypewriter?: boolean;
+  typewriterKey?: string;
 }
 
 type Segment =
@@ -290,7 +293,14 @@ function ThinkChipPreview({
   );
 }
 
-export function MessageContent({ content, role, options, className }: MessageContentProps) {
+export function MessageContent({
+  content,
+  role,
+  options,
+  className,
+  enableTypewriter = false,
+  typewriterKey,
+}: MessageContentProps) {
   const { t } = useI18n();
   const thinkPanelId = useId();
 
@@ -334,6 +344,21 @@ export function MessageContent({ content, role, options, className }: MessageCon
 
   const mergedText = textSegments.map((s) => s.content).join("").trim();
   const mergedThink = thinkSegments.map((s) => s.content).join("\n\n").trim();
+
+  const { text: typewriterText, isFinished: typewriterFinished } = useTypewriter(
+    mergedText,
+    {
+      enabled: enableTypewriter && role === "assistant",
+      sourceKey: typewriterKey,
+      baseChunkSize: 3,
+      maxChunkSize: 14,
+      accelerateAt: 64,
+      tickMs: 18,
+    }
+  );
+  const displayText = enableTypewriter && role === "assistant" ? typewriterText : mergedText;
+  const showCursor = enableTypewriter && role === "assistant" && !typewriterFinished;
+  const renderText = showCursor ? `${displayText}▌` : displayText;
 
   const [showThink, setShowThink] = useState(() => resolved.default_show_think);
 
@@ -382,8 +407,8 @@ export function MessageContent({ content, role, options, className }: MessageCon
         </div>
       ) : null}
 
-      {mergedText ? (
-        <div>{renderBody(mergedText, role === "user")}</div>
+      {renderText ? (
+        <div>{renderBody(renderText, role === "user")}</div>
       ) : null}
     </div>
   );

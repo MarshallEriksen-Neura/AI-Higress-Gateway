@@ -18,6 +18,7 @@ export * from "./use-messages";
 export * from "./use-project-chat-settings";
 export * from "./use-evals";
 export * from "./use-eval-config";
+export * from "./use-selectable-chat-models";
 export * from "./keys";
 export * from "./use-users";
 export * from "./use-provider-submissions";

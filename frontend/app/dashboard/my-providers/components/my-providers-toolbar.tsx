@@ -10,7 +10,7 @@ export interface MyProvidersToolbarProps {
   onSearchQueryChange: (value: string) => void;
   isRefreshing: boolean;
   onRefresh: () => void;
-  onCreate: () => void;
+  onCreate?: () => void;
 }
 
 export function MyProvidersToolbar({
@@ -46,10 +46,12 @@ export function MyProvidersToolbar({
           />
           {t("my_providers.refresh")}
         </Button>
-        <Button onClick={onCreate} className="flex-1 md:flex-none">
-          <Plus className="w-4 h-4 mr-2" />
-          {t("my_providers.create_provider")}
-        </Button>
+        {onCreate && (
+          <Button onClick={onCreate} className="flex-1 md:flex-none">
+            <Plus className="w-4 h-4 mr-2" />
+            {t("my_providers.create_provider")}
+          </Button>
+        )}
       </div>
     </div>
   );

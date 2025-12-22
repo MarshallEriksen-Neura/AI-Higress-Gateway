@@ -79,7 +79,7 @@ export function ChatNavRail({ variant = "desktop" }: { variant?: "desktop" | "mo
 
   // 桌面端变体 - 垂直布局
   return (
-    <aside className="w-14 shrink-0 border-r bg-background/60 backdrop-blur supports-[backdrop-filter]:bg-background/40">
+    <aside className="w-14 shrink-0 border-r border-border/30 bg-white/50 backdrop-blur-xl shadow-[0_0_24px_rgba(0,0,0,0.03)]">
       <div className="flex h-full flex-col items-center py-3">
         {/* 顶部导航按钮组 - 3个按钮纵向排列 */}
         <div className="flex flex-col items-center gap-1.5">
@@ -95,12 +95,12 @@ export function ChatNavRail({ variant = "desktop" }: { variant?: "desktop" | "mo
                     variant="ghost"
                     size="icon"
                     className={cn(
-                      "h-10 w-10 rounded-xl",
-                      active && "bg-accent text-accent-foreground"
+                      "h-10 w-10 rounded-xl hover:bg-muted/50 transition-colors",
+                      active && "bg-primary/10 text-primary hover:bg-primary/15"
                     )}
                   >
                     <Link href={item.href} aria-label={t(item.labelKey)}>
-                      <Icon className="h-5 w-5" />
+                      <Icon className="h-5 w-5 stroke-[1.5]" />
                     </Link>
                   </Button>
                 </TooltipTrigger>

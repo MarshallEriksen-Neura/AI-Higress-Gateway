@@ -1,3 +1,4 @@
+import axios, { type AxiosRequestConfig } from 'axios';
 import { cookies } from 'next/headers';
 
 /**
@@ -14,6 +15,7 @@ export async function serverFetch<T>(
   options?: RequestInit
 ): Promise<T | null> {
   try {
+    // Next.js 16（React 19）中 cookies() 返回 Promise，需要 await 获取 CookieStore
     const cookieStore = await cookies();
     const token = cookieStore.get('access_token')?.value;
     
@@ -23,28 +25,47 @@ export async function serverFetch<T>(
       process.env.NEXT_PUBLIC_API_BASE_URL ||
       process.env.NEXT_PUBLIC_API_URL ||
       'http://localhost:8000';
-    const url = `${apiUrl}${endpoint}`;
-    
-    const res = await fetch(url, {
-      ...options,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { 'Authorization': `Bearer ${token}` }),
-        ...options?.headers,
-      },
-      cache: 'no-store', // 默认不缓存，确保数据新鲜
-    });
-    
-    if (!res.ok) {
-      if (res.status === 401) {
-        console.log(`[serverFetch] 401 Unauthorized: ${endpoint} (token may be expired)`);
-      } else {
-        console.error(`[serverFetch] Failed: ${endpoint}`, res.status);
-      }
+
+    const normalizedHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (options?.headers instanceof Headers) {
+      options.headers.forEach((value, key) => {
+        normalizedHeaders[key] = value;
+      });
+    } else if (options?.headers && typeof options.headers === 'object') {
+      Object.entries(options.headers).forEach(([key, value]) => {
+        if (typeof value === 'undefined') return;
+        normalizedHeaders[key] = Array.isArray(value) ? value.join(', ') : String(value);
+      });
+    }
+    if (token) {
+      normalizedHeaders['Authorization'] = `Bearer ${token}`;
+    }
+    // 与 fetch 的 no-store 行为保持一致，避免使用缓存
+    normalizedHeaders['Cache-Control'] = 'no-store';
+
+    const axiosConfig: AxiosRequestConfig = {
+      baseURL: apiUrl,
+      url: endpoint,
+      method: (options?.method as AxiosRequestConfig['method']) ?? 'GET',
+      headers: normalizedHeaders,
+      data: options?.body,
+      signal: options?.signal,
+      // 交由 axios 返回响应对象，由下方统一处理状态码
+      validateStatus: () => true,
+    };
+
+    const res = await axios.request<T>(axiosConfig);
+
+    if (res.status === 401) {
+      console.log(`[serverFetch] 401 Unauthorized: ${endpoint} (token may be expired)`);
       return null;
     }
-    
-    return res.json();
+    if (res.status < 200 || res.status >= 300) {
+      console.error(`[serverFetch] Failed: ${endpoint}`, res.status);
+      return null;
+    }
+
+    return res.data;
   } catch (error) {
     console.error(`[serverFetch] Error: ${endpoint}`, error);
     return null;

@@ -9,7 +9,6 @@ import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n-context";
 import { useSendMessage } from "@/lib/swr/use-messages";
 import { toast } from "sonner";
-import { ErrorHandler } from "@/lib/errors";
 import type { Message } from "@/lib/api-types";
 import { cn } from "@/lib/utils";
 import { useChatStore } from "@/lib/stores/chat-store";
@@ -112,9 +111,7 @@ export function MessageInput({
       }
     } catch (error: any) {
       console.error("Failed to send message:", error);
-      const standardError = ErrorHandler.normalize(error);
-      const errorMessage = ErrorHandler.getUserMessage(standardError, t);
-      toast.error(errorMessage);
+      // 错误信息会作为聊天气泡展示，避免使用 toast
     } finally {
       setIsSending(false);
     }

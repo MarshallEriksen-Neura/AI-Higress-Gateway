@@ -5,6 +5,7 @@ import { useMemo } from 'react';
 import { messageService } from '@/http/message';
 import { streamSSERequest } from '@/lib/bridge/sse';
 import { SWRCacheManager, cacheStrategies } from './cache';
+import { ErrorHandler } from '@/lib/errors';
 import type {
   GetMessagesParams,
   MessagesResponse,
@@ -113,18 +114,24 @@ export function useSendMessageToConversation(
     request: SendMessageRequest,
     options?: SendMessageOptions
   ) => {
+    const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const createdAt = new Date().toISOString();
     // 使用字符串 key 确保与 MessageList/useMessages 默认第一页一致（limit=50）
     const messagesKey = `/v1/conversations/${conversationId}/messages?limit=50`;
     const wantsStreaming = !!options?.streaming;
-    const hasBridgeTools =
-      !!request.bridge_agent_id ||
-      (Array.isArray(request.bridge_agent_ids) && request.bridge_agent_ids.length > 0);
 
     try {
       const payload: SendMessageRequest = { ...request };
       if (overrideLogicalModel) {
         payload.override_logical_model = overrideLogicalModel;
       }
+      const hasBridgeTools =
+        !!payload.bridge_agent_id ||
+        (Array.isArray(payload.bridge_agent_ids) && payload.bridge_agent_ids.length > 0);
+      const requestedLogicalModel =
+        payload.override_logical_model && payload.override_logical_model.trim()
+          ? payload.override_logical_model
+          : 'auto';
 
       if (wantsStreaming && !hasBridgeTools) {
         const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -353,22 +360,36 @@ export function useSendMessageToConversation(
 
       const optimisticMessage = {
         message: {
-          message_id: `temp-${Date.now()}`,
+          message_id: `temp-${nonce}`,
           conversation_id: conversationId,
           role: 'user' as const,
           content: request.content,
-          created_at: new Date().toISOString(),
+          created_at: createdAt,
         },
         run: undefined,
+      };
+      const assistantPlaceholder: MessagesResponse['items'][number] = {
+        message: {
+          message_id: `temp-assistant-${nonce}`,
+          conversation_id: conversationId,
+          role: 'assistant',
+          content: '',
+          created_at: createdAt,
+        },
+        run: {
+          run_id: `temp-run-${nonce}`,
+          requested_logical_model: requestedLogicalModel,
+          status: 'running',
+        },
       };
 
       await globalMutate(
         messagesKey,
         async (currentData?: MessagesResponse) => {
-          if (!currentData) return currentData;
+          const baseItems = currentData?.items ?? [];
           return {
             ...currentData,
-            items: [optimisticMessage, ...currentData.items],
+            items: [assistantPlaceholder, optimisticMessage, ...baseItems],
           };
         },
         { revalidate: false }
@@ -387,8 +408,42 @@ export function useSendMessageToConversation(
 
       return response;
     } catch (error) {
-      await globalMutate(messagesKey);
-      throw error;
+      const standardError = ErrorHandler.normalize(error);
+      const errorText = standardError.message || 'Send failed';
+      const errorMessage = {
+        message: {
+          message_id: `error-${nonce}`,
+          conversation_id: conversationId,
+          role: 'assistant' as const,
+          content: `[Error] ${errorText}`,
+          created_at: new Date().toISOString(),
+        },
+        run: undefined,
+      };
+
+      await globalMutate(
+        messagesKey,
+        (currentData?: MessagesResponse) => {
+          const baseItems =
+            currentData?.items.filter(
+              (it) => it.message.message_id !== `temp-assistant-${nonce}`
+            ) ?? [];
+          const hasUser = baseItems.some(
+            (it) => it.message.message_id === `temp-${nonce}`
+          );
+          const itemsWithUser = hasUser
+            ? baseItems
+            : [optimisticMessage, ...baseItems];
+
+          return {
+            ...currentData,
+            items: [errorMessage, ...itemsWithUser],
+          };
+        },
+        { revalidate: false }
+      );
+
+      throw standardError;
     }
   };
 }

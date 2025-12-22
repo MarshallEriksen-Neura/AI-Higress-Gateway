@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n-context";
+import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { ClearHistoryAction } from "./chat-input/clear-history-action";
@@ -79,6 +80,7 @@ export function SlateChatInput({
   defaultParameters = {},
 }: SlateChatInputProps) {
   const { t } = useI18n();
+  const { preferences } = useUserPreferencesStore();
   const [editor] = useState(() => withHistory(withReact(createEditor())));
   const [isSending, setIsSending] = useState(false);
   const [isClearing, setIsClearing] = useState(false);
@@ -256,8 +258,6 @@ export function SlateChatInput({
       // 清空编辑器和图片
       clearEditor();
       setImages([]);
-      
-      toast.success(t("chat.message.sent"));
     } catch (error) {
       console.error("Failed to send message:", error);
       toast.error(t("chat.message.failed"));
@@ -283,15 +283,39 @@ export function SlateChatInput({
     }
   }, [onClearHistory, t]);
 
+  const sendHint = useMemo(
+    () =>
+      preferences.sendShortcut === "enter"
+        ? t("chat.settings.preferences.send_shortcut_enter_desc")
+        : t("chat.settings.preferences.send_shortcut_ctrl_enter_desc"),
+    [preferences.sendShortcut, t]
+  );
+
   // 键盘快捷键
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent) => {
+      if (event.isComposing) return;
+
+      if (preferences.sendShortcut === "enter") {
+        if (
+          event.key === "Enter" &&
+          !event.shiftKey &&
+          !event.ctrlKey &&
+          !event.metaKey &&
+          !event.altKey
+        ) {
+          event.preventDefault();
+          void handleSend();
+        }
+        return;
+      }
+
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
         event.preventDefault();
-        handleSend();
+        void handleSend();
       }
     },
-    [handleSend]
+    [handleSend, preferences.sendShortcut]
   );
 
   return (
@@ -411,7 +435,7 @@ export function SlateChatInput({
               onClick={handleSend}
               disabled={disabled || isSending}
               aria-label={isSending ? t("chat.message.sending") : t("chat.message.send")}
-              title={t("chat.message.send_hint")}
+              title={sendHint}
             >
               {isSending ? (
                 <Loader2 className="size-4 animate-spin" />
@@ -424,7 +448,7 @@ export function SlateChatInput({
       </div>
 
       <div className="text-xs text-muted-foreground text-center">
-        {isSending ? t("chat.message.sending") : t("chat.message.send_hint")}
+        {isSending ? t("chat.message.sending") : sendHint}
       </div>
     </div>
   );

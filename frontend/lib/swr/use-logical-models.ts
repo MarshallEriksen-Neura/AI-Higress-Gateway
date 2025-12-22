@@ -9,9 +9,16 @@ import type {
 /**
  * 获取所有逻辑模型列表（从 /logical-models）
  */
-export const useLogicalModels = () => {
+export const useLogicalModels = (projectId?: string | null) => {
+  const path =
+    projectId === undefined
+      ? "/logical-models"
+      : projectId
+        ? `/logical-models?project_id=${encodeURIComponent(projectId)}`
+        : null;
+
   const { data, error, loading, refresh } =
-    useApiGet<LogicalModelsResponse>("/logical-models", {
+    useApiGet<LogicalModelsResponse>(path, {
       strategy: "frequent",
     });
 
@@ -44,4 +51,3 @@ export const useLogicalModelUpstreams = (logicalId: string | null) => {
     refresh,
   };
 };
-

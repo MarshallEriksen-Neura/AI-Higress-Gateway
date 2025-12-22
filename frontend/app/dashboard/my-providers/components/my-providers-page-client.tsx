@@ -4,12 +4,13 @@ import { useState, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import type { Provider } from "@/http/provider";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors";
 import { useAuthStore } from "@/lib/stores/auth-store";
-import { usePrivateProviders, usePrivateProviderQuota } from "@/lib/swr/use-private-providers";
+import { usePrivateProviders, usePrivateProviderQuota, useUserAvailableProviders } from "@/lib/swr/use-private-providers";
 import { useUserDashboardProvidersMetrics } from "@/lib/swr/use-dashboard-v2";
 import { DeleteProviderDialog } from "./delete-provider-dialog";
 import { PrivateProvidersCards } from "./private-providers-cards";
@@ -20,13 +21,15 @@ import { MyProvidersToolbar } from "./my-providers-toolbar";
 const ProviderFormEnhanced = dynamic(() => import("@/components/dashboard/providers/provider-form").then(mod => ({ default: mod.ProviderFormEnhanced })), { ssr: false });
 const ProviderModelsDialog = dynamic(() => import("@/components/dashboard/providers/provider-models-dialog").then(mod => ({ default: mod.ProviderModelsDialog })), { ssr: false });
 
+type TabValue = "private" | "shared" | "public";
+
 /**
- * 私有 Provider 页面客户端组件
+ * Provider 管理页面客户端组件
  *
  * - 使用前端 auth store 判断登录态
- * - 使用 SWR hooks 获取私有 Provider 列表和配额信息
+ * - 使用 SWR hooks 获取私有、共享和公共 Provider 列表
  * - 未登录时展示登录提示，并唤起全局登录对话框
- * - 处理所有业务逻辑：搜索、刷新、创建、编辑、删除
+ * - 处理所有业务逻辑：Tab 切换、搜索、刷新、创建、编辑、删除
  */
 export function MyProvidersPageClient() {
   const { t } = useI18n();
@@ -41,13 +44,17 @@ export function MyProvidersPageClient() {
 
   const userId = user?.id ?? null;
 
-  // 使用 SWR hooks 获取数据（会自动使用服务端预取的 fallback）
+  // Tab 状态
+  const [activeTab, setActiveTab] = useState<TabValue>("private");
+
+  // 使用 SWR hooks 获取数据
   const {
-    providers,
-    loading: isLoadingProviders,
-    refresh,
-    deleteProvider,
-  } = usePrivateProviders({ userId });
+    privateProviders,
+    sharedProviders,
+    publicProviders,
+    loading: isLoadingAllProviders,
+    refresh: refreshAllProviders,
+  } = useUserAvailableProviders({ userId });
 
   // 私有 Provider 配额信息
   const {
@@ -68,13 +75,27 @@ export function MyProvidersPageClient() {
   const [viewingModelsProviderId, setViewingModelsProviderId] = useState<string | null>(null);
   const [modelsPathByProvider, setModelsPathByProvider] = useState<Record<string, string>>({});
 
+  // 根据当前 Tab 获取对应的 providers
+  const currentProviders = useMemo(() => {
+    switch (activeTab) {
+      case "private":
+        return privateProviders;
+      case "shared":
+        return sharedProviders;
+      case "public":
+        return publicProviders;
+      default:
+        return [];
+    }
+  }, [activeTab, privateProviders, sharedProviders, publicProviders]);
+
   const providerIdsParam = useMemo(() => {
-    const ids = providers
+    const ids = currentProviders
       .map((p) => p.provider_id)
       .filter((id) => !!id)
       .join(",");
     return ids || undefined;
-  }, [providers]);
+  }, [currentProviders]);
 
   const {
     items: providerMetricItems,
@@ -97,20 +118,20 @@ export function MyProvidersPageClient() {
   const handleRefresh = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      await refresh();
+      await refreshAllProviders();
     } catch (error) {
       showError(error, { context: t("providers.error_loading") });
     } finally {
       setIsRefreshing(false);
     }
-  }, [refresh, t, showError]);
+  }, [refreshAllProviders, t, showError]);
 
   // 本地搜索过滤
   const filteredProviders = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return providers;
+    if (!query) return currentProviders;
 
-    return providers.filter((provider) => {
+    return currentProviders.filter((provider) => {
       const name = provider.name?.toLowerCase() ?? "";
       const providerId = provider.provider_id?.toLowerCase() ?? "";
       const baseUrl = provider.base_url?.toLowerCase() ?? "";
@@ -121,22 +142,22 @@ export function MyProvidersPageClient() {
         baseUrl.includes(query)
       );
     });
-  }, [providers, searchQuery]);
+  }, [currentProviders, searchQuery]);
 
   // 打开创建表单
   const handleCreate = useCallback(() => {
     // 检查配额
-    if (!isUnlimited && quotaLimit > 0 && providers.length >= quotaLimit) {
+    if (!isUnlimited && quotaLimit > 0 && privateProviders.length >= quotaLimit) {
       toast.error(t("my_providers.quota_warning"));
       return;
     }
     setFormOpen(true);
-  }, [providers.length, quotaLimit, isUnlimited, t]);
+  }, [privateProviders.length, quotaLimit, isUnlimited, t]);
 
   // 表单成功回调
   const handleFormSuccess = useCallback(() => {
-    refresh();
-  }, [refresh]);
+    refreshAllProviders();
+  }, [refreshAllProviders]);
 
   // 编辑提供商
   const handleEdit = useCallback((provider: Provider) => {
@@ -156,8 +177,11 @@ export function MyProvidersPageClient() {
 
     setIsDeleting(true);
     try {
-      await deleteProvider(deletingProviderId);
+      // 调用删除 API
+      const { deletePrivateProvider } = await import("@/http/provider").then(m => m.providerService);
+      await deletePrivateProvider(userId, deletingProviderId);
       toast.success(t("providers.toast_delete_success"));
+      await refreshAllProviders();
     } catch (error) {
       showError(error, {
         context: t("providers.toast_delete_error"),
@@ -168,7 +192,7 @@ export function MyProvidersPageClient() {
       setDeleteConfirmOpen(false);
       setDeletingProviderId(null);
     }
-  }, [deletingProviderId, userId, deleteProvider, t, showError]);
+  }, [deletingProviderId, userId, t, showError, refreshAllProviders]);
 
   // 查看详情
   const handleViewDetails = useCallback((providerId: string) => {
@@ -197,7 +221,7 @@ export function MyProvidersPageClient() {
   }, []);
 
   // 加载中状态
-  if (authLoading || isLoadingProviders) {
+  if (authLoading || isLoadingAllProviders) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
         <p className="text-muted-foreground">{t("common.loading")}</p>
@@ -224,34 +248,95 @@ export function MyProvidersPageClient() {
 
       {/* 顶部统计卡片 */}
       <MyProvidersSummary
-        providers={providers}
+        providers={privateProviders}
         quotaLimit={quotaLimit}
         isUnlimited={isUnlimited}
         isLoading={isRefreshing || isQuotaLoading}
       />
 
-      {/* 操作栏 */}
-      <MyProvidersToolbar
-        searchQuery={searchQuery}
-        onSearchQueryChange={setSearchQuery}
-        isRefreshing={isRefreshing}
-        onRefresh={handleRefresh}
-        onCreate={handleCreate}
-      />
+      {/* Tab 切换 */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as TabValue)} className="w-full">
+        <TabsList>
+          <TabsTrigger value="private">我的私有</TabsTrigger>
+          <TabsTrigger value="shared">他人分享</TabsTrigger>
+          <TabsTrigger value="public">公共 Provider</TabsTrigger>
+        </TabsList>
 
-      {/* Provider 列表 */}
-      <PrivateProvidersCards
-        providers={filteredProviders}
-        isRefreshing={isRefreshing}
-        metricsByProviderId={metricsByProviderId}
-        isMetricsLoading={isMetricsLoading}
-        onCreate={handleCreate}
-        onEdit={handleEdit}
-        onDelete={handleDeleteClick}
-        onViewDetails={handleViewDetails}
-        onViewModels={handleViewModels}
-        onManageKeys={handleManageKeys}
-      />
+        <TabsContent value="private" className="space-y-4 mt-6">
+          {/* 操作栏 */}
+          <MyProvidersToolbar
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            isRefreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            onCreate={handleCreate}
+          />
+
+          {/* Provider 列表 */}
+          <PrivateProvidersCards
+            providers={filteredProviders}
+            isRefreshing={isRefreshing}
+            metricsByProviderId={metricsByProviderId}
+            isMetricsLoading={isMetricsLoading}
+            onCreate={handleCreate}
+            onEdit={handleEdit}
+            onDelete={handleDeleteClick}
+            onViewDetails={handleViewDetails}
+            onViewModels={handleViewModels}
+            onManageKeys={handleManageKeys}
+          />
+        </TabsContent>
+
+        <TabsContent value="shared" className="space-y-4 mt-6">
+          {/* 操作栏（共享的不需要创建按钮） */}
+          <MyProvidersToolbar
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            isRefreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            onCreate={undefined}
+          />
+
+          {/* Provider 列表（共享的不能编辑和删除） */}
+          <PrivateProvidersCards
+            providers={filteredProviders}
+            isRefreshing={isRefreshing}
+            metricsByProviderId={metricsByProviderId}
+            isMetricsLoading={isMetricsLoading}
+            onCreate={undefined}
+            onEdit={undefined}
+            onDelete={undefined}
+            onViewDetails={handleViewDetails}
+            onViewModels={handleViewModels}
+            onManageKeys={undefined}
+          />
+        </TabsContent>
+
+        <TabsContent value="public" className="space-y-4 mt-6">
+          {/* 操作栏（公共的不需要创建按钮） */}
+          <MyProvidersToolbar
+            searchQuery={searchQuery}
+            onSearchQueryChange={setSearchQuery}
+            isRefreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            onCreate={undefined}
+          />
+
+          {/* Provider 列表（公共的不能编辑和删除） */}
+          <PrivateProvidersCards
+            providers={filteredProviders}
+            isRefreshing={isRefreshing}
+            metricsByProviderId={metricsByProviderId}
+            isMetricsLoading={isMetricsLoading}
+            onCreate={undefined}
+            onEdit={undefined}
+            onDelete={undefined}
+            onViewDetails={handleViewDetails}
+            onViewModels={handleViewModels}
+            onManageKeys={undefined}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* 创建/编辑表单抽屉 */}
       <ProviderFormEnhanced

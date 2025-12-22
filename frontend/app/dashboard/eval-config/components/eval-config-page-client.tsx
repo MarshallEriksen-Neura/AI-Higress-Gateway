@@ -36,8 +36,8 @@ export function EvalConfigPageClient() {
   const { user, isLoading } = useAuth();
   const router = useRouter();
   const { apiKeys, loading: isLoadingApiKeys } = useApiKeys();
-  const { models, loading: isLoadingModels } = useLogicalModels();
   const [projectId, setProjectId] = useState<string>("");
+  const { models, loading: isLoadingModels } = useLogicalModels(projectId || null);
 
   const isSuperuser = user?.is_superuser === true;
   const canAccess = !isLoading && !!user && isSuperuser;

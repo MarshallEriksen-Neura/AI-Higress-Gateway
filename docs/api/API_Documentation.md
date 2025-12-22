@@ -2917,6 +2917,9 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 
 **描述**: 获取所有存储在 Redis 中的逻辑模型。
 
+**查询参数**:
+- `project_id` (UUID，可选)：指定项目（API Key）时，仅返回该项目允许的 Provider 下可访问的逻辑模型；未指定则按用户可访问的 Provider 过滤。
+
 **认证**: JWT 令牌
 
 **响应**:
@@ -2968,6 +2971,9 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 
 **描述**: 获取指定逻辑模型的详情。
 
+**查询参数**:
+- `project_id` (UUID，可选)：指定项目（API Key）时，仅返回该项目允许的 Provider 下可访问的上游；若无可访问上游将返回 404。
+
 **认证**: JWT 令牌
 
 **响应**:
@@ -3016,6 +3022,9 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 **接口**: `GET /logical-models/{logical_model_id}/upstreams`
 
 **描述**: 获取映射到逻辑模型的上游物理模型。
+
+**查询参数**:
+- `project_id` (UUID，可选)：指定项目（API Key）时，仅返回该项目允许的 Provider 下可访问的上游；若无可访问上游将返回 404。
 
 **认证**: JWT 令牌
 

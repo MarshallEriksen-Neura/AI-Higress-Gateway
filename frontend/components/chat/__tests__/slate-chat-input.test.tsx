@@ -4,7 +4,9 @@
 
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { SlateChatInput } from "../slate-chat-input";
+import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
 
 // Mock i18n
 vi.mock("@/lib/i18n-context", () => ({
@@ -15,6 +17,11 @@ vi.mock("@/lib/i18n-context", () => ({
 }));
 
 describe("SlateChatInput", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    useUserPreferencesStore.setState({ preferences: { sendShortcut: "ctrl-enter" } });
+  });
+
   it("应该正确渲染组件", () => {
     render(
       <SlateChatInput
@@ -73,5 +80,47 @@ describe("SlateChatInput", () => {
     fireEvent.click(screen.getByRole("button", { name: "chat.action.confirm" }));
 
     await waitFor(() => expect(onClearHistory).toHaveBeenCalledTimes(1));
+  });
+
+  it("在 Enter 模式下按 Enter 应发送消息", async () => {
+    useUserPreferencesStore.setState({ preferences: { sendShortcut: "enter" } });
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <SlateChatInput
+        conversationId="test-conv-123"
+        onSend={onSend}
+      />
+    );
+
+    const editor = screen.getByRole("textbox");
+    await user.click(editor);
+    await user.type(editor, "hello");
+    await user.keyboard("{Enter}");
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+  });
+
+  it("在 Ctrl+Enter 模式下 Enter 不发送而 Ctrl+Enter 发送", async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    const user = userEvent.setup();
+
+    render(
+      <SlateChatInput
+        conversationId="test-conv-123"
+        onSend={onSend}
+      />
+    );
+
+    const editor = screen.getByRole("textbox");
+    await user.click(editor);
+    await user.type(editor, "hello");
+
+    await user.keyboard("{Enter}");
+    expect(onSend).not.toHaveBeenCalled();
+
+    await user.keyboard("{Control>}{Enter}{/Control}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
   });
 });

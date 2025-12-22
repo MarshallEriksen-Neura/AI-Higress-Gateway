@@ -12,12 +12,12 @@ export interface PrivateProvidersCardsProps {
   isRefreshing: boolean;
   metricsByProviderId: Record<string, DashboardV2ProviderMetricsItem | undefined>;
   isMetricsLoading: boolean;
-  onCreate: () => void;
-  onEdit: (provider: Provider) => void;
-  onDelete: (providerId: string) => void;
+  onCreate?: () => void;
+  onEdit?: (provider: Provider) => void;
+  onDelete?: (providerId: string) => void;
   onViewDetails: (providerId: string) => void;
   onViewModels: (providerId: string) => void;
-  onManageKeys: (providerInternalId: string) => void;
+  onManageKeys?: (providerInternalId: string) => void;
 }
 
 export function PrivateProvidersCards({
@@ -44,10 +44,12 @@ export function PrivateProvidersCards({
           <p className="text-sm text-muted-foreground">
             {t("my_providers.empty_description")}
           </p>
-          <Button onClick={onCreate} className="mt-4">
-            <Plus className="w-4 h-4 mr-2" />
-            {t("my_providers.create_provider")}
-          </Button>
+          {onCreate && (
+            <Button onClick={onCreate} className="mt-4">
+              <Plus className="w-4 h-4 mr-2" />
+              {t("my_providers.create_provider")}
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -66,8 +68,8 @@ export function PrivateProvidersCards({
           onViewDetails={onViewDetails}
           onViewModels={onViewModels}
           onManageKeys={onManageKeys}
-          canModify
-          canManageKeys
+          canModify={!!onEdit}
+          canManageKeys={!!onManageKeys}
         />
       ))}
     </div>

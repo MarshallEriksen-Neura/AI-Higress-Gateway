@@ -1,7 +1,7 @@
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 try:
@@ -19,6 +19,7 @@ from app.schemas import (
     LogicalModelUpstreamsResponse,
 )
 from app.services.user_provider_service import get_accessible_provider_ids
+from app.services.project_eval_config_service import resolve_project_context
 from app.storage.redis_service import get_logical_model, list_logical_models
 
 router = APIRouter(
@@ -27,11 +28,31 @@ router = APIRouter(
 )
 
 
+def _resolve_accessible_provider_ids(
+    db: Session,
+    current_user: AuthenticatedUser,
+    project_id: UUID | None,
+) -> set[str]:
+    """
+    结合用户权限与项目级限制，返回可访问的 provider_id 集合。
+    """
+    accessible_provider_ids = get_accessible_provider_ids(db, UUID(current_user.id))
+    if project_id is None:
+        return accessible_provider_ids
+
+    ctx = resolve_project_context(db, project_id=project_id, current_user=current_user)
+    if getattr(ctx.api_key, "has_provider_restrictions", False):
+        allowed = {pid for pid in ctx.api_key.allowed_provider_ids if pid}
+        accessible_provider_ids &= allowed
+    return accessible_provider_ids
+
+
 @router.get("/logical-models", response_model=LogicalModelsResponse)
 async def list_logical_models_endpoint(
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_jwt_token),
+    project_id: UUID | None = Query(default=None),
 ) -> LogicalModelsResponse:
     """
     返回当前用户可访问的逻辑模型，使用 Cache-Aside 模式：
@@ -56,8 +77,8 @@ async def list_logical_models_endpoint(
             # 即使同步失败，也返回空列表而不是报错
             models = []
 
-    # 根据用户权限过滤逻辑模型
-    accessible_provider_ids = get_accessible_provider_ids(db, UUID(current_user.id))
+    # 根据用户权限 + 项目限制过滤逻辑模型
+    accessible_provider_ids = _resolve_accessible_provider_ids(db, current_user, project_id)
 
     filtered_models: list[LogicalModel] = []
     for model in models:
@@ -82,6 +103,7 @@ async def get_logical_model_endpoint(
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_jwt_token),
+    project_id: UUID | None = Query(default=None),
 ) -> LogicalModel:
     """
     返回单个逻辑模型（仅包含用户可访问的上游），使用 Cache-Aside 模式：
@@ -108,8 +130,8 @@ async def get_logical_model_endpoint(
     if lm is None:
         raise not_found(f"Logical model '{logical_model_id}' not found")
 
-    # 根据用户权限过滤上游
-    accessible_provider_ids = get_accessible_provider_ids(db, UUID(current_user.id))
+    # 根据用户权限 + 项目限制过滤上游
+    accessible_provider_ids = _resolve_accessible_provider_ids(db, current_user, project_id)
     accessible_upstreams = [
         upstream for upstream in lm.upstreams
         if upstream.provider_id in accessible_provider_ids
@@ -131,6 +153,7 @@ async def get_logical_model_upstreams_endpoint(
     redis: Redis = Depends(get_redis),
     db: Session = Depends(get_db),
     current_user: AuthenticatedUser = Depends(require_jwt_token),
+    project_id: UUID | None = Query(default=None),
 ) -> LogicalModelUpstreamsResponse:
     """
     返回逻辑模型的上游物理模型列表（仅包含用户可访问的上游），使用 Cache-Aside 模式。
@@ -154,8 +177,8 @@ async def get_logical_model_upstreams_endpoint(
     if lm is None:
         raise not_found(f"Logical model '{logical_model_id}' not found")
 
-    # 根据用户权限过滤上游
-    accessible_provider_ids = get_accessible_provider_ids(db, UUID(current_user.id))
+    # 根据用户权限 + 项目限制过滤上游
+    accessible_provider_ids = _resolve_accessible_provider_ids(db, current_user, project_id)
     accessible_upstreams = [
         upstream for upstream in lm.upstreams
         if upstream.provider_id in accessible_provider_ids

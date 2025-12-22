@@ -65,21 +65,25 @@ const refreshAccessToken = async (): Promise<string> => {
   }
 
   try {
-    // 直接调用后端刷新接口（不使用 axios 实例，避免拦截器循环）
-    const response = await fetch(`${BASE_URL}/auth/refresh`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({}), // HttpOnly Cookie handles the token
-    });
+    // 使用 axios 直接调用后端刷新接口（避免实例拦截器循环）
+    const response = await axios.post<{ access_token: string; refresh_token: string | null }>(
+      `${BASE_URL}/auth/refresh`,
+      {},
+      {
+        headers: { 'Content-Type': 'application/json' },
+        withCredentials: true, // 确保跨域发送 cookie
+        validateStatus: () => true, // 由下方统一处理状态码
+      }
+    );
 
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Token refresh failed' }));
-      throw new Error(errorData.error || 'Token refresh failed');
+    if (response.status !== 200 || !response.data?.access_token) {
+      const errorMessage =
+        (response.data as any)?.error ||
+        `Token refresh failed with status ${response.status}`;
+      throw new Error(errorMessage);
     }
 
-    const { access_token, refresh_token: new_refresh_token } = await response.json();
+    const { access_token, refresh_token: new_refresh_token } = response.data;
     
     // 更新 tokens
     tokenManager.setAccessToken(access_token);
@@ -109,14 +113,15 @@ const createHttpClient = (): AxiosInstance => {
     async (config: InternalAxiosRequestConfig) => {
       // 从 tokenManager 获取 token
       let token = tokenManager.getAccessToken();
-      const refreshToken = tokenManager.getRefreshToken();
       const apiKey = typeof window !== 'undefined' 
         ? localStorage.getItem('api_key') 
         : null;
+      const refreshToken = tokenManager.getRefreshToken();
 
       // 如果没有 access_token 但有 refresh_token，且不是刷新请求本身，先刷新
       const isRefreshRequest = config.url?.includes('/auth/refresh');
-      if (!token && refreshToken && !isRefreshRequest) {
+      const shouldRefreshToken = !token && !apiKey && refreshToken && !isRefreshRequest;
+      if (shouldRefreshToken) {
         console.log('[Auth Debug] No access token but has refresh token, refreshing before request...');
         
         // 如果正在刷新，等待刷新完成

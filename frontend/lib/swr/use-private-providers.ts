@@ -5,6 +5,7 @@ import type {
   Provider,
   CreatePrivateProviderRequest,
   UpdatePrivateProviderRequest,
+  UserAvailableProvidersResponse,
 } from "@/http/provider";
 
 interface UsePrivateProvidersOptions {
@@ -136,6 +137,53 @@ export const usePrivateProviderQuota = (userId: string | null) => {
     current,
     limit,
     isUnlimited,
+    loading,
+    validating,
+    error,
+    refresh,
+  };
+};
+
+/**
+ * 获取用户可用的所有 Provider（私有 + 共享 + 公共）
+ * 
+ * @param options - 配置选项
+ * @param options.userId - 用户 ID
+ * @param options.visibility - 过滤可见性：'all' | 'private' | 'shared' | 'public'
+ * 
+ * @example
+ * ```tsx
+ * const { privateProviders, sharedProviders, publicProviders, loading } = useUserAvailableProviders({
+ *   userId: currentUser.id,
+ *   visibility: 'all'
+ * });
+ * ```
+ */
+export const useUserAvailableProviders = (options: {
+  userId: string | null;
+  visibility?: 'all' | 'private' | 'shared' | 'public';
+}) => {
+  const { userId, visibility = 'all' } = options;
+
+  const {
+    data,
+    error,
+    loading,
+    validating,
+    refresh,
+  } = useApiGet<UserAvailableProvidersResponse>(
+    userId ? `/users/${userId}/providers` : null,
+    {
+      strategy: "default",
+      params: visibility !== 'all' ? { visibility } : undefined,
+    }
+  );
+
+  return {
+    privateProviders: data?.private_providers ?? [],
+    sharedProviders: data?.shared_providers ?? [],
+    publicProviders: data?.public_providers ?? [],
+    total: data?.total ?? 0,
     loading,
     validating,
     error,

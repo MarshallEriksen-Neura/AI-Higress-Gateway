@@ -497,6 +497,8 @@ export function ConversationPageClient({
                 <MessageList
                   assistantId={assistantId}
                   conversationId={conversationId}
+                  overrideLogicalModel={overrideLogicalModel}
+                  disabledActions={isArchived}
                   onTriggerEval={handleTriggerEval}
                 />
               </div>
@@ -553,6 +555,8 @@ export function ConversationPageClient({
                     <MessageList
                       assistantId={assistantId}
                       conversationId={conversationId}
+                      overrideLogicalModel={overrideLogicalModel}
+                      disabledActions={isArchived}
                       onTriggerEval={handleTriggerEval}
                     />
                   </div>

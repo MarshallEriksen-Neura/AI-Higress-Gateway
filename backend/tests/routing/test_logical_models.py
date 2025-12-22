@@ -167,6 +167,112 @@ def test_logical_model_routes_list_and_get():
         assert resp_missing.status_code == 404
 
 
+def test_logical_models_respect_project_allowed_providers():
+    from app.models import APIKey, APIKeyAllowedProvider, Provider, User
+
+    app = create_app()
+    SessionLocal = install_inmemory_db(app)
+    app.dependency_overrides[get_redis] = override_get_redis
+
+    with SessionLocal() as session:
+        user = session.query(User).filter_by(username="admin").first()
+        user_id = str(user.id)
+        api_key = session.query(APIKey).filter_by(user_id=user.id).first()
+
+        # 配置项目仅允许访问 openai
+        api_key.has_provider_restrictions = True
+        session.add_all(
+            [
+                Provider(
+                    provider_id="openai",
+                    name="OpenAI",
+                    base_url="https://api.openai.com/v1",
+                    transport="http",
+                    provider_type="native",
+                    weight=1.0,
+                    status="healthy",
+                    visibility="public",
+                ),
+                Provider(
+                    provider_id="anthropic",
+                    name="Anthropic",
+                    base_url="https://api.anthropic.com",
+                    transport="http",
+                    provider_type="native",
+                    weight=1.0,
+                    status="healthy",
+                    visibility="public",
+                ),
+                APIKeyAllowedProvider(api_key_id=api_key.id, provider_id="openai"),
+            ]
+        )
+        session.commit()
+        session.refresh(api_key)
+        project_id = str(api_key.id)
+
+    app.dependency_overrides[require_jwt_token] = make_override_require_jwt_token(user_id)
+    fake_redis._data.clear()
+
+    # openai 模型（允许）
+    _store_logical_model(
+        LogicalModel(
+            logical_id="gpt-4o",
+            display_name="GPT-4o",
+            description="OpenAI flagship",
+            capabilities=[ModelCapability.CHAT],
+            upstreams=[
+                PhysicalModel(
+                    provider_id="openai",
+                    model_id="gpt-4o",
+                    endpoint="https://api.openai.com/v1/chat/completions",
+                    base_weight=1.0,
+                    region="global",
+                    max_qps=50,
+                    meta_hash=None,
+                    updated_at=1704067200.0,
+                )
+            ],
+            enabled=True,
+            updated_at=1704067200.0,
+        )
+    )
+    # anthropic 模型（项目不允许，应被过滤）
+    _store_logical_model(
+        LogicalModel(
+            logical_id="claude-3-sonnet",
+            display_name="Claude 3 Sonnet",
+            description="Anthropic model",
+            capabilities=[ModelCapability.CHAT],
+            upstreams=[
+                PhysicalModel(
+                    provider_id="anthropic",
+                    model_id="claude-3-sonnet",
+                    endpoint="https://api.anthropic.com/v1/messages",
+                    base_weight=1.0,
+                    region="global",
+                    max_qps=50,
+                    meta_hash=None,
+                    updated_at=1704067200.0,
+                )
+            ],
+            enabled=True,
+            updated_at=1704067200.0,
+        )
+    )
+
+    with TestClient(app=app, base_url="http://test") as client:
+        resp = client.get(f"/logical-models?project_id={project_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = {m["logical_id"] for m in data["models"]}
+        assert "gpt-4o" in ids
+        assert "claude-3-sonnet" not in ids  # 被项目级 provider 限制过滤
+
+        # 不允许的模型应返回 404
+        resp_forbidden = client.get(f"/logical-models/claude-3-sonnet?project_id={project_id}")
+        assert resp_forbidden.status_code == 404
+
+
 def test_logical_model_routes_upstreams():
     from app.models import Provider, User
 

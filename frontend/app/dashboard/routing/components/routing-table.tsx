@@ -99,10 +99,10 @@ export function RoutingTable({ candidates, selectedUpstream }: RoutingTableProps
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatPercent(candidate.metrics.success_rate)}
+                    {formatPercent(candidate.metrics?.success_rate)}
                   </TableCell>
                   <TableCell className="text-right">
-                    {formatLatency(candidate.metrics.avg_latency_ms)}
+                    {formatLatency(candidate.metrics?.avg_latency_ms)}
                   </TableCell>
                   <TableCell className="text-right">
                     {formatCost(candidate.upstream.cost_input, candidate.upstream.cost_output)}

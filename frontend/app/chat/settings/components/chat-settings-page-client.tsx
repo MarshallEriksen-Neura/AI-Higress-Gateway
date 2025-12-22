@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -16,54 +17,42 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { useI18n } from "@/lib/i18n-context";
 import { useChatStore } from "@/lib/stores/chat-store";
-import { useAssistant, useUpdateAssistant } from "@/lib/swr/use-assistants";
-import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { useProjectChatSettings, useUpdateProjectChatSettings } from "@/lib/swr/use-project-chat-settings";
+import { useSelectableChatModels } from "@/lib/swr/use-selectable-chat-models";
+import { ChatSettingsPreferences } from "./chat-settings-preferences";
 
-const PROJECT_INHERIT_SENTINEL = "__project__";
 const DISABLE_VALUE = "__disable__";
 
 export function ChatSettingsPageClient() {
   const { t } = useI18n();
-  const { selectedProjectId, selectedAssistantId } = useChatStore();
+  const { selectedProjectId } = useChatStore();
 
   const { settings, mutate: mutateProjectSettings } = useProjectChatSettings(selectedProjectId);
   const updateProjectSettings = useUpdateProjectChatSettings();
 
-  const { assistant, mutate: mutateAssistant } = useAssistant(selectedAssistantId);
-  const updateAssistant = useUpdateAssistant();
-
-  const { models } = useLogicalModels();
-
-  const availableChatModels = useMemo(() => {
-    const modelSet = new Set<string>(["auto"]);
-    for (const model of models) {
-      if (!model.enabled) continue;
-      if (!model.capabilities?.includes("chat")) continue;
-      modelSet.add(model.logical_id);
-    }
-    return ["auto", ...Array.from(modelSet).filter((m) => m !== "auto").sort()];
-  }, [models]);
-
-  const availableTitleModels = useMemo(() => {
-    const modelSet = new Set<string>();
-    for (const model of models) {
-      if (!model.enabled) continue;
-      if (!model.capabilities?.includes("chat")) continue;
-      if (model.logical_id === "auto") continue;
-      modelSet.add(model.logical_id);
-    }
-    return Array.from(modelSet).sort();
-  }, [models]);
-
   const [savingProject, setSavingProject] = useState(false);
-  const [savingAssistant, setSavingAssistant] = useState(false);
 
   const projectDefaultModel = settings?.default_logical_model ?? "auto";
   const projectTitleModelValue = settings?.title_logical_model ?? null;
 
-  const assistantDefaultModel = assistant?.default_logical_model ?? "auto";
-  const assistantTitleModelValue = assistant?.title_logical_model ?? null;
+  const { filterOptions } = useSelectableChatModels(
+    selectedProjectId,
+    {
+      extraModels: [projectDefaultModel, projectTitleModelValue ?? undefined],
+    }
+  );
+  const [projectDefaultSearch, setProjectDefaultSearch] = useState("");
+  const [projectTitleSearch, setProjectTitleSearch] = useState("");
+
+  const projectDefaultModels = useMemo(
+    () => filterOptions(projectDefaultSearch),
+    [filterOptions, projectDefaultSearch]
+  );
+  const projectTitleModels = useMemo(
+    () =>
+      filterOptions(projectTitleSearch).filter((model) => model.value !== "auto"),
+    [filterOptions, projectTitleSearch]
+  );
 
   const updateProjectDefaultModel = async (value: string) => {
     if (!selectedProjectId) return;
@@ -97,38 +86,6 @@ export function ChatSettingsPageClient() {
     }
   };
 
-  const updateAssistantDefaultModel = async (value: string) => {
-    if (!selectedAssistantId) return;
-    setSavingAssistant(true);
-    try {
-      await updateAssistant(selectedAssistantId, { default_logical_model: value });
-      await mutateAssistant();
-      toast.success(t("chat.settings.saved"));
-    } catch (error) {
-      console.error("Failed to update assistant default model:", error);
-      toast.error(t("chat.settings.save_failed"));
-    } finally {
-      setSavingAssistant(false);
-    }
-  };
-
-  const updateAssistantTitleModel = async (value: string) => {
-    if (!selectedAssistantId) return;
-    setSavingAssistant(true);
-    try {
-      await updateAssistant(selectedAssistantId, {
-        title_logical_model: value === DISABLE_VALUE ? null : value,
-      });
-      await mutateAssistant();
-      toast.success(t("chat.settings.saved"));
-    } catch (error) {
-      console.error("Failed to update assistant title model:", error);
-      toast.error(t("chat.settings.save_failed"));
-    } finally {
-      setSavingAssistant(false);
-    }
-  };
-
   if (!selectedProjectId) {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -154,8 +111,8 @@ export function ChatSettingsPageClient() {
             <TabsTrigger value="project" className="flex-1">
               {t("chat.settings.tab_project")}
             </TabsTrigger>
-            <TabsTrigger value="assistant" className="flex-1" disabled={!selectedAssistantId}>
-              {t("chat.settings.tab_assistant")}
+            <TabsTrigger value="preferences" className="flex-1">
+              {t("chat.settings.tab_preferences")}
             </TabsTrigger>
           </TabsList>
 
@@ -171,14 +128,25 @@ export function ChatSettingsPageClient() {
                   <Select
                     value={projectDefaultModel}
                     onValueChange={(value) => void updateProjectDefaultModel(value)}
+                    onOpenChange={(open) => {
+                      if (!open) setProjectDefaultSearch("");
+                    }}
                   >
                     <SelectTrigger disabled={savingProject}>
                       <SelectValue placeholder={t("chat.header.model_placeholder")} />
                     </SelectTrigger>
                     <SelectContent>
-                      {availableChatModels.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
+                      <div className="p-2 pb-1">
+                        <Input
+                          value={projectDefaultSearch}
+                          onChange={(event) => setProjectDefaultSearch(event.target.value)}
+                          placeholder={t("chat.model.search_placeholder")}
+                          className="h-9"
+                        />
+                      </div>
+                      {projectDefaultModels.map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          {model.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -193,17 +161,28 @@ export function ChatSettingsPageClient() {
                   <Select
                     value={projectTitleModelValue ?? DISABLE_VALUE}
                     onValueChange={(value) => void updateProjectTitleModel(value)}
+                    onOpenChange={(open) => {
+                      if (!open) setProjectTitleSearch("");
+                    }}
                   >
                     <SelectTrigger disabled={savingProject}>
                       <SelectValue placeholder={t("chat.assistant.title_model_placeholder")} />
                     </SelectTrigger>
                     <SelectContent>
+                      <div className="p-2 pb-1">
+                        <Input
+                          value={projectTitleSearch}
+                          onChange={(event) => setProjectTitleSearch(event.target.value)}
+                          placeholder={t("chat.model.search_placeholder")}
+                          className="h-9"
+                        />
+                      </div>
                       <SelectItem value={DISABLE_VALUE}>
                         {t("chat.settings.title_model_disable")}
                       </SelectItem>
-                      {availableTitleModels.map((model) => (
-                        <SelectItem key={model} value={model}>
-                          {model}
+                      {projectTitleModels.map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          {model.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -222,83 +201,11 @@ export function ChatSettingsPageClient() {
             </Card>
           </TabsContent>
 
-          <TabsContent value="assistant" className="mt-4 space-y-4">
-            {!selectedAssistantId ? (
-              <div className="text-sm text-muted-foreground">
-                {t("chat.settings.assistant.not_selected")}
-              </div>
-            ) : (
-              <Card>
-                <CardHeader>
-                  <CardTitle>{t("chat.settings.assistant.title")}</CardTitle>
-                  <CardDescription>{t("chat.settings.assistant.description")}</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="grid gap-2">
-                    <div className="text-sm font-medium">{t("chat.settings.assistant.default_model")}</div>
-                    <Select
-                      value={assistantDefaultModel}
-                      onValueChange={(value) => void updateAssistantDefaultModel(value)}
-                    >
-                      <SelectTrigger disabled={savingAssistant}>
-                        <SelectValue placeholder={t("chat.header.model_placeholder")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={PROJECT_INHERIT_SENTINEL}>
-                          {t("chat.settings.assistant.follow_project")}
-                        </SelectItem>
-                        {availableChatModels.map((model) => (
-                          <SelectItem key={model} value={model}>
-                            {model}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="text-xs text-muted-foreground">
-                      {t("chat.settings.assistant.default_model_help")}
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <div className="text-sm font-medium">{t("chat.settings.assistant.title_model")}</div>
-                    <Select
-                      value={assistantTitleModelValue ?? DISABLE_VALUE}
-                      onValueChange={(value) => void updateAssistantTitleModel(value)}
-                    >
-                      <SelectTrigger disabled={savingAssistant}>
-                        <SelectValue placeholder={t("chat.assistant.title_model_placeholder")} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={DISABLE_VALUE}>
-                          {t("chat.settings.title_model_disable")}
-                        </SelectItem>
-                        <SelectItem value={PROJECT_INHERIT_SENTINEL}>
-                          {t("chat.settings.assistant.follow_project")}
-                        </SelectItem>
-                        {availableTitleModels.map((model) => (
-                          <SelectItem key={model} value={model}>
-                            {model}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <div className="text-xs text-muted-foreground">
-                      {t("chat.settings.assistant.title_model_help")}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end">
-                    <Button variant="outline" disabled>
-                      {t("chat.settings.auto_saved")}
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+          <TabsContent value="preferences" className="mt-4">
+            <ChatSettingsPreferences />
           </TabsContent>
         </Tabs>
       </div>
     </div>
   );
 }
-

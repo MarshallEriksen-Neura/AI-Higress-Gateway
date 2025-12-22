@@ -760,6 +760,24 @@ async def stream_message_and_run_baseline(
             content_text=run.output_text,
         )
 
+    # Auto-title conversation (best-effort, same as non-streaming path)
+    try:
+        if int(user_message.sequence or 0) == 1 and not (getattr(conv, "title", None) or "").strip():
+            await _maybe_auto_title_conversation(
+                db,
+                redis=redis,
+                client=client,
+                current_user=current_user,
+                conv=conv,
+                assistant=assistant,
+                effective_provider_ids=effective_provider_ids,
+                user_text=content,
+                user_sequence=int(user_message.sequence or 0),
+                requested_model_for_title_fallback=requested_model,
+            )
+    except Exception:  # pragma: no cover - best-effort only
+        pass
+
     yield _encode_sse_event(
         event_type="message.completed" if run.status == "succeeded" else "message.failed",
         data={

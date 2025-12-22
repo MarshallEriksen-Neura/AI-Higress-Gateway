@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Maximize2, Minimize2, PlugZap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 import {
   Tooltip,
   TooltipContent,
@@ -22,8 +23,8 @@ import { useI18n } from "@/lib/i18n-context";
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useAssistant } from "@/lib/swr/use-assistants";
-import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { useProjectChatSettings } from "@/lib/swr/use-project-chat-settings";
+import { useSelectableChatModels } from "@/lib/swr/use-selectable-chat-models";
 
 const INHERIT_VALUE = "__inherit__";
 const PROJECT_INHERIT_SENTINEL = "__project__";
@@ -38,9 +39,6 @@ export function ConversationHeader({
   title: string | null | undefined;
 }) {
   const { t } = useI18n();
-  const { assistant } = useAssistant(assistantId);
-  const { models } = useLogicalModels();
-
   const isImmersive = useChatLayoutStore((s) => s.isImmersive);
   const setIsImmersive = useChatLayoutStore((s) => s.setIsImmersive);
   const isBridgePanelOpen = useChatLayoutStore((s) => s.isBridgePanelOpen);
@@ -56,6 +54,7 @@ export function ConversationHeader({
     setChatStreamingEnabled,
   } = useChatStore();
 
+  const { assistant } = useAssistant(assistantId);
   const { settings: projectSettings } = useProjectChatSettings(selectedProjectId);
 
   const currentOverride = conversationModelOverrides[conversationId] ?? null;
@@ -66,22 +65,18 @@ export function ConversationHeader({
       ? projectSettings?.default_logical_model || "auto"
       : assistant?.default_logical_model || "auto";
 
-  const availableModels = useMemo(() => {
-    const modelSet = new Set<string>();
-    modelSet.add("auto");
-
-    for (const model of models) {
-      if (!model.enabled) continue;
-      if (!model.capabilities?.includes("chat")) continue;
-      modelSet.add(model.logical_id);
+  const { filterOptions } = useSelectableChatModels(
+    selectedProjectId,
+    {
+      extraModels: [currentOverride, effectiveAssistantDefaultModel],
     }
+  );
+  const [modelSearch, setModelSearch] = useState("");
 
-    // Ensure current override is selectable even if filtered out
-    if (currentOverride) modelSet.add(currentOverride);
-    if (effectiveAssistantDefaultModel) modelSet.add(effectiveAssistantDefaultModel);
-
-    return ["auto", ...Array.from(modelSet).filter((m) => m !== "auto").sort()];
-  }, [models, currentOverride, effectiveAssistantDefaultModel]);
+  const filteredModels = useMemo(
+    () => filterOptions(modelSearch),
+    [filterOptions, modelSearch]
+  );
 
   const displayTitle = (title || "").trim() || t("chat.conversation.untitled");
 
@@ -181,20 +176,31 @@ export function ConversationHeader({
                 setConversationModelOverride(conversationId, value);
               }
             }}
+            onOpenChange={(open) => {
+              if (!open) setModelSearch("");
+            }}
           >
             <SelectTrigger className="h-8 md:h-9 text-xs md:text-sm">
               <SelectValue placeholder={t("chat.header.model_placeholder")} />
             </SelectTrigger>
             <SelectContent>
+              <div className="p-2 pb-1">
+                <Input
+                  value={modelSearch}
+                  onChange={(event) => setModelSearch(event.target.value)}
+                  placeholder={t("chat.model.search_placeholder")}
+                  className="h-9"
+                />
+              </div>
               <SelectItem value={INHERIT_VALUE}>
                 {t("chat.header.model_inherit")}
                 {effectiveAssistantDefaultModel
                   ? ` (${effectiveAssistantDefaultModel})`
                   : ""}
               </SelectItem>
-              {availableModels.map((model) => (
-                <SelectItem key={model} value={model}>
-                  {model}
+              {filteredModels.map((model) => (
+                <SelectItem key={model.value} value={model.value}>
+                  {model.label}
                 </SelectItem>
               ))}
             </SelectContent>

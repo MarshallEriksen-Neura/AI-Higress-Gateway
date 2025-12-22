@@ -10,6 +10,7 @@ from .api.logical_model_routes import router as logical_model_router
 from .api.metrics_dashboard_v2_routes import router as metrics_dashboard_v2_router
 from .api.metrics_routes import router as metrics_router
 from .api.provider_preset_routes import router as provider_preset_router
+from .api.model_catalog_routes import router as model_catalog_router
 from .api.provider_routes import router as provider_router
 from .api.routing_routes import router as routing_router
 from .api.session_routes import router as session_router
@@ -208,6 +209,7 @@ def create_app() -> FastAPI:
     app.include_router(provider_submission_router)
     app.include_router(provider_router)
     app.include_router(provider_preset_router)
+    app.include_router(model_catalog_router)
     app.include_router(logical_model_router)
     app.include_router(routing_router)
     app.include_router(session_router)

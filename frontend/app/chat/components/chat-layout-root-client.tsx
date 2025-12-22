@@ -56,7 +56,6 @@ import {
   useDeleteConversation,
   useUpdateConversation,
 } from "@/lib/swr/use-conversations";
-import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { ChatNavRail } from "./chat-nav-rail";
 
 const AssistantForm = dynamic(
@@ -171,40 +170,6 @@ export function ChatLayoutRootClient({
         }
       : { assistant_id: "", limit: 0 }
   );
-
-  const { models: logicalModels } = useLogicalModels();
-
-  const availableAssistantModels = useMemo(() => {
-    const modelSet = new Set<string>(["auto"]);
-
-    for (const model of logicalModels) {
-      if (!model.enabled) continue;
-      if (!model.capabilities?.includes("chat")) continue;
-      modelSet.add(model.logical_id);
-    }
-
-    if (editingAssistant?.default_logical_model) {
-      modelSet.add(editingAssistant.default_logical_model);
-    }
-
-    return ["auto", ...Array.from(modelSet).filter((m) => m !== "auto").sort()];
-  }, [logicalModels, editingAssistant?.default_logical_model]);
-
-  const availableTitleModels = useMemo(() => {
-    const modelSet = new Set<string>();
-    for (const model of logicalModels) {
-      if (!model.enabled) continue;
-      if (!model.capabilities?.includes("chat")) continue;
-      if (model.logical_id === "auto") continue;
-      modelSet.add(model.logical_id);
-    }
-
-    if (editingAssistant?.title_logical_model) {
-      modelSet.add(editingAssistant.title_logical_model);
-    }
-
-    return Array.from(modelSet).sort();
-  }, [logicalModels, editingAssistant?.title_logical_model]);
 
   const createAssistant = useCreateAssistant();
   const updateAssistant = useUpdateAssistant();
@@ -521,8 +486,6 @@ export function ChatLayoutRootClient({
           editingAssistant={editingAssistant}
           projectId={selectedProjectId}
           onSubmit={handleSaveAssistant}
-          availableModels={availableAssistantModels}
-          availableTitleModels={availableTitleModels}
         />
       )}
 

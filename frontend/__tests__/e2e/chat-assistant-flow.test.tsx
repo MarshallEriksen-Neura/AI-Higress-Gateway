@@ -58,7 +58,7 @@ describe('E2E: 创建助手 → 创建会话 → 发送消息 → 查看回复�
     project_id: 'proj-1',
     name: '测试助手',
     system_prompt: '你是一个有帮助的助手',
-    default_logical_model: 'gpt-4',
+    default_logical_model: '__project__',
     model_preset: {},
     archived: false,
     created_at: '2024-01-01T00:00:00Z',
@@ -133,7 +133,7 @@ describe('E2E: 创建助手 → 创建会话 → 发送消息 → 查看回复�
     const assistant = await assistantService.createAssistant({
       project_id: 'proj-1',
       name: '测试助手',
-      default_logical_model: 'gpt-4',
+      default_logical_model: '__project__',
     });
     expect(assistant.assistant_id).toBe('asst-1');
 
@@ -459,7 +459,7 @@ describe('E2E: 删除助手 → 验证级联删除流程', () => {
     project_id: 'proj-1',
     name: '待删除助手',
     system_prompt: '测试',
-    default_logical_model: 'gpt-4',
+    default_logical_model: '__project__',
     model_preset: {},
     archived: false,
     created_at: '2024-01-01T00:00:00Z',

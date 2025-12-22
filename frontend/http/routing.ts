@@ -15,7 +15,7 @@ export interface RoutingDecisionRequest {
 export interface CandidateInfo {
   upstream: UpstreamModel;
   score: number;
-  metrics: ProviderMetrics;
+  metrics?: ProviderMetrics | null;
 }
 
 export interface RoutingDecisionResponse {
@@ -23,9 +23,9 @@ export interface RoutingDecisionResponse {
   selected_upstream: UpstreamModel;
   decision_time: number;
   reasoning: string;
-  alternative_upstreams: UpstreamModel[];
-  strategy_used: string;
-  all_candidates: CandidateInfo[];
+  alternative_upstreams?: UpstreamModel[] | null;
+  strategy_used?: string | null;
+  all_candidates?: CandidateInfo[] | null;
 }
 
 export interface SessionInfo {

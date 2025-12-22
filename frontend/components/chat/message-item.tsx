@@ -2,7 +2,17 @@
 
 import { formatDistanceToNow } from "date-fns";
 import { zhCN, enUS } from "date-fns/locale";
-import { User, Bot, Eye, PlugZap, Sparkles, Plus } from "lucide-react";
+import {
+  User,
+  Bot,
+  Eye,
+  PlugZap,
+  Sparkles,
+  Plus,
+  RotateCw,
+  Trash2,
+  Loader2,
+} from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { CardContent } from "@/components/ui/card";
@@ -28,6 +38,14 @@ export interface MessageItemProps {
   showEvalButton?: boolean;
   comparisonVariants?: ComparisonVariant[];
   onAddComparison?: (assistantMessageId: string, sourceUserMessageId: string) => void;
+  isLatestAssistant?: boolean;
+  enableTypewriter?: boolean;
+  typewriterKey?: string;
+  onRegenerate?: (assistantMessageId: string, sourceUserMessageId?: string) => void;
+  onDeleteConversation?: () => void;
+  disableActions?: boolean;
+  isRegenerating?: boolean;
+  isDeletingConversation?: boolean;
 }
 
 export function MessageItem({
@@ -41,6 +59,14 @@ export function MessageItem({
   showEvalButton = true,
   comparisonVariants = [],
   onAddComparison,
+  isLatestAssistant = false,
+  enableTypewriter = false,
+  typewriterKey,
+  onRegenerate,
+  onDeleteConversation,
+  disableActions = false,
+  isRegenerating = false,
+  isDeletingConversation = false,
 }: MessageItemProps) {
   const { t, language } = useI18n();
   const isUser = message.role === "user";
@@ -53,6 +79,18 @@ export function MessageItem({
   const primaryRun = runs.length > 0 ? runs[0] : undefined;
   const firstInvocation = primaryRun?.tool_invocations?.[0];
   const [activeTab, setActiveTab] = useState<string>("baseline");
+  const effectiveTypewriterKey =
+    typewriterKey ?? `${message.conversation_id}:${message.created_at}`;
+  const primaryStatus = primaryRun?.status;
+  const createdMs = new Date(message.created_at).getTime();
+  const isRecent = Number.isFinite(createdMs)
+    ? Date.now() - createdMs < 90_000
+    : false;
+  const shouldTypewriter =
+    enableTypewriter &&
+    isAssistant &&
+    isLatestAssistant &&
+    (primaryStatus === "running" || primaryStatus === "queued" || isRecent);
 
   const tabItems = useMemo(() => {
     if (!isAssistant) return [];
@@ -210,13 +248,23 @@ export function MessageItem({
                         {item.errorMessage || t("chat.message.add_comparison_failed")}
                       </div>
                     ) : (
-                      <MessageContent content={item.content || ""} role="assistant" />
+                      <MessageContent
+                        content={item.content || ""}
+                        role="assistant"
+                        enableTypewriter={item.key === "baseline" && shouldTypewriter}
+                        typewriterKey={effectiveTypewriterKey}
+                      />
                     )}
                   </TabsContent>
                 ))}
               </Tabs>
             ) : (
-              <MessageContent content={message.content} role={message.role} />
+              <MessageContent
+                content={message.content}
+                role={message.role}
+                enableTypewriter={shouldTypewriter}
+                typewriterKey={effectiveTypewriterKey}
+              />
             )}
 
             {/* Run 摘要信息 */}
@@ -268,61 +316,101 @@ export function MessageItem({
           </span>
 
           {/* 助手消息的操作按钮 */}
-          {isAssistant && primaryRun && (
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {firstInvocation?.req_id && firstInvocation?.agent_id && (
+          {isAssistant && (
+            <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+              {/* 重新生成 */}
+              {onRegenerate && (
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => {
-                    setConversationBridgeAgentIds(message.conversation_id, [firstInvocation.agent_id]);
-                    setConversationBridgeActiveReqId(message.conversation_id, firstInvocation.req_id);
-                    setIsBridgePanelOpen(true);
-                  }}
-                  title={t("chat.bridge.toggle")}
+                  disabled={disableActions || isRegenerating}
+                  onClick={() => onRegenerate(message.message_id, runSourceMessageId)}
+                  title={t("chat.action.retry")}
+                  aria-label={t("chat.action.retry")}
                 >
-                  <PlugZap className="size-3.5" />
+                  {isRegenerating ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <RotateCw className="size-3.5" />
+                  )}
                 </Button>
               )}
-              {/* 查看详情按钮 */}
-              {onViewDetails && (
+              {/* 删除对话 */}
+              {onDeleteConversation && (
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={() => onViewDetails(primaryRun.run_id)}
-                  title={t("chat.message.view_details")}
+                  disabled={disableActions || isDeletingConversation}
+                  onClick={onDeleteConversation}
+                  title={t("chat.conversation.delete")}
+                  aria-label={t("chat.conversation.delete")}
                 >
-                  <Eye className="size-3.5" />
+                  {isDeletingConversation ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="size-3.5" />
+                  )}
                 </Button>
               )}
 
-              {/* 添加对比按钮 */}
-              {onAddComparison &&
-                runSourceMessageId &&
-                primaryRun.status === "succeeded" && (
-                  <Button
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => onAddComparison(message.message_id, runSourceMessageId)}
-                    title={t("chat.message.add_comparison")}
-                    aria-label={t("chat.message.add_comparison")}
-                  >
-                    <Plus className="size-3.5" />
-                  </Button>
-                )}
+              {/* 以下操作依赖基线 run */}
+              {primaryRun && (
+                <>
+                  {firstInvocation?.req_id && firstInvocation?.agent_id && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => {
+                        setConversationBridgeAgentIds(message.conversation_id, [firstInvocation.agent_id]);
+                        setConversationBridgeActiveReqId(message.conversation_id, firstInvocation.req_id);
+                        setIsBridgePanelOpen(true);
+                      }}
+                      title={t("chat.bridge.toggle")}
+                    >
+                      <PlugZap className="size-3.5" />
+                    </Button>
+                  )}
+                  {/* 查看详情按钮 */}
+                  {onViewDetails && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() => onViewDetails(primaryRun.run_id)}
+                      title={t("chat.message.view_details")}
+                    >
+                      <Eye className="size-3.5" />
+                    </Button>
+                  )}
 
-              {/* 推荐评测按钮 */}
-              {showEvalButton && onTriggerEval && primaryRun.status === "succeeded" && (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() =>
-                    onTriggerEval(runSourceMessageId ?? message.message_id, primaryRun.run_id)
-                  }
-                  title={t("chat.message.trigger_eval")}
-                >
-                  <Sparkles className="size-3.5" />
-                </Button>
+                  {/* 添加对比按钮 */}
+                  {onAddComparison &&
+                    runSourceMessageId &&
+                    primaryRun.status === "succeeded" && (
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => onAddComparison(message.message_id, runSourceMessageId)}
+                        title={t("chat.message.add_comparison")}
+                        aria-label={t("chat.message.add_comparison")}
+                      >
+                        <Plus className="size-3.5" />
+                      </Button>
+                    )}
+
+                  {/* 推荐评测按钮 */}
+                  {showEvalButton && onTriggerEval && primaryRun.status === "succeeded" && (
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      onClick={() =>
+                        onTriggerEval(runSourceMessageId ?? message.message_id, primaryRun.run_id)
+                      }
+                      title={t("chat.message.trigger_eval")}
+                    >
+                      <Sparkles className="size-3.5" />
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           )}
