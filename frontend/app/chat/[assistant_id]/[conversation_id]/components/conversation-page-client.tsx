@@ -73,6 +73,8 @@ export function ConversationPageClient({
 
   const conversation = useConversationFromList(conversationId, assistantId);
   const selectedProjectId = useChatStore((s) => s.selectedProjectId);
+  const setSelectedAssistant = useChatStore((s) => s.setSelectedAssistant);
+  const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
   const activeEvalId = useChatStore((s) => s.activeEvalId);
   const setActiveEval = useChatStore((s) => s.setActiveEval);
   const evalStreamingEnabled = useChatStore((s) => s.evalStreamingEnabled);
@@ -90,6 +92,12 @@ export function ConversationPageClient({
   const setIsBridgePanelOpen = useChatLayoutStore(
     (s) => s.setIsBridgePanelOpen
   );
+
+  // 同步 URL 中的 assistantId 和 conversationId 到全局状态
+  useEffect(() => {
+    setSelectedAssistant(assistantId);
+    setSelectedConversation(conversationId);
+  }, [assistantId, conversationId, setSelectedAssistant, setSelectedConversation]);
 
   const evalStreamControllerRef = useRef<AbortController | null>(null);
   useEffect(() => {

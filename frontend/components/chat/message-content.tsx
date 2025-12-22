@@ -5,9 +5,10 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { Eye, EyeOff, Copy, Check } from "lucide-react";
+import { Eye, EyeOff, Copy, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n-context";
 import {
@@ -350,15 +351,17 @@ export function MessageContent({
     {
       enabled: enableTypewriter && role === "assistant",
       sourceKey: typewriterKey,
-      baseChunkSize: 3,
-      maxChunkSize: 14,
+      baseChunkSize: 2,
+      maxChunkSize: 12,
       accelerateAt: 64,
-      tickMs: 18,
+      tickMs: 22,
     }
   );
   const displayText = enableTypewriter && role === "assistant" ? typewriterText : mergedText;
   const showCursor = enableTypewriter && role === "assistant" && !typewriterFinished;
   const renderText = showCursor ? `${displayText}▌` : displayText;
+  const showTypewriterPlaceholder =
+    enableTypewriter && role === "assistant" && !renderText;
 
   const [showThink, setShowThink] = useState(() => resolved.default_show_think);
 
@@ -407,7 +410,17 @@ export function MessageContent({
         </div>
       ) : null}
 
-      {renderText ? (
+      {showTypewriterPlaceholder ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader2 className="size-3 animate-spin" />
+            {t("chat.run.status_running")}
+          </div>
+          <Skeleton className="h-3 w-3/4" />
+          <Skeleton className="h-3 w-5/6" />
+          <Skeleton className="h-3 w-2/3" />
+        </div>
+      ) : renderText ? (
         <div>{renderBody(renderText, role === "user")}</div>
       ) : null}
     </div>

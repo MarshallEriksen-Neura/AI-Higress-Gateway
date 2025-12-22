@@ -83,6 +83,10 @@ export function MessageItem({
     typewriterKey ?? `${message.conversation_id}:${message.created_at}`;
   const primaryStatus = primaryRun?.status;
   const createdMs = new Date(message.created_at).getTime();
+  const isAssistantPendingResponse =
+    isAssistant &&
+    primaryStatus === "running" &&
+    (message.content ?? "").trim().length === 0;
   const isRecent = Number.isFinite(createdMs)
     ? Date.now() - createdMs < 90_000
     : false;
@@ -91,6 +95,11 @@ export function MessageItem({
     isAssistant &&
     isLatestAssistant &&
     (primaryStatus === "running" || primaryStatus === "queued" || isRecent);
+  const isActivelyGenerating =
+    isAssistant &&
+    (primaryStatus === "running" ||
+      primaryStatus === "queued" ||
+      (shouldTypewriter && isRecent));
 
   const tabItems = useMemo(() => {
     if (!isAssistant) return [];
@@ -129,71 +138,6 @@ export function MessageItem({
     locale: language === "zh" ? zhCN : enUS,
   });
 
-  // 获取状态显示
-  const getStatusBadge = (run: RunSummary) => {
-    const statusConfig = {
-      queued: {
-        label: t("chat.run.status_queued"),
-        className: "bg-muted text-muted-foreground",
-      },
-      running: {
-        label: t("chat.run.status_running"),
-        className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-      },
-      succeeded: {
-        label: t("chat.run.status_succeeded"),
-        className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-      },
-      failed: {
-        label: t("chat.run.status_failed"),
-        className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-      },
-    };
-
-    const config = statusConfig[run.status];
-    if (!config) return null;
-
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-          config.className
-        )}
-      >
-        {config.label}
-      </span>
-    );
-  };
-
-  const getComparisonStatusBadge = (status: "running" | "succeeded" | "failed") => {
-    const statusConfig = {
-      running: {
-        label: t("chat.run.status_running"),
-        className: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-      },
-      succeeded: {
-        label: t("chat.run.status_succeeded"),
-        className: "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-      },
-      failed: {
-        label: t("chat.run.status_failed"),
-        className: "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-      },
-    } as const;
-
-    const config = statusConfig[status];
-    return (
-      <span
-        className={cn(
-          "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium",
-          config.className
-        )}
-      >
-        {config.label}
-      </span>
-    );
-  };
-
   return (
     <div
       className={cn(
@@ -223,7 +167,12 @@ export function MessageItem({
           )}
         >
           <CardContent className="py-3 px-4">
-            {isAssistant && comparisonVariants.length > 0 ? (
+            {isAssistantPendingResponse ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Loader2 className="size-4 animate-spin" />
+                <span>{t("chat.message.loading")}</span>
+              </div>
+            ) : isAssistant && comparisonVariants.length > 0 ? (
               <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
                 <TabsList className="h-8 px-1">
                   {tabItems.map((item) => (
@@ -266,46 +215,6 @@ export function MessageItem({
                 typewriterKey={effectiveTypewriterKey}
               />
             )}
-
-            {/* Run 摘要信息 */}
-            {isAssistant && (
-              <>
-                {runs.length === 0 ? (
-                  <div className="mt-3 pt-3 border-t border-border/50 text-xs text-muted-foreground">
-                    {t("chat.message.no_response")}
-                  </div>
-                ) : (
-                  <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
-                    {runs.map((run, index) => (
-                      <div key={run.run_id} className="flex items-center gap-2 text-xs text-muted-foreground">
-                        {runs.length > 1 && (
-                          <span className="font-medium text-muted-foreground/70">
-                            #{index + 1}
-                          </span>
-                        )}
-                        <span className="font-medium">{run.requested_logical_model}</span>
-                        {getStatusBadge(run)}
-                        {run.latency && (
-                          <span>
-                            {run.latency}ms
-                          </span>
-                        )}
-                      </div>
-                    ))}
-
-                    {comparisonVariants.map((v) => (
-                      <div
-                        key={v.id}
-                        className="flex items-center gap-2 text-xs text-muted-foreground"
-                      >
-                        <span className="font-medium">{v.model}</span>
-                        {getComparisonStatusBadge(v.status)}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
           </CardContent>
         </AdaptiveCard>
 
@@ -314,6 +223,12 @@ export function MessageItem({
           <span className="text-xs text-muted-foreground">
             {formattedTime}
           </span>
+          {isActivelyGenerating ? (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <Loader2 className="size-3 animate-spin" />
+              {t("chat.run.status_running")}
+            </span>
+          ) : null}
 
           {/* 助手消息的操作按钮 */}
           {isAssistant && (

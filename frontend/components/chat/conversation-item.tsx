@@ -16,6 +16,8 @@ import { MoreVertical, Archive, Trash2, Pencil } from "lucide-react";
 import { useI18n } from "@/lib/i18n-context";
 import type { Conversation } from "@/lib/api-types";
 import { ConversationItemDialogs } from "./conversation-item-dialogs";
+import { useChatStore } from "@/lib/stores/chat-store";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface ConversationItemProps {
   conversation: Conversation;
@@ -42,6 +44,10 @@ export function ConversationItem({
   const [showArchiveDialog, setShowArchiveDialog] = useState(false);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [draftTitle, setDraftTitle] = useState(conversation.title || "");
+  const conversationPending =
+    useChatStore((s) => s.conversationPending[conversation.conversation_id]) ?? false;
+  const showTitleSkeleton =
+    conversationPending || !(conversation.title || "").trim();
 
   const handleCardClick = () => {
     if (onSelect) {
@@ -110,7 +116,16 @@ export function ConversationItem({
       >
         <CardHeader>
           <CardTitle className="text-base">
-            {conversation.title || t("chat.conversation.untitled")}
+            {showTitleSkeleton ? (
+              <div className="flex items-center gap-2">
+                <Skeleton className="h-4 w-32" />
+                <span className="text-[11px] text-muted-foreground animate-pulse">
+                  {t("chat.message.loading")}
+                </span>
+              </div>
+            ) : (
+              conversation.title || t("chat.conversation.untitled")
+            )}
           </CardTitle>
           <CardDescription>
             {t("chat.conversation.last_activity")}: {formatLastActivity(conversation.last_activity_at)}

@@ -32,6 +32,9 @@ interface ChatState {
   // 会话级 Bridge 面板聚焦的 req_id：conversationId -> req_id
   conversationBridgeActiveReqIds: Record<string, string>;
 
+  // 非流式等待回复中的会话：conversationId -> pending
+  conversationPending: Record<string, boolean>;
+
   // 操作方法
   setSelectedProjectId: (projectId: string | null) => void;
   setSelectedAssistant: (assistantId: string | null) => void;
@@ -43,6 +46,7 @@ interface ChatState {
   clearConversationModelOverrides: () => void;
   setConversationBridgeAgentIds: (conversationId: string, agentIds: string[] | null) => void;
   setConversationBridgeActiveReqId: (conversationId: string, reqId: string | null) => void;
+  setConversationPending: (conversationId: string, pending: boolean) => void;
   
   // 重置状态
   reset: () => void;
@@ -58,6 +62,7 @@ const initialState = {
   conversationModelOverrides: {} as Record<string, string>,
   conversationBridgeAgentIds: {} as Record<string, string[]>,
   conversationBridgeActiveReqIds: {} as Record<string, string>,
+  conversationPending: {} as Record<string, boolean>,
 };
 
 export const useChatStore = create<ChatState>()(
@@ -127,11 +132,22 @@ export const useChatStore = create<ChatState>()(
           return { conversationBridgeActiveReqIds: next };
         }),
 
+      setConversationPending: (conversationId, pending) =>
+        set((state) => {
+          const next = { ...state.conversationPending };
+          if (!pending) {
+            delete next[conversationId];
+          } else {
+            next[conversationId] = true;
+          }
+          return { conversationPending: next };
+        }),
+
       reset: () => set(initialState),
     }),
     {
       name: 'chat-store',
-      version: 7,
+      version: 8,
       migrate: (persistedState: unknown) => {
         // v1 -> v2: add conversationModelOverrides
         // v2 -> v3: add conversationBridgeAgentIds
@@ -139,6 +155,7 @@ export const useChatStore = create<ChatState>()(
         // v4 -> v5: conversationBridgeAgentIds from string -> string[]
         // v5 -> v6: add evalStreamingEnabled
         // v6 -> v7: add chatStreamingEnabled
+        // v7 -> v8: add conversationPending
         if (persistedState && typeof persistedState === 'object') {
           const state = persistedState as Record<string, unknown>;
           const rawAgentIds = state.conversationBridgeAgentIds ?? {};
@@ -159,6 +176,7 @@ export const useChatStore = create<ChatState>()(
             conversationModelOverrides: (state.conversationModelOverrides as Record<string, string> | undefined) ?? {},
             conversationBridgeAgentIds: nextAgentIds,
             conversationBridgeActiveReqIds: (state.conversationBridgeActiveReqIds as Record<string, string> | undefined) ?? {},
+            conversationPending: (state.conversationPending as Record<string, boolean> | undefined) ?? {},
           };
         }
         return persistedState;

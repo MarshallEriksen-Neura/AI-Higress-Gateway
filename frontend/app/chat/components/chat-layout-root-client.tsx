@@ -78,6 +78,7 @@ export function ChatLayoutRootClient({
   const {
     selectedProjectId,
     selectedAssistantId,
+    selectedConversationId,
     setSelectedAssistant,
     setSelectedConversation,
   } = useChatStore();
@@ -393,6 +394,7 @@ export function ChatLayoutRootClient({
               <ConversationList
                 conversations={conversations}
                 isLoading={isLoadingConversations}
+                selectedConversationId={selectedConversationId || undefined}
                 onSelectConversation={handleSelectConversation}
                 onCreateConversation={handleCreateConversation}
                 onArchiveConversation={handleArchiveConversation}

@@ -67,6 +67,12 @@ export const MessageList = memo(function MessageList({
   const { preloadData } = useCachePreloader();
   const chatStreamingEnabled = useChatStore((s) => s.chatStreamingEnabled);
   const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
+  const isPendingResponse =
+    useChatStore((s) => s.conversationPending[conversationId]) ?? false;
+  const loaderColors = useMemo(
+    () => ["#ff9800", "#ff7a1b", "#ff6b3c", "#ff4f70", "#ff0f8f"],
+    []
+  );
 
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
   const deleteConversation = useDeleteConversation();
@@ -224,15 +230,23 @@ export const MessageList = memo(function MessageList({
     return rows;
   }, [displayMessages]);
 
+  const renderRows = useMemo(() => {
+    if (!isPendingResponse) return displayRows;
+    return displayRows.filter(
+      (row) =>
+        row.message.role !== "assistant" || (row.message.content || "").trim().length > 0
+    );
+  }, [displayRows, isPendingResponse]);
+
   const latestAssistantMessageId = useMemo(() => {
-    for (let idx = displayRows.length - 1; idx >= 0; idx -= 1) {
-      const row = displayRows[idx];
+    for (let idx = renderRows.length - 1; idx >= 0; idx -= 1) {
+      const row = renderRows[idx];
       if (row?.message.role === "assistant") {
         return row.message.message_id;
       }
     }
     return null;
-  }, [displayRows]);
+  }, [renderRows]);
 
   const findUserMessageContent = useCallback(
     (sourceUserMessageId?: string) => {
@@ -465,7 +479,7 @@ export const MessageList = memo(function MessageList({
 
   // 虚拟列表配置
   const rowVirtualizer = useVirtualizer({
-    count: displayRows.length,
+    count: renderRows.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 100, // 估计每条消息的高度
     overscan: 5, // 预渲染的消息数量
@@ -575,7 +589,7 @@ export const MessageList = memo(function MessageList({
           }}
         >
           {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const item = displayRows[virtualItem.index];
+            const item = renderRows[virtualItem.index];
             if (!item) return null;
 
             return (
@@ -642,6 +656,57 @@ export const MessageList = memo(function MessageList({
           <span className="ml-2 text-muted-foreground">
             {t("chat.message.loading")}
           </span>
+        </div>
+      )}
+
+      {/* 非流式等待回复时的趣味 loading */}
+      {isPendingResponse && (
+        <div className="px-4 pb-6">
+          <div className="flex items-center justify-center">
+            <div className="flex items-center gap-3 rounded-full border bg-muted/60 px-4 py-2 shadow-sm">
+              <div className="flex items-center gap-2">
+                {loaderColors.map((color, idx) => (
+                  <span
+                    key={color}
+                    className="block h-3 w-3 rounded-full shadow-sm"
+                    style={{
+                      background: color,
+                      animation: "chat-dot-swap 1.4s ease-in-out infinite",
+                      animationDelay: `${idx * 0.12}s`,
+                      boxShadow: `0 4px 10px ${color}33`,
+                    }}
+                  />
+                ))}
+              </div>
+              <span className="text-sm font-medium text-muted-foreground">
+                {t("chat.message.loading_fun")}
+              </span>
+              <style jsx global>{`
+                @keyframes chat-dot-swap {
+                  0% {
+                    transform: translateY(0) scale(1);
+                    opacity: 0.8;
+                  }
+                  25% {
+                    transform: translateY(-6px) scale(1.08);
+                    opacity: 1;
+                  }
+                  50% {
+                    transform: translateY(0) scale(1);
+                    opacity: 0.85;
+                  }
+                  75% {
+                    transform: translateY(6px) scale(0.96);
+                    opacity: 0.8;
+                  }
+                  100% {
+                    transform: translateY(0) scale(1);
+                    opacity: 0.8;
+                  }
+                }
+              `}</style>
+            </div>
+          </div>
         </div>
       )}
 

@@ -6,6 +6,7 @@ import { messageService } from '@/http/message';
 import { streamSSERequest } from '@/lib/bridge/sse';
 import { SWRCacheManager, cacheStrategies } from './cache';
 import { ErrorHandler } from '@/lib/errors';
+import { useChatStore } from '@/lib/stores/chat-store';
 import type {
   GetMessagesParams,
   MessagesResponse,
@@ -119,8 +120,14 @@ export function useSendMessageToConversation(
     // 使用字符串 key 确保与 MessageList/useMessages 默认第一页一致（limit=50）
     const messagesKey = `/v1/conversations/${conversationId}/messages?limit=50`;
     const wantsStreaming = !!options?.streaming;
+    const markPending = (pending: boolean) =>
+      useChatStore.getState().setConversationPending(conversationId, pending);
+    const shouldShowPendingLoader = true;
 
     try {
+      if (shouldShowPendingLoader) {
+        markPending(true);
+      }
       const payload: SendMessageRequest = { ...request };
       if (overrideLogicalModel) {
         payload.override_logical_model = overrideLogicalModel;
@@ -128,10 +135,6 @@ export function useSendMessageToConversation(
       const hasBridgeTools =
         !!payload.bridge_agent_id ||
         (Array.isArray(payload.bridge_agent_ids) && payload.bridge_agent_ids.length > 0);
-      const requestedLogicalModel =
-        payload.override_logical_model && payload.override_logical_model.trim()
-          ? payload.override_logical_model
-          : 'auto';
 
       if (wantsStreaming && !hasBridgeTools) {
         const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -142,7 +145,69 @@ export function useSendMessageToConversation(
         let userMessageId: string = tempUserMessageId;
         let assistantMessageId: string = tempAssistantMessageId;
         let assistantText = '';
+        let assistantBuffer = '';
+        let flushTimer: ReturnType<typeof setTimeout> | number | null = null;
         let baselineRun: RunSummary | null = null;
+        const clearPending = () => {
+          if (shouldShowPendingLoader) {
+            markPending(false);
+          }
+        };
+
+        const updateAssistantContent = (nextText: string) => {
+          void globalMutate(
+            messagesKey,
+            (current?: MessagesResponse) => {
+              if (!current) return current;
+              const nextItems = current.items.map((it) => {
+                if (it.message.message_id !== assistantMessageId) return it;
+                return {
+                  ...it,
+                  message: { ...it.message, content: nextText },
+                };
+              });
+              return { ...current, items: nextItems };
+            },
+            { revalidate: false }
+          );
+        };
+
+        const computeFlushDelay = () => {
+          if (assistantBuffer.length > 120) return 30;
+          if (assistantBuffer.length > 60) return 45;
+          return 60;
+        };
+
+        const flushBuffer = (force?: boolean) => {
+          if (!assistantBuffer) {
+            flushTimer = null;
+            return;
+          }
+          assistantText += assistantBuffer;
+          assistantBuffer = '';
+          updateAssistantContent(assistantText);
+          flushTimer = null;
+
+          // 在完成阶段可以微调节奏，让收尾更平滑
+          if (!force && assistantBuffer.length === 0) {
+            flushTimer = setTimeout(() => {
+              flushTimer = null;
+              if (assistantBuffer) {
+                flushBuffer();
+              }
+            }, 24);
+          }
+        };
+
+        const scheduleFlush = () => {
+          if (flushTimer) return;
+          // 优先使用 rAF，对齐帧节奏；回退到定时器
+          if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+            flushTimer = window.requestAnimationFrame(() => flushBuffer());
+            return;
+          }
+          flushTimer = setTimeout(flushBuffer, computeFlushDelay());
+        };
 
         await globalMutate(
           messagesKey,
@@ -290,26 +355,15 @@ export function useSendMessageToConversation(
             if (type === 'message.delta') {
               const delta = getString(rec, 'delta');
               if (!delta) return;
-              assistantText += delta;
-              void globalMutate(
-                messagesKey,
-                (current?: MessagesResponse) => {
-                  if (!current) return current;
-                  const nextItems = current.items.map((it) => {
-                    if (it.message.message_id !== assistantMessageId) return it;
-                    return {
-                      ...it,
-                      message: { ...it.message, content: assistantText },
-                    };
-                  });
-                  return { ...current, items: nextItems };
-                },
-                { revalidate: false }
-              );
+              assistantBuffer += delta;
+              clearPending();
+              scheduleFlush();
               return;
             }
 
             if (type === 'message.completed' || type === 'message.failed') {
+              flushBuffer(true);
+              clearPending();
               const finalRun = parseRunSummary(rec['baseline_run']);
               if (finalRun) baselineRun = finalRun;
 
@@ -368,20 +422,6 @@ export function useSendMessageToConversation(
         },
         run: undefined,
       };
-      const assistantPlaceholder: MessagesResponse['items'][number] = {
-        message: {
-          message_id: `temp-assistant-${nonce}`,
-          conversation_id: conversationId,
-          role: 'assistant',
-          content: '',
-          created_at: createdAt,
-        },
-        run: {
-          run_id: `temp-run-${nonce}`,
-          requested_logical_model: requestedLogicalModel,
-          status: 'running',
-        },
-      };
 
       await globalMutate(
         messagesKey,
@@ -389,7 +429,7 @@ export function useSendMessageToConversation(
           const baseItems = currentData?.items ?? [];
           return {
             ...currentData,
-            items: [assistantPlaceholder, optimisticMessage, ...baseItems],
+            items: [optimisticMessage, ...baseItems],
           };
         },
         { revalidate: false }
@@ -425,9 +465,7 @@ export function useSendMessageToConversation(
         messagesKey,
         (currentData?: MessagesResponse) => {
           const baseItems =
-            currentData?.items.filter(
-              (it) => it.message.message_id !== `temp-assistant-${nonce}`
-            ) ?? [];
+            currentData?.items ?? [];
           const hasUser = baseItems.some(
             (it) => it.message.message_id === `temp-${nonce}`
           );
@@ -444,6 +482,11 @@ export function useSendMessageToConversation(
       );
 
       throw standardError;
+    }
+    finally {
+      if (shouldShowPendingLoader) {
+        markPending(false);
+      }
     }
   };
 }
