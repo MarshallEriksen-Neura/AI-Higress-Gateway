@@ -103,6 +103,8 @@ const createHttpClient = (): AxiosInstance => {
   const instance = axios.create({
     baseURL: BASE_URL,
     timeout: 10000,
+    // 需要携带跨域 Cookie 才能拿到后端设置的 HttpOnly refresh_token
+    withCredentials: true,
     headers: {
       'Content-Type': 'application/json',
     },

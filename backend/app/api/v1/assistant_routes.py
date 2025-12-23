@@ -294,10 +294,9 @@ async def create_message_endpoint(
     accept_header = request.headers.get("accept", "")
     wants_event_stream = "text/event-stream" in accept_header.lower()
 
-    # streaming=true 或 Accept:text/event-stream 均触发 SSE；但当使用 bridge 工具时回退到 non-stream（tool loop 依赖非流式路径）。
+    # streaming=true 或 Accept:text/event-stream 均触发 SSE
     stream = bool(payload.streaming) or wants_event_stream
-    has_bridge_tools = bool((payload.bridge_agent_id or "").strip()) or bool(payload.bridge_agent_ids)
-    if stream and not has_bridge_tools:
+    if stream:
         return StreamingResponse(
             chat_app_service.stream_message_and_run_baseline(
                 db,
@@ -308,6 +307,8 @@ async def create_message_endpoint(
                 content=payload.content,
                 override_logical_model=payload.override_logical_model,
                 model_preset=payload.model_preset,
+                bridge_agent_id=payload.bridge_agent_id,
+                bridge_agent_ids=payload.bridge_agent_ids,
             ),
             media_type="text/event-stream",
         )

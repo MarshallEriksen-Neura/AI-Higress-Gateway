@@ -282,10 +282,15 @@ func (s *gatewayServer) handleTunnelWS(w http.ResponseWriter, r *http.Request) {
 				_ = conn.Close(websocket.StatusPolicyViolation, "invalid auth payload")
 				return
 			}
-			userID, err := verifyAgentToken(s.opts.AgentTokenSecret, payload.Token, pendingHello.agentID)
+			userID, tokenVersion, err := verifyAgentToken(s.opts.AgentTokenSecret, payload.Token, pendingHello.agentID)
 			if err != nil {
 				logger.Warn("agent auth failed", "agent_id", pendingHello.agentID, "err", err.Error())
 				_ = conn.Close(websocket.StatusPolicyViolation, "invalid token")
+				return
+			}
+			if err := s.verifyTokenVersion(ctx, userID, pendingHello.agentID, tokenVersion); err != nil {
+				logger.Warn("agent token version mismatch", "agent_id", pendingHello.agentID, "user_id", userID, "err", err.Error())
+				_ = conn.Close(websocket.StatusPolicyViolation, "invalid token version")
 				return
 			}
 			pendingHello.userID = userID
@@ -368,20 +373,21 @@ func (s *gatewayServer) handleTunnelWS(w http.ResponseWriter, r *http.Request) {
 type bridgeAgentClaims struct {
 	Type    string `json:"type"`
 	AgentID string `json:"agent_id"`
+	Version int    `json:"ver"`
 	jwt.RegisteredClaims
 }
 
-func verifyAgentToken(secret string, tokenString string, agentID string) (string, error) {
+func verifyAgentToken(secret string, tokenString string, agentID string) (string, int, error) {
 	secret = strings.TrimSpace(secret)
 	tokenString = strings.TrimSpace(tokenString)
 	if secret == "" {
-		return "", errors.New("missing secret")
+		return "", 0, errors.New("missing secret")
 	}
 	if tokenString == "" {
-		return "", errors.New("missing token")
+		return "", 0, errors.New("missing token")
 	}
 	if strings.TrimSpace(agentID) == "" {
-		return "", errors.New("missing agent_id")
+		return "", 0, errors.New("missing agent_id")
 	}
 
 	claims := &bridgeAgentClaims{}
@@ -393,22 +399,59 @@ func verifyAgentToken(secret string, tokenString string, agentID string) (string
 		return []byte(secret), nil
 	})
 	if err != nil || parsed == nil || !parsed.Valid {
-		return "", fmt.Errorf("invalid token: %w", err)
+		return "", 0, fmt.Errorf("invalid token: %w", err)
 	}
 	if claims.Type != "bridge_agent" {
-		return "", fmt.Errorf("invalid token type: %s", claims.Type)
+		return "", 0, fmt.Errorf("invalid token type: %s", claims.Type)
 	}
 	if claims.AgentID != agentID {
-		return "", fmt.Errorf("agent_id mismatch")
+		return "", 0, fmt.Errorf("agent_id mismatch")
 	}
 	if claims.ExpiresAt != nil && time.Now().After(claims.ExpiresAt.Time) {
-		return "", fmt.Errorf("token expired")
+		return "", 0, fmt.Errorf("token expired")
 	}
 	userID := strings.TrimSpace(claims.Subject)
 	if userID == "" {
-		return "", fmt.Errorf("missing sub")
+		return "", 0, fmt.Errorf("missing sub")
 	}
-	return userID, nil
+	if claims.Version <= 0 {
+		return "", 0, fmt.Errorf("missing ver")
+	}
+	return userID, claims.Version, nil
+}
+
+type bridgeAgentVersionPayload struct {
+	Version   int    `json:"version"`
+	ExpiresAt string `json:"expires_at"`
+}
+
+func (s *gatewayServer) versionRedisKey(userID string, agentID string) string {
+	return fmt.Sprintf("bridge:agent_token_version:%s:%s", strings.TrimSpace(userID), strings.TrimSpace(agentID))
+}
+
+func (s *gatewayServer) verifyTokenVersion(ctx context.Context, userID string, agentID string, tokenVersion int) error {
+	if tokenVersion <= 0 {
+		return fmt.Errorf("missing token version")
+	}
+	if s.redis == nil {
+		// Redis 未启用时无法做版本比对，维持兼容。
+		return nil
+	}
+	val, err := s.redis.Get(ctx, s.versionRedisKey(userID, agentID)).Result()
+	if errors.Is(err, redis.Nil) {
+		return fmt.Errorf("token version not found")
+	}
+	if err != nil {
+		return fmt.Errorf("version lookup failed: %w", err)
+	}
+	var payload bridgeAgentVersionPayload
+	if err := json.Unmarshal([]byte(val), &payload); err != nil {
+		return fmt.Errorf("invalid version payload")
+	}
+	if payload.Version != tokenVersion {
+		return fmt.Errorf("token version mismatch")
+	}
+	return nil
 }
 
 func (s *gatewayServer) handleListAgents(w http.ResponseWriter, r *http.Request) {

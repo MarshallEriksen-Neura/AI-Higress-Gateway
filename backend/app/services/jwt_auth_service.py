@@ -12,8 +12,9 @@ from jose import JWTError, jwt
 from app.settings import settings
 
 # JWT配置
-JWT_SECRET_KEY = settings.secret_key
-JWT_ALGORITHM = "HS256"
+JWT_PRIVATE_KEY = settings.jwt_private_key
+JWT_PUBLIC_KEY = settings.jwt_public_key
+JWT_ALGORITHM = "RS256"
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES = 30  # 访问令牌有效期30分钟
 JWT_REFRESH_TOKEN_EXPIRE_DAYS = 7    # 刷新令牌有效期7天
 
@@ -82,7 +83,7 @@ def create_access_token(data: dict[str, Any], expires_delta: datetime.timedelta 
         expire = now + datetime.timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire, "type": "access"})
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_PRIVATE_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
 
@@ -102,7 +103,7 @@ def create_refresh_token(data: dict[str, Any]) -> str:
     expire = now + datetime.timedelta(days=JWT_REFRESH_TOKEN_EXPIRE_DAYS)
 
     to_encode.update({"exp": expire, "type": "refresh"})
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_PRIVATE_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt
 
 
@@ -120,7 +121,7 @@ def decode_token(token: str) -> dict[str, Any]:
         JWTError: 如果令牌无效
     """
     try:
-        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        payload = jwt.decode(token, JWT_PUBLIC_KEY, algorithms=[JWT_ALGORITHM])
         return payload
     except JWTError:
         raise
@@ -175,7 +176,7 @@ def create_access_token_with_jti(
         expire = now + datetime.timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)
 
     to_encode.update({"exp": expire, "type": "access", "jti": jti, "token_id": token_id})
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_PRIVATE_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt, jti, token_id
 
 
@@ -210,7 +211,7 @@ def create_refresh_token_with_jti(
         "token_id": token_id,
         "family_id": family_id
     })
-    encoded_jwt = jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+    encoded_jwt = jwt.encode(to_encode, JWT_PRIVATE_KEY, algorithm=JWT_ALGORITHM)
     return encoded_jwt, jti, token_id, family_id
 
 

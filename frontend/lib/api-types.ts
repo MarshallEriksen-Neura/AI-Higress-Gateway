@@ -1145,12 +1145,15 @@ export interface BridgeCancelResponse {
 
 export interface BridgeAgentTokenRequest {
   agent_id?: string;
+  reset?: boolean;
 }
 
 export interface BridgeAgentTokenResponse {
   agent_id: string;
   token: string;
   expires_at: string;
+  version?: number;
+  reset?: boolean;
 }
 
 export interface BridgeEnvelope {

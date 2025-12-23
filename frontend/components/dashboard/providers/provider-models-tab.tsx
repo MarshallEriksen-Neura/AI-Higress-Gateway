@@ -31,20 +31,21 @@ export const ProviderModelsTab = ({
 }: ProviderModelsTabProps) => {
   const modelCount = models?.models?.length || 0;
   
-  // 按 family 分组模型
+  // 按模型 ID 的前缀（以 "/" 分隔）分组
   const groupedModels = useMemo(() => {
     if (!models?.models || models.models.length === 0) return {};
     
     const groups: Record<string, Model[]> = {};
     models.models.forEach((model) => {
-      const family = model.family || "other";
-      if (!groups[family]) {
-        groups[family] = [];
+      const modelId = model.model_id || "";
+      const groupKey = modelId.includes("/") ? modelId.split("/")[0] : (model.family || "other");
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
       }
-      groups[family].push(model);
+      groups[groupKey].push(model);
     });
     
-    // 按 family 名称排序
+    // 按分组名称排序
     return Object.keys(groups)
       .sort()
       .reduce((acc, key) => {
@@ -75,7 +76,7 @@ export const ProviderModelsTab = ({
         </div>
       </div>
 
-      {/* 模型卡片网格 - 按 family 分组 */}
+      {/* 模型卡片网格 - 按前缀分组 */}
       {!models?.models || models.models.length === 0 ? (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-16">
@@ -89,23 +90,23 @@ export const ProviderModelsTab = ({
         </Card>
       ) : (
         <div className="space-y-8">
-          {Object.entries(groupedModels).map(([family, familyModels]) => (
-            <div key={family} className="space-y-4">
-              {/* Family 标题 */}
+          {Object.entries(groupedModels).map(([groupName, groupModels]) => (
+            <div key={groupName} className="space-y-4">
+              {/* 分组标题 */}
               <div className="flex items-center gap-3">
                 <div className="h-px flex-1 bg-border" />
                 <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider px-3 py-1 bg-muted/50 rounded-full">
-                  {family}
+                  {groupName}
                   <span className="ml-2 text-xs font-normal text-muted-foreground/70">
-                    ({familyModels.length})
+                    ({groupModels.length})
                   </span>
                 </h3>
                 <div className="h-px flex-1 bg-border" />
               </div>
               
-              {/* 该 family 下的模型卡片 */}
+              {/* 该分组下的模型卡片 */}
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                {familyModels.map((model) => (
+                {groupModels.map((model) => (
                   <ModelCard
                     key={model.model_id}
                     providerId={providerId}

@@ -5,6 +5,7 @@ REPO_DEFAULT="MarshallEriksen-Neura/AI-Higress-Gateway"
 REF_DEFAULT="master"
 DIST_DIR_DEFAULT="dist/bridge"
 DEV_PREFIX_DEFAULT="bridge_dev"
+LATEST_API_DEFAULT="https://api.github.com/repos/${REPO_DEFAULT}/releases/latest"
 
 usage() {
   cat <<'EOF'
@@ -21,6 +22,8 @@ Options (env vars):
   INSTALL_DIR=<dir>          Default: ~/.local/bin
 
 Notes:
+  - By default the script will try to fetch the latest GitHub Release tag via API.
+    If that fails, it falls back to dev artifacts on REF.
   - Dev artifacts come from: dist/bridge/bridge_dev_<os>_<arch>.{tar.gz|zip}
   - Release artifacts come from: bridge_<VERSION>_<os>_<arch>.{tar.gz|zip}
 EOF
@@ -36,6 +39,7 @@ REF="${REF:-$REF_DEFAULT}"
 DIST_DIR="${DIST_DIR:-$DIST_DIR_DEFAULT}"
 DEV_PREFIX="${DEV_PREFIX:-$DEV_PREFIX_DEFAULT}"
 VERSION="${VERSION:-}"
+LATEST_API="${LATEST_API:-$LATEST_API_DEFAULT}"
 
 INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
 
@@ -65,6 +69,16 @@ if [[ "${os}" == "windows" ]]; then
   ext="zip"
 fi
 
+# Auto-resolve latest release tag if VERSION not provided.
+if [[ -z "${VERSION}" ]]; then
+  if command -v curl >/dev/null 2>&1; then
+    latest_tag="$(curl -fsSL "${LATEST_API}" 2>/dev/null | grep -m1 '"tag_name"' | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/')"
+    if [[ -n "${latest_tag}" ]]; then
+      VERSION="${latest_tag}"
+    fi
+  fi
+fi
+
 if [[ -n "${VERSION}" ]]; then
   asset="bridge_${VERSION}_${os}_${arch}.${ext}"
   url="https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
@@ -76,9 +90,9 @@ fi
 echo "Installing bridge"
 echo "  repo: ${REPO}"
 if [[ -n "${VERSION}" ]]; then
-  echo "  version: ${VERSION}"
+  echo "  version: ${VERSION} (release asset)"
 else
-  echo "  ref: ${REF}"
+  echo "  ref: ${REF} (dev artifact fallback)"
 fi
 echo "  asset: ${asset}"
 echo "  url: ${url}"
