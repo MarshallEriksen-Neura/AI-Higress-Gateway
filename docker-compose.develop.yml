@@ -1,32 +1,4 @@
 services:
-  bridge_gateway:
-    build:
-      context: ./bridge
-      dockerfile: Dockerfile.gateway
-    image: apiproxy-bridge-gateway:dev
-    container_name: apiproxy-bridge-gateway
-    restart: unless-stopped
-    env_file:
-      - .env
-    ports:
-      - "8088:8088"
-    networks:
-      apiproxy-net:
-        ipv4_address: 172.20.0.12
-    command:
-      [
-        "gateway",
-        "serve",
-        "--listen",
-        ":8088",
-        "--tunnel-path",
-        "/bridge/tunnel",
-        "--agent-token-secret",
-        "${SECRET_KEY}",
-        "--internal-token",
-        "${BRIDGE_GATEWAY_INTERNAL_TOKEN}",
-      ]
-
   postgres:
     image: postgres:16-alpine
     container_name: apiproxy-postgres
@@ -83,7 +55,6 @@ services:
     env_file:
       - .env
     environment:
-      - BRIDGE_GATEWAY_URL=http://bridge_gateway:8088
       - AVATAR_LOCAL_DIR=/app/media/avatars
     volumes:
       - ./backend/logs:/app/logs
@@ -96,8 +67,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      bridge_gateway:
-        condition: service_started
     ports:
       - "8000:8000"
     networks:
@@ -122,7 +91,6 @@ services:
     env_file:
       - .env
     environment:
-      - BRIDGE_GATEWAY_URL=http://bridge_gateway:8088
       - AVATAR_LOCAL_DIR=/app/media/avatars
     volumes:
       - ./backend/logs:/app/logs
@@ -134,8 +102,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      bridge_gateway:
-        condition: service_started
     networks:
       apiproxy-net:
         ipv4_address: 172.20.0.14
@@ -151,7 +117,6 @@ services:
     env_file:
       - .env
     environment:
-      - BRIDGE_GATEWAY_URL=http://bridge_gateway:8088
       - AVATAR_LOCAL_DIR=/app/media/avatars
     volumes:
       - ./backend/logs:/app/logs
@@ -161,8 +126,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      bridge_gateway:
-        condition: service_started
     networks:
       apiproxy-net:
         ipv4_address: 172.20.0.15
