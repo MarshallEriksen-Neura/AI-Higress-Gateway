@@ -30,7 +30,7 @@ class ClaudeToOpenAIStreamAdapter:
     """
     将 Claude messages SSE（event: content_block_delta 等）转换为 OpenAI chat.completions SSE。
 
-    这里只做“文本增量”的最小兼容转换，满足大多数客户端消费。
+    处理文本增量 + tool_use → OpenAI tool_calls 增量。
     """
 
     def __init__(self, model: str | None) -> None:
@@ -40,6 +40,8 @@ class ClaudeToOpenAIStreamAdapter:
         self.sent_role = False
         self.finish_reason: str | None = None
         self.had_error = False
+        self.tool_calls: list[dict[str, Any]] = []
+        self.tool_idx_by_id: dict[str, int] = {}
 
     def _encode_openai(self, payload: dict[str, Any]) -> bytes:
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n".encode()
@@ -130,30 +132,101 @@ class ClaudeToOpenAIStreamAdapter:
                 self.had_error = True
                 continue
 
+            if event_type == "content_block_start":
+                cb = data.get("content_block") if isinstance(data, dict) else None
+                if isinstance(cb, dict) and cb.get("type") == "tool_use":
+                    tool_id = cb.get("id") or f"call_{len(self.tool_calls)}"
+                    name = cb.get("name") or f"tool_{len(self.tool_calls)}"
+                    self.tool_idx_by_id[str(tool_id)] = len(self.tool_calls)
+                    self.tool_calls.append({"id": tool_id, "type": "function", "function": {"name": name, "arguments": ""}})
+                    if not self.started:
+                        self.started = True
+                        outputs.extend(self._emit_role_once())
+                    outputs.append(
+                        self._encode_openai(
+                            {
+                                "id": None,
+                                "object": "chat.completion.chunk",
+                                "model": self.model,
+                                "choices": [
+                                    {
+                                        "index": 0,
+                                        "delta": {"tool_calls": [{"index": len(self.tool_calls) - 1, "id": tool_id, "type": "function", "function": {"name": name, "arguments": ""}}]},
+                                        "finish_reason": None,
+                                    }
+                                ],
+                            }
+                        )
+                    )
             if event_type == "content_block_delta":
                 delta = data.get("delta") if isinstance(data, dict) else None
-                if isinstance(delta, dict) and delta.get("type") == "text_delta":
-                    text = delta.get("text")
-                    if isinstance(text, str) and text:
-                        if not self.started:
-                            self.started = True
-                            outputs.extend(self._emit_role_once())
-                        outputs.append(
-                            self._encode_openai(
-                                {
-                                    "id": None,
-                                    "object": "chat.completion.chunk",
-                                    "model": self.model,
-                                    "choices": [
-                                        {
-                                            "index": 0,
-                                            "delta": {"content": text},
-                                            "finish_reason": None,
-                                        }
-                                    ],
-                                }
+                if isinstance(delta, dict):
+                    if delta.get("type") == "text_delta":
+                        text = delta.get("text")
+                        if isinstance(text, str) and text:
+                            if not self.started:
+                                self.started = True
+                                outputs.extend(self._emit_role_once())
+                            outputs.append(
+                                self._encode_openai(
+                                    {
+                                        "id": None,
+                                        "object": "chat.completion.chunk",
+                                        "model": self.model,
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {"content": text},
+                                                "finish_reason": None,
+                                            }
+                                        ],
+                                    }
+                                )
                             )
-                        )
+                    elif delta.get("type") == "input_json_delta":
+                        # tool arguments incremental
+                        tbid = delta.get("tool_use_id")
+                        idx = self.tool_idx_by_id.get(str(tbid)) if tbid else None
+                        if idx is None and self.tool_calls:
+                            idx = len(self.tool_calls) - 1
+                        if idx is not None:
+                            chunk_str = delta.get("partial_json") or delta.get("text") or ""
+                            if not isinstance(chunk_str, str):
+                                try:
+                                    chunk_str = json.dumps(chunk_str, ensure_ascii=False)
+                                except Exception:
+                                    chunk_str = ""
+                            current_args = self.tool_calls[idx]["function"].get("arguments", "")
+                            new_args = (current_args or "") + chunk_str
+                            self.tool_calls[idx]["function"]["arguments"] = new_args
+                            if not self.started:
+                                self.started = True
+                                outputs.extend(self._emit_role_once())
+                            outputs.append(
+                                self._encode_openai(
+                                    {
+                                        "id": None,
+                                        "object": "chat.completion.chunk",
+                                        "model": self.model,
+                                        "choices": [
+                                            {
+                                                "index": 0,
+                                                "delta": {
+                                                    "tool_calls": [
+                                                        {
+                                                            "index": idx,
+                                                            "id": self.tool_calls[idx]["id"],
+                                                            "type": "function",
+                                                            "function": {"name": self.tool_calls[idx]["function"]["name"], "arguments": new_args},
+                                                        }
+                                                    ]
+                                                },
+                                                "finish_reason": None,
+                                            }
+                                        ],
+                                    }
+                                )
+                            )
             elif event_type == "message_delta":
                 delta = data.get("delta") if isinstance(data, dict) else None
                 if isinstance(delta, dict) and isinstance(delta.get("stop_reason"), str):
@@ -173,13 +246,19 @@ class ClaudeToOpenAIStreamAdapter:
                             "object": "chat.completion.chunk",
                             "model": self.model,
                             "choices": [
-                                {"index": 0, "delta": {}, "finish_reason": self.finish_reason or "stop"}
+                                {
+                                    "index": 0,
+                                    "delta": {},
+                                    "finish_reason": "tool_calls"
+                                    if self.tool_calls
+                                    else (self.finish_reason or "stop"),
+                                }
                             ],
                         }
                     )
                 )
                 outputs.append(b"data: [DONE]\n\n")
-        return outputs
+                return outputs
 
 
 async def _convert_claude_sse_to_openai_sse(

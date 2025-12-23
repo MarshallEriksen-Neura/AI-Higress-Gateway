@@ -59,6 +59,31 @@ def _openai_chat_to_claude_messages_payload(
             continue
         role = msg.get("role") or "user"
         content = msg.get("content")
+        # OpenAI tool result -> Claude tool_result block（放在 user 消息里）
+        if role == "tool":
+            tool_call_id = str(msg.get("tool_call_id") or "").strip() or None
+            text_content = ""
+            if isinstance(content, str):
+                text_content = content
+            elif isinstance(content, dict):
+                text_content = json.dumps(content, ensure_ascii=False)
+            elif content is not None:
+                text_content = str(content)
+
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": tool_call_id or "unknown",
+                            "content": [{"type": "text", "text": text_content}],
+                        }
+                    ],
+                }
+            )
+            continue
+
         if role == "system":
             if isinstance(content, str) and content.strip():
                 system_texts.append(content)
@@ -112,11 +137,12 @@ def _openai_chat_to_claude_messages_payload(
             name = fn.get("name")
             if not isinstance(name, str) or not name.strip():
                 continue
+            parameters = fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {"type": "object", "properties": {}}
             converted_tools.append(
                 {
                     "name": name,
                     "description": fn.get("description") or "",
-                    "input_schema": fn.get("parameters") or {"type": "object", "properties": {}},
+                    "input_schema": parameters,
                 }
             )
         if converted_tools:
@@ -253,4 +279,3 @@ __all__ = [
     "adapt_response_payload",
     "stringify_payload",
 ]
-

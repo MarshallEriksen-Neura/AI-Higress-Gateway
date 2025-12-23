@@ -460,6 +460,7 @@ async def execute_run_stream(
     stream_usage: dict[str, Any] | None = None
     buffer = ""
     request_payload_for_billing: dict[str, Any] | None = None
+    tool_call_acc: dict[int, dict[str, Any]] = {}
 
     try:
         payload = payload_override or chat_run_service.build_openai_request_payload(
@@ -575,6 +576,39 @@ async def execute_run_stream(
                                 content = delta.get("content")
                                 if isinstance(content, str) and content:
                                     text_deltas.append(content)
+                                tool_calls_delta = delta.get("tool_calls")
+                                if isinstance(tool_calls_delta, list):
+                                    for tc in tool_calls_delta:
+                                        if not isinstance(tc, dict):
+                                            continue
+                                        idx_raw = tc.get("index")
+                                        try:
+                                            idx = int(idx_raw)
+                                        except Exception:
+                                            idx = None
+                                        if idx is None:
+                                            idx = len(tool_call_acc)
+                                        current = tool_call_acc.setdefault(
+                                            idx,
+                                            {"id": None, "type": None, "function": {"name": None, "arguments": ""}},
+                                        )
+                                        if isinstance(tc.get("id"), str) and tc["id"].strip():
+                                            current["id"] = tc["id"].strip()
+                                        if isinstance(tc.get("type"), str) and tc["type"].strip():
+                                            current["type"] = tc["type"].strip()
+                                        fn = tc.get("function") if isinstance(tc.get("function"), dict) else None
+                                        if isinstance(fn, dict):
+                                            fname = fn.get("name")
+                                            if isinstance(fname, str) and fname.strip():
+                                                current["function"]["name"] = fname.strip()
+                                            args_delta = fn.get("arguments")
+                                            if isinstance(args_delta, str):
+                                                current["function"]["arguments"] += args_delta
+                                            elif isinstance(args_delta, dict):
+                                                try:
+                                                    current["function"]["arguments"] += json.dumps(args_delta, ensure_ascii=False)
+                                                except Exception:
+                                                    pass
             except Exception:
                 # best-effort：不影响主流程
                 text_deltas = []
@@ -609,6 +643,21 @@ async def execute_run_stream(
         full_text = "".join(full_text_list)
         output_preview = full_text[:380].rstrip() if full_text else None
 
+        tool_calls: list[dict[str, Any]] = []
+        for idx in sorted(tool_call_acc.keys()):
+            tc = tool_call_acc[idx]
+            fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+            name = fn.get("name")
+            args = fn.get("arguments")
+            if isinstance(name, str) and name.strip():
+                tool_calls.append(
+                    {
+                        "id": tc.get("id") or f"call_{idx + 1}",
+                        "type": tc.get("type") or "function",
+                        "function": {"name": name, "arguments": args if args is not None else ""},
+                    }
+                )
+
         response_payload: dict[str, Any] = {
             "id": stream_id,
             "object": "chat.completion",
@@ -617,8 +666,12 @@ async def execute_run_stream(
             "choices": [
                 {
                     "index": 0,
-                    "message": {"role": "assistant", "content": full_text},
-                    "finish_reason": "stop",
+                    "message": {
+                        "role": "assistant",
+                        "content": full_text,
+                        **({"tool_calls": tool_calls} if tool_calls else {}),
+                    },
+                    "finish_reason": "tool_calls" if tool_calls else "stop",
                 }
             ],
         }

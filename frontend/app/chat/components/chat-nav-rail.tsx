@@ -79,7 +79,7 @@ export function ChatNavRail({ variant = "desktop" }: { variant?: "desktop" | "mo
 
   // 桌面端变体 - 垂直布局
   return (
-    <aside className="w-14 shrink-0 border-r border-border/30 bg-white/50 backdrop-blur-xl shadow-[0_0_24px_rgba(0,0,0,0.03)]">
+    <aside className="w-14 shrink-0 border-r border-border/30 bg-background/50 backdrop-blur-xl shadow-[0_0_24px_rgba(0,0,0,0.03)]">
       <div className="flex h-full flex-col items-center py-3">
         {/* 顶部导航按钮组 - 3个按钮纵向排列 */}
         <div className="flex flex-col items-center gap-1.5">

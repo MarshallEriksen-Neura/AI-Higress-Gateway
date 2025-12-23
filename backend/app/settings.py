@@ -681,6 +681,35 @@ class Settings(BaseSettings):
         description="Secret key used to derive hashed identifiers for API keys; please override in production",
     )
 
+    # JWT RSA Keys
+    jwt_private_key_path: str = Field(
+        "security/private.pem",
+        alias="JWT_PRIVATE_KEY_PATH",
+        description="Path to the RSA private key for JWT signing",
+    )
+    jwt_public_key_path: str = Field(
+        "security/public.pem",
+        alias="JWT_PUBLIC_KEY_PATH",
+        description="Path to the RSA public key for JWT verification",
+    )
+
+    @property
+    def jwt_private_key(self) -> str:
+        try:
+            with open(self.jwt_private_key_path, "r") as f:
+                return f.read()
+        except FileNotFoundError:
+            # Fallback for dev/test if keys don't exist (though they should)
+            return ""
+
+    @property
+    def jwt_public_key(self) -> str:
+        try:
+            with open(self.jwt_public_key_path, "r") as f:
+                return f.read()
+        except FileNotFoundError:
+            return ""
+
     # Per-user private provider limits and shared-provider approval behaviour.
     default_user_private_provider_limit: int = Field(
         3,

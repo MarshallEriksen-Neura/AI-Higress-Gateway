@@ -1,30 +1,26 @@
 "use client";
 
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import type { ClipboardEvent, KeyboardEvent } from "react";
 import { createEditor, Descendant, Editor, Transforms, Element as SlateElement } from "slate";
-import { Slate, Editable, withReact, ReactEditor } from "slate-react";
+import { withReact, ReactEditor } from "slate-react";
 import { withHistory } from "slate-history";
 import { useSize, useDebounceFn } from "ahooks";
-import { 
-  Send, 
-  Zap,
-  Loader2 
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { useI18n } from "@/lib/i18n-context";
 import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { ClearHistoryAction } from "./chat-input/clear-history-action";
-import { ImagePreviewGrid, ImageUploadAction } from "./chat-input/image-attachments";
-import { ModelParametersPopover, type ModelParameterEnabled } from "./chat-input/model-parameters-popover";
+import { ImagePreviewGrid } from "./chat-input/image-attachments";
 import { buildModelPreset } from "./chat-input/model-preset";
 import { encodeImageFileToCompactDataUrl } from "./chat-input/image-encoding";
 import { composeMessageContent, isMessageTooLong } from "./chat-input/message-content";
+import { ChatEditor } from "./chat-input/chat-editor";
+import { ChatToolbar } from "./chat-input/chat-toolbar";
 import {
   DEFAULT_MODEL_PARAMETERS,
   type ModelParameters,
 } from "./chat-input/types";
+import type { ModelParameterEnabled } from "./chat-input/model-parameters-popover";
 
 export type { ModelParameters } from "./chat-input/types";
 
@@ -65,7 +61,6 @@ export interface SlateChatInputProps {
         }
       ) => Promise<void>);
   onClearHistory?: () => Promise<void>;
-  onMcpAction?: () => void;
   className?: string;
   defaultParameters?: Partial<ModelParameters>;
 }
@@ -75,7 +70,6 @@ export function SlateChatInput({
   disabled = false,
   onSend,
   onClearHistory,
-  onMcpAction,
   className,
   defaultParameters = {},
 }: SlateChatInputProps) {
@@ -210,7 +204,7 @@ export function SlateChatInput({
   );
 
   const handlePaste = useCallback(
-    async (event: React.ClipboardEvent) => {
+    async (event: ClipboardEvent) => {
       const { clipboardData } = event;
       if (!clipboardData) return;
 
@@ -313,7 +307,7 @@ export function SlateChatInput({
 
   // 键盘快捷键
   const handleKeyDown = useCallback(
-    (event: React.KeyboardEvent) => {
+    (event: KeyboardEvent) => {
       if (event.nativeEvent.isComposing) return;
 
       if (preferences.sendShortcut === "enter") {
@@ -353,119 +347,44 @@ export function SlateChatInput({
 
       {/* 输入框容器 - 包含编辑器和工具栏 */}
       <div className="relative flex flex-col border rounded-md bg-background focus-within:ring-2 focus-within:ring-ring flex-1">
-        {/* 编辑器区域 */}
-        <div 
-          ref={editorRef}
-          className="flex-1 px-3 pt-3 pb-2 overflow-y-auto"
-        >
-          <Slate editor={editor} initialValue={initialValue}>
-            <Editable
-              placeholder={disabled ? t("chat.conversation.archived_notice") : t("chat.message.input_placeholder")}
-              readOnly={disabled || isSending}
-              aria-disabled={disabled || isSending}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              className={cn(
-                "w-full h-full resize-none text-sm outline-none",
-                "placeholder:text-muted-foreground",
-                (disabled || isSending) && "cursor-not-allowed opacity-50"
-              )}
-            />
-          </Slate>
-        </div>
+        <ChatEditor
+          editor={editor}
+          editorRef={editorRef}
+          initialValue={initialValue}
+          disabled={disabled}
+          isSending={isSending}
+          placeholder={
+            disabled ? t("chat.conversation.archived_notice") : t("chat.message.input_placeholder")
+          }
+          onKeyDown={handleKeyDown}
+          onPaste={handlePaste}
+        />
 
-        {/* 工具栏 - 在输入框底部 */}
-        <div className="flex items-center justify-between px-2 py-2 border-t bg-muted/30">
-          <div className="flex items-center gap-1">
-            <ImageUploadAction
-              disabled={disabled || isSending}
-              onFilesSelected={handleFilesSelected}
-              uploadLabel={t("chat.message.upload_image")}
-            />
-
-            <ModelParametersPopover
-              idPrefix={`chat-${conversationId}`}
-              disabled={disabled || isSending}
-              enabled={paramEnabled}
-              parameters={parameters}
-              onEnabledChange={setParamEnabled}
-              onParametersChange={setParameters}
-              onReset={() => {
-                setParameters({ ...DEFAULT_MODEL_PARAMETERS, ...defaultParameters });
-                setParamEnabled({
-                  temperature: false,
-                  top_p: false,
-                  frequency_penalty: false,
-                  presence_penalty: false,
-                });
-              }}
-              title={t("chat.message.model_parameters")}
-              resetLabel={t("chat.message.reset_parameters")}
-              labels={{
-                temperature: t("chat.message.parameter_temperature"),
-                top_p: t("chat.message.parameter_top_p"),
-                frequency_penalty: t("chat.message.parameter_frequency_penalty"),
-                presence_penalty: t("chat.message.parameter_presence_penalty"),
-              }}
-            />
-
-            {/* MCP 按钮 */}
-            {onMcpAction && (
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                onClick={onMcpAction}
-                disabled={disabled || isSending}
-                aria-label={t("chat.message.mcp_tools")}
-                title={t("chat.message.mcp_tools")}
-              >
-                <Zap className="size-4" />
-              </Button>
-            )}
-
-            {/* 清空历史 */}
-            {onClearHistory ? (
-              <ClearHistoryAction
-                disabled={disabled || isSending}
-                isBusy={isClearing}
-                onConfirm={() => void handleClearHistory()}
-                title={t("chat.message.clear_history")}
-                description={t("chat.message.clear_history_confirm")}
-                confirmText={t("chat.action.confirm")}
-                cancelText={t("chat.action.cancel")}
-                tooltip={t("chat.message.clear_history")}
-                open={clearDialogOpen}
-                onOpenChange={setClearDialogOpen}
-              />
-            ) : null}
-          </div>
-
-          {/* 右侧：发送状态与按钮 */}
-          <div className="flex items-center gap-2">
-            {isSending ? (
-              <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                <Loader2 className="size-3 animate-spin" />
-                <span>{t("chat.message.sending")}</span>
-              </div>
-            ) : null}
-
-            <Button
-              type="button"
-              size="icon-sm"
-              onClick={handleSend}
-              disabled={disabled || isSending}
-              aria-label={isSending ? t("chat.message.sending") : t("chat.message.send")}
-              title={sendHint}
-            >
-              {isSending ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <Send className="size-4" />
-              )}
-            </Button>
-          </div>
-        </div>
+        <ChatToolbar
+          conversationId={conversationId}
+          disabled={disabled}
+          isSending={isSending}
+          isClearing={isClearing}
+          clearDialogOpen={clearDialogOpen}
+          onClearDialogOpenChange={setClearDialogOpen}
+          onClearHistory={onClearHistory ? () => void handleClearHistory() : undefined}
+          onSend={() => void handleSend()}
+          sendHint={sendHint}
+          parameters={parameters}
+          paramEnabled={paramEnabled}
+          onParametersChange={setParameters}
+          onParamEnabledChange={setParamEnabled}
+          onResetParameters={() => {
+            setParameters({ ...DEFAULT_MODEL_PARAMETERS, ...defaultParameters });
+            setParamEnabled({
+              temperature: false,
+              top_p: false,
+              frequency_penalty: false,
+              presence_penalty: false,
+            });
+          }}
+          onFilesSelected={handleFilesSelected}
+        />
       </div>
 
       <div className="text-xs text-muted-foreground text-center">

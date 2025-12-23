@@ -32,6 +32,12 @@ interface ChatState {
   // 会话级 Bridge 面板聚焦的 req_id：conversationId -> req_id
   conversationBridgeActiveReqIds: Record<string, string>;
 
+  // 会话级 Bridge 工具选择：conversationId -> agent_id -> tool_names[]
+  conversationBridgeToolSelections: Record<string, Record<string, string[]>>;
+
+  // 全局默认 Bridge 工具选择：agent_id -> tool_names[]（跨会话复用）
+  defaultBridgeToolSelections: Record<string, string[]>;
+
   // 非流式等待回复中的会话：conversationId -> pending
   conversationPending: Record<string, boolean>;
 
@@ -46,6 +52,12 @@ interface ChatState {
   clearConversationModelOverrides: () => void;
   setConversationBridgeAgentIds: (conversationId: string, agentIds: string[] | null) => void;
   setConversationBridgeActiveReqId: (conversationId: string, reqId: string | null) => void;
+  setConversationBridgeToolSelections: (
+    conversationId: string,
+    agentId: string,
+    toolNames: string[] | null
+  ) => void;
+  setDefaultBridgeToolSelections: (agentId: string, toolNames: string[] | null) => void;
   setConversationPending: (conversationId: string, pending: boolean) => void;
   
   // 重置状态
@@ -62,6 +74,8 @@ const initialState = {
   conversationModelOverrides: {} as Record<string, string>,
   conversationBridgeAgentIds: {} as Record<string, string[]>,
   conversationBridgeActiveReqIds: {} as Record<string, string>,
+  conversationBridgeToolSelections: {} as Record<string, Record<string, string[]>>,
+  defaultBridgeToolSelections: {} as Record<string, string[]>,
   conversationPending: {} as Record<string, boolean>,
 };
 
@@ -79,6 +93,7 @@ export const useChatStore = create<ChatState>()(
           conversationModelOverrides: {},
           conversationBridgeAgentIds: {},
           conversationBridgeActiveReqIds: {},
+          conversationBridgeToolSelections: {},
         }),
 
       setSelectedAssistant: (assistantId) =>
@@ -132,6 +147,42 @@ export const useChatStore = create<ChatState>()(
           return { conversationBridgeActiveReqIds: next };
         }),
 
+      setConversationBridgeToolSelections: (conversationId, agentId, toolNames) =>
+        set((state) => {
+          const next = { ...(state.conversationBridgeToolSelections || {}) };
+          const normalizedAgent = String(agentId || "").trim();
+          if (!normalizedAgent) {
+            return { conversationBridgeToolSelections: next };
+          }
+          const existing = { ...(next[conversationId] || {}) };
+          const normalizedTools = (toolNames || []).map((x) => x.trim()).filter(Boolean);
+          if (!normalizedTools.length) {
+            delete existing[normalizedAgent];
+          } else {
+            existing[normalizedAgent] = normalizedTools;
+          }
+          if (Object.keys(existing).length === 0) {
+            delete next[conversationId];
+          } else {
+            next[conversationId] = existing;
+          }
+          return { conversationBridgeToolSelections: next };
+        }),
+
+      setDefaultBridgeToolSelections: (agentId, toolNames) =>
+        set((state) => {
+          const next = { ...(state.defaultBridgeToolSelections || {}) };
+          const normalizedAgent = String(agentId || "").trim();
+          if (!normalizedAgent) return { defaultBridgeToolSelections: next };
+          const normalizedTools = (toolNames || []).map((x) => x.trim()).filter(Boolean);
+          if (!normalizedTools.length) {
+            delete next[normalizedAgent];
+          } else {
+            next[normalizedAgent] = normalizedTools;
+          }
+          return { defaultBridgeToolSelections: next };
+        }),
+
       setConversationPending: (conversationId, pending) =>
         set((state) => {
           const next = { ...state.conversationPending };
@@ -147,7 +198,7 @@ export const useChatStore = create<ChatState>()(
     }),
     {
       name: 'chat-store',
-      version: 8,
+      version: 10,
       migrate: (persistedState: unknown) => {
         // v1 -> v2: add conversationModelOverrides
         // v2 -> v3: add conversationBridgeAgentIds
@@ -156,6 +207,8 @@ export const useChatStore = create<ChatState>()(
         // v5 -> v6: add evalStreamingEnabled
         // v6 -> v7: add chatStreamingEnabled
         // v7 -> v8: add conversationPending
+        // v8 -> v9: add conversationBridgeToolSelections
+        // v9 -> v10: add defaultBridgeToolSelections
         if (persistedState && typeof persistedState === 'object') {
           const state = persistedState as Record<string, unknown>;
           const rawAgentIds = state.conversationBridgeAgentIds ?? {};
@@ -169,6 +222,41 @@ export const useChatStore = create<ChatState>()(
               }
             }
           }
+
+          const rawToolSelections = state.conversationBridgeToolSelections ?? {};
+          const nextToolSelections: Record<string, Record<string, string[]>> = {};
+          if (rawToolSelections && typeof rawToolSelections === 'object') {
+            for (const [convId, agents] of Object.entries(rawToolSelections)) {
+              if (agents && typeof agents === 'object') {
+                const normalizedAgents: Record<string, string[]> = {};
+                for (const [aid, tools] of Object.entries(agents as Record<string, unknown>)) {
+                  if (Array.isArray(tools)) {
+                    const normalizedTools = tools.map((t) => String(t).trim()).filter(Boolean);
+                    if (normalizedTools.length) {
+                      normalizedAgents[aid] = normalizedTools;
+                    }
+                  }
+                }
+                if (Object.keys(normalizedAgents).length) {
+                  nextToolSelections[convId] = normalizedAgents;
+                }
+              }
+            }
+          }
+
+          const rawDefaultTools = state.defaultBridgeToolSelections ?? {};
+          const nextDefaultTools: Record<string, string[]> = {};
+          if (rawDefaultTools && typeof rawDefaultTools === 'object') {
+            for (const [aid, tools] of Object.entries(rawDefaultTools)) {
+              if (Array.isArray(tools)) {
+                const normalized = tools.map((t) => String(t).trim()).filter(Boolean);
+                if (normalized.length) {
+                  nextDefaultTools[aid] = normalized;
+                }
+              }
+            }
+          }
+
           return {
             ...state,
             evalStreamingEnabled: (state.evalStreamingEnabled as boolean | undefined) ?? false,
@@ -177,6 +265,8 @@ export const useChatStore = create<ChatState>()(
             conversationBridgeAgentIds: nextAgentIds,
             conversationBridgeActiveReqIds: (state.conversationBridgeActiveReqIds as Record<string, string> | undefined) ?? {},
             conversationPending: (state.conversationPending as Record<string, boolean> | undefined) ?? {},
+            conversationBridgeToolSelections: nextToolSelections,
+            defaultBridgeToolSelections: nextDefaultTools,
           };
         }
         return persistedState;

@@ -14,7 +14,7 @@ import type {
 
 export const useBridgeAgents = () => {
   const { data, error, loading, refresh } = useApiGet<BridgeAgentsResponse>("/v1/bridge/agents", {
-    strategy: "realtime",
+    strategy: "frequent",
   });
   return {
     agents: data?.agents ?? [],

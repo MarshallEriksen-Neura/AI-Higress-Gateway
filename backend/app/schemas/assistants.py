@@ -98,12 +98,21 @@ class ConversationListResponse(PaginatedResponse):
     items: list[ConversationItem] = Field(default_factory=list)
 
 
+class BridgeToolSelection(BaseModel):
+    agent_id: str = Field(..., min_length=1, max_length=128)
+    tool_names: list[str] = Field(..., min_length=1, max_length=30)
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class MessageCreateRequest(BaseModel):
     content: str = Field(..., min_length=1, max_length=20000)
     override_logical_model: str | None = Field(default=None, min_length=1, max_length=128)
     model_preset: dict | None = None
     bridge_agent_id: str | None = Field(default=None, min_length=1, max_length=128)
     bridge_agent_ids: list[str] | None = Field(default=None, max_length=5)
+    # 可选：指定每个 Agent 的工具子集；若不传则使用 Agent 的全部工具。
+    bridge_tool_selections: list[BridgeToolSelection] | None = Field(default=None, max_length=5)
     streaming: bool = Field(default=False)
 
     model_config = ConfigDict(extra="forbid")

@@ -207,6 +207,15 @@ def transform_to_claude_cli_format(
     # Add empty tools array if not present
     if "tools" not in transformed:
         transformed["tools"] = []
+    else:
+        # Clean unsupported tool fields (e.g., strict) for Claude CLI
+        cleaned_tools: list[dict[str, Any]] = []
+        for t in transformed.get("tools") or []:
+            if not isinstance(t, dict):
+                continue
+            cleaned = {k: v for k, v in t.items() if k in {"name", "description", "input_schema"}}
+            cleaned_tools.append(cleaned)
+        transformed["tools"] = cleaned_tools
 
     # Add temperature if not present (Claude CLI default)
     if "temperature" not in transformed:
@@ -288,27 +297,49 @@ def transform_claude_response_to_openai(
         "usage": {}
     }
 
-    # Transform content
+    tool_calls: list[dict[str, Any]] = []
     content_blocks_count = 0
     text_blocks_count = 0
+    message_content = ""
     if "content" in claude_response:
         content_blocks = claude_response["content"]
         content_blocks_count = len(content_blocks)
-        text_parts = []
+        text_parts: list[str] = []
 
-        for block in content_blocks:
-            if block.get("type") == "text":
+        for idx, block in enumerate(content_blocks):
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
                 text_parts.append(block.get("text", ""))
                 text_blocks_count += 1
+            elif btype == "tool_use":
+                name = block.get("name")
+                input_obj = block.get("input")
+                args = ""
+                if isinstance(input_obj, str):
+                    args = input_obj
+                elif isinstance(input_obj, dict):
+                    args = json.dumps(input_obj, ensure_ascii=False)
+                tool_calls.append(
+                    {
+                        "id": block.get("id") or f"call_{idx}",
+                        "type": "function",
+                        "function": {"name": name or f"tool_{idx}", "arguments": args},
+                    }
+                )
+
+        message_content = "".join(text_parts)
 
         openai_response["choices"] = [
             {
                 "index": 0,
                 "message": {
                     "role": "assistant",
-                    "content": "".join(text_parts)
+                    "content": message_content,
+                    **({"tool_calls": tool_calls} if tool_calls else {}),
                 },
-                "finish_reason": claude_response.get("stop_reason", "stop")
+                "finish_reason": "tool_calls" if tool_calls else claude_response.get("stop_reason", "stop"),
             }
         ]
 

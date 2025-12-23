@@ -3,15 +3,23 @@ from __future__ import annotations
 import json
 import uuid
 from typing import Any
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
+
+try:
+    from redis.asyncio import Redis
+except ModuleNotFoundError:  # pragma: no cover
+    Redis = object  # type: ignore[misc,assignment]
 
 from app.errors import bad_request, not_found, service_unavailable
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
+from app.deps import get_db, get_redis
 from app.services.bridge_agent_token_service import (
-    create_bridge_agent_token,
+    BridgeAgentTokenService,
     generate_agent_id,
     normalize_agent_id,
     validate_agent_id,
@@ -91,6 +99,8 @@ async def list_agent_tools(agent_id: str) -> dict[str, Any]:
 @router.post("/agent-token")
 async def issue_agent_token(
     payload: dict[str, Any],
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
     current_user: AuthenticatedUser = Depends(require_jwt_token),
 ) -> dict[str, Any]:
     """
@@ -98,7 +108,7 @@ async def issue_agent_token(
 
     说明：
     - token 仅用于 Agent -> Gateway 的 AUTH（不包含用户 MCP 密钥）。
-    - token 不落库；如需吊销/轮换，可后续引入 DB/Redis revocation。
+    - 采用 version 单活：默认复用未过期 token，reset 时版本 +1，旧 token 立即失效。
     """
     requested = payload.get("agent_id")
     agent_id = normalize_agent_id(str(requested) if requested is not None else None)
@@ -109,8 +119,17 @@ async def issue_agent_token(
     except ValueError as exc:
         raise bad_request("agent_id 不合法", details={"code": "invalid_agent_id", "message": str(exc)})
 
-    token, expires_at = create_bridge_agent_token(user_id=str(current_user.id), agent_id=agent_id)
-    return {"agent_id": agent_id, "token": token, "expires_at": expires_at.isoformat()}
+    reset = bool(payload.get("reset", False))
+    service = BridgeAgentTokenService(db=db, redis=redis)
+    result = await service.issue_token(user_id=UUID(str(current_user.id)), agent_id=agent_id, reset=reset)
+
+    return {
+        "agent_id": agent_id,
+        "token": result.token,
+        "expires_at": result.expires_at.isoformat(),
+        "version": result.version,
+        "reset": reset,
+    }
 
 
 @router.post("/invoke")

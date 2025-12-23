@@ -4,6 +4,7 @@ from .api_key_allowed_provider import APIKeyAllowedProvider
 from .assistant_preset import AssistantPreset
 from .bandit_arm_stats import BanditArmStats
 from .base import Base, TimestampMixin, UUIDPrimaryKeyMixin
+from .bridge_agent_token import BridgeAgentToken
 from .conversation import Conversation
 from .credit import CreditAccount, CreditAutoTopupRule, CreditTransaction, ModelBillingConfig
 from .eval import Eval
@@ -47,6 +48,7 @@ __all__ = [
     "AssistantPreset",
     "BanditArmStats",
     "Base",
+    "BridgeAgentToken",
     "Conversation",
     "CreditAccount",
     "CreditAutoTopupRule",

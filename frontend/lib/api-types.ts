@@ -946,6 +946,10 @@ export interface SendMessageRequest {
   model_preset?: Record<string, any>;
   bridge_agent_id?: string;
   bridge_agent_ids?: string[];
+  bridge_tool_selections?: Array<{
+    agent_id: string;
+    tool_names: string[];
+  }>;
   streaming?: boolean;
 }
 
@@ -1145,12 +1149,15 @@ export interface BridgeCancelResponse {
 
 export interface BridgeAgentTokenRequest {
   agent_id?: string;
+  reset?: boolean;
 }
 
 export interface BridgeAgentTokenResponse {
   agent_id: string;
   token: string;
   expires_at: string;
+  version?: number;
+  reset?: boolean;
 }
 
 export interface BridgeEnvelope {

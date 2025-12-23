@@ -471,6 +471,7 @@ class OpenAIToClaudeStreamAdapter:
         self.stop_reason: str | None = None
         self.usage: dict[str, Any] | None = None
         self.aggregate_text: str = ""
+        self.tool_block_seq = 1  # 0 号被文本 block 占用
 
     def _usage_object(self) -> dict[str, int]:
         """
@@ -603,6 +604,55 @@ class OpenAIToClaudeStreamAdapter:
                             },
                         )
                     )
+                tool_deltas = delta.get("tool_calls")
+                if isinstance(tool_deltas, list):
+                    for tc in tool_deltas:
+                        if not isinstance(tc, dict):
+                            continue
+                        fn = tc.get("function") if isinstance(tc.get("function"), dict) else {}
+                        name = fn.get("name") or f"tool_{self.tool_block_seq}"
+                        args_delta = fn.get("arguments") or ""
+                        block_id = tc.get("id") or f"tool_{self.tool_block_seq}"
+                        if not self.started:
+                            outputs.extend(self._emit_start_events())
+                        # tool_use start
+                        outputs.append(
+                            self._encode_event(
+                                "content_block_start",
+                                {
+                                    "type": "content_block_start",
+                                    "index": self.tool_block_seq,
+                                    "content_block": {
+                                        "id": block_id,
+                                        "type": "tool_use",
+                                        "name": name,
+                                        "input": {},
+                                    },
+                                },
+                            )
+                        )
+                        if args_delta:
+                            outputs.append(
+                                self._encode_event(
+                                    "content_block_delta",
+                                    {
+                                        "type": "content_block_delta",
+                                        "index": self.tool_block_seq,
+                                        "delta": {
+                                            "type": "input_json_delta",
+                                            "partial_json": args_delta,
+                                            "tool_use_id": block_id,
+                                        },
+                                    },
+                                )
+                            )
+                        outputs.append(
+                            self._encode_event(
+                                "content_block_stop",
+                                {"type": "content_block_stop", "index": self.tool_block_seq},
+                            )
+                        )
+                        self.tool_block_seq += 1
                 finish_reason = choice.get("finish_reason")
                 if isinstance(finish_reason, str):
                     self.stop_reason = _map_openai_finish_reason(finish_reason)

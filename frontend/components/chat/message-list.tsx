@@ -18,10 +18,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MessageItem } from "./message-item";
+import { MessageBubble } from "./message-bubble";
 import { ErrorAlert } from "./error-alert";
 import { AddComparisonDialog } from "./add-comparison-dialog";
-import { AdaptiveCard } from "@/components/cards/adaptive-card";
-import { CardContent } from "@/components/ui/card";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors/error-display";
 import { useMessages } from "@/lib/swr/use-messages";
@@ -70,10 +69,6 @@ export const MessageList = memo(function MessageList({
   const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
   const isPendingResponse =
     useChatStore((s) => s.conversationPending[conversationId]) ?? false;
-  const loaderColors = useMemo(
-    () => ["#ff9800", "#ff7a1b", "#ff6b3c", "#ff4f70", "#ff0f8f"],
-    []
-  );
 
   const deleteConversation = useDeleteConversation();
 
@@ -676,64 +671,32 @@ export const MessageList = memo(function MessageList({
         <div className="px-4 pb-6">
           <div className="flex items-start gap-3">
             <div className="flex-shrink-0 mt-1">
-              <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                <Bot className="size-4" aria-hidden="true" />
+              <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary ring-2 ring-white/50 shadow-lg">
+                <Bot className="size-6" aria-hidden="true" />
               </div>
             </div>
             <div className="max-w-[80%]">
-              <AdaptiveCard
-                showDecor={false}
-                variant="plain"
-                hoverScale={false}
-                className="py-0 gap-0 shadow-sm bg-card"
-              >
-                <CardContent className="py-3 px-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex items-center gap-2">
-                      {loaderColors.map((color, idx) => (
-                        <span
-                          key={color}
-                          className="block h-3 w-3 rounded-full shadow-sm"
-                          style={{
-                            background: color,
-                            animation: "chat-dot-swap 1.4s ease-in-out infinite",
-                            animationDelay: `${idx * 0.12}s`,
-                            boxShadow: `0 4px 10px ${color}33`,
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <span className="text-sm font-medium text-muted-foreground">
-                      {t("chat.message.loading_fun")}
-                    </span>
+              <MessageBubble role="assistant">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
+                    {[0, 1, 2, 3, 4].map((i) => (
+                      <div
+                        key={i}
+                        className="size-2.5 rounded-full animate-pulse"
+                        style={{
+                          background: `hsl(${200 + i * 30}, 70%, 60%)`,
+                          animationDelay: `${i * 0.15}s`,
+                          animationDuration: '1.2s',
+                        }}
+                      />
+                    ))}
                   </div>
-                </CardContent>
-              </AdaptiveCard>
+                  <div className="text-xs text-muted-foreground">
+                    Typing...
+                  </div>
+                </div>
+              </MessageBubble>
             </div>
-            <style jsx global>{`
-              @keyframes chat-dot-swap {
-                0% {
-                  transform: translateY(0) scale(1);
-                  opacity: 0.8;
-                }
-                25% {
-                  transform: translateY(-6px) scale(1.08);
-                  opacity: 1;
-                }
-                50% {
-                  transform: translateY(0) scale(1);
-                  opacity: 0.85;
-                }
-                75% {
-                  transform: translateY(6px) scale(0.96);
-                  opacity: 0.8;
-                }
-                100% {
-                  transform: translateY(0) scale(1);
-                  opacity: 0.8;
-                }
-              }
-            `}</style>
           </div>
         </div>
       )}

@@ -136,6 +136,64 @@ def _extract_first_choice_text(payload: dict[str, Any] | None) -> str | None:
     return None
 
 
+def _normalize_bridge_inputs(
+    *,
+    bridge_agent_id: str | None,
+    bridge_agent_ids: list[str] | None,
+    bridge_tool_selections: list[dict] | None,
+    max_agents: int = 5,
+) -> tuple[list[str], dict[str, set[str]]]:
+    """
+    合并 bridge 相关输入：
+    - 返回去重后的有效 Agent 列表（按出现顺序，最多 max_agents）
+    - 返回每个 Agent 的工具白名单（若未指定则空）
+    """
+    effective_ids: list[str] = []
+    seen: set[str] = set()
+
+    def _add_agent(value: str | None) -> None:
+        if not value:
+            return
+        trimmed = str(value).strip()
+        if trimmed and trimmed not in seen:
+            effective_ids.append(trimmed)
+            seen.add(trimmed)
+
+    if isinstance(bridge_agent_ids, list):
+        for aid in bridge_agent_ids:
+            _add_agent(aid)
+    _add_agent(bridge_agent_id)
+
+    tool_filters: dict[str, set[str]] = {}
+    if isinstance(bridge_tool_selections, list):
+        for sel in bridge_tool_selections:
+            if isinstance(sel, dict):
+                agent = str(sel.get("agent_id") or "").strip()
+                raw_names = sel.get("tool_names")
+            else:
+                agent = str(getattr(sel, "agent_id", "") or "").strip()
+                raw_names = getattr(sel, "tool_names", None)
+            if not agent:
+                continue
+            names: list[str] = []
+            if isinstance(raw_names, list):
+                for n in raw_names:
+                    val = str(n).strip()
+                    if val:
+                        names.append(val)
+            if names:
+                _add_agent(agent)
+                # 限制每个 agent 的工具白名单数量，防止过大注入
+                tool_filters[agent] = set(names[:30])
+
+    if len(effective_ids) > max_agents:
+        effective_ids = effective_ids[:max_agents]
+
+    tool_filters = {aid: names for aid, names in tool_filters.items() if aid in effective_ids}
+
+    return effective_ids, tool_filters
+
+
 def _truncate_title_input(value: str, *, max_len: int = 1000) -> str:
     text = (value or "").strip()
     if not text:
@@ -268,6 +326,7 @@ async def send_message_and_run_baseline(
     model_preset: dict | None = None,
     bridge_agent_id: str | None = None,
     bridge_agent_ids: list[str] | None = None,
+    bridge_tool_selections: list[dict] | None = None,
 ) -> tuple[UUID, UUID]:
     """
     创建 user message 并同步执行 baseline run，随后写入 assistant message（用于历史上下文）。
@@ -370,16 +429,11 @@ async def send_message_and_run_baseline(
     openai_tools: list[dict[str, Any]] = []
     tool_name_map: dict[str, tuple[str, str]] = {}  # openai_tool_name -> (agent_id, bridge_tool_name)
 
-    # bridge_agent_ids takes precedence; bridge_agent_id is legacy.
-    effective_bridge_agent_ids: list[str] = []
-    if isinstance(bridge_agent_ids, list) and bridge_agent_ids:
-        effective_bridge_agent_ids = [str(x).strip() for x in bridge_agent_ids if str(x).strip()]
-    elif (bridge_agent_id or "").strip():
-        effective_bridge_agent_ids = [str(bridge_agent_id).strip()]
-
-    # Hard cap to prevent oversized tool injection.
-    if len(effective_bridge_agent_ids) > 5:
-        effective_bridge_agent_ids = effective_bridge_agent_ids[:5]
+    effective_bridge_agent_ids, tool_filters = _normalize_bridge_inputs(
+        bridge_agent_id=bridge_agent_id,
+        bridge_agent_ids=bridge_agent_ids,
+        bridge_tool_selections=bridge_tool_selections,
+    )
 
     if effective_bridge_agent_ids:
         try:
@@ -390,7 +444,15 @@ async def send_message_and_run_baseline(
                 except Exception:
                     continue
                 if isinstance(tools_resp, dict) and isinstance(tools_resp.get("tools"), list):
-                    bridge_tools_by_agent[aid] = [t for t in tools_resp["tools"] if isinstance(t, dict)]
+                    tools = [t for t in tools_resp["tools"] if isinstance(t, dict)]
+                    allowlist = tool_filters.get(aid)
+                    if allowlist:
+                        tools = [
+                            t for t in tools
+                            if str(t.get("name") or "").strip() in allowlist
+                        ]
+                    if tools:
+                        bridge_tools_by_agent[aid] = tools
 
             openai_tools, tool_name_map = bridge_tools_by_agent_to_openai_tools(
                 bridge_tools_by_agent=bridge_tools_by_agent,
@@ -428,7 +490,7 @@ async def send_message_and_run_baseline(
         payload_override=payload,
     )
 
-    # Tool-calling loop (best-effort; only when bridge_agent_ids is provided).
+    # Tool-calling loop (best-effort; only when选择了 Agent).
     if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
         tool_calls = extract_openai_tool_calls(run.response_payload)
         if tool_calls:
@@ -584,11 +646,14 @@ async def stream_message_and_run_baseline(
     content: str,
     override_logical_model: str | None = None,
     model_preset: dict | None = None,
+    bridge_agent_id: str | None = None,
+    bridge_agent_ids: list[str] | None = None,
+    bridge_tool_selections: list[dict] | None = None,
 ) -> AsyncIterator[bytes]:
     """
     创建 user message 并以 SSE 流式执行 baseline run。
 
-    注意：当前流式模式不支持 bridge 工具调用（tool loop）。
+    注意：流式模式同样支持 bridge 工具调用（tool loop 在流式回复结束后进行补充调用）。
     """
     conv = get_conversation(db, conversation_id=conversation_id, user_id=UUID(str(current_user.id)))
     ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
@@ -681,6 +746,46 @@ async def stream_message_and_run_baseline(
         model_preset_override=model_preset,
     )
 
+    bridge_tools_by_agent: dict[str, list[dict[str, Any]]] = {}
+    openai_tools: list[dict[str, Any]] = []
+    tool_name_map: dict[str, tuple[str, str]] = {}  # openai_tool_name -> (agent_id, bridge_tool_name)
+
+    effective_bridge_agent_ids, tool_filters = _normalize_bridge_inputs(
+        bridge_agent_id=bridge_agent_id,
+        bridge_agent_ids=bridge_agent_ids,
+        bridge_tool_selections=bridge_tool_selections,
+    )
+
+    if effective_bridge_agent_ids:
+        try:
+            bridge = BridgeGatewayClient()
+            for aid in effective_bridge_agent_ids:
+                try:
+                    tools_resp = await bridge.list_tools(aid)
+                except Exception:
+                    continue
+                if isinstance(tools_resp, dict) and isinstance(tools_resp.get("tools"), list):
+                    tools = [t for t in tools_resp["tools"] if isinstance(t, dict)]
+                    allowlist = tool_filters.get(aid)
+                    if allowlist:
+                        tools = [
+                            t for t in tools
+                            if str(t.get("name") or "").strip() in allowlist
+                        ]
+                    if tools:
+                        bridge_tools_by_agent[aid] = tools
+
+            openai_tools, tool_name_map = bridge_tools_by_agent_to_openai_tools(
+                bridge_tools_by_agent=bridge_tools_by_agent,
+            )
+            if openai_tools:
+                payload = dict(payload)
+                payload["tools"] = openai_tools
+                payload["tool_choice"] = "auto"
+        except Exception:
+            # Best-effort：加载失败不阻塞基线流式
+            openai_tools = []
+
     run = create_run_record(
         db,
         user_id=UUID(str(current_user.id)),
@@ -752,6 +857,135 @@ async def stream_message_and_run_baseline(
             break
 
     db.refresh(run)
+
+    # Tool-calling loop（流式结束后补充执行）
+    if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
+        tool_calls = extract_openai_tool_calls(run.response_payload)
+        if tool_calls:
+            invocations: list[BridgeToolInvocation] = []
+            tool_messages: list[dict[str, Any]] = []
+            for tc in tool_calls:
+                tool_name, args, tool_call_id = tool_call_to_args(tc)
+                if not tool_name:
+                    continue
+                mapped = tool_name_map.get(tool_name)
+                if mapped:
+                    target_agent_id, target_tool_name = mapped
+                else:
+                    target_agent_id = effective_bridge_agent_ids[0]
+                    target_tool_name = tool_name
+                req_id = "req_" + uuid.uuid4().hex
+                invocations.append(
+                    BridgeToolInvocation(
+                        req_id=req_id,
+                        agent_id=target_agent_id,
+                        tool_name=target_tool_name,
+                        tool_call_id=tool_call_id,
+                    )
+                )
+                tool_result = await invoke_bridge_tool_and_wait(
+                    req_id=req_id,
+                    agent_id=target_agent_id,
+                    tool_name=target_tool_name,
+                    arguments=args,
+                    timeout_ms=60000,
+                    result_timeout_seconds=120.0,
+                )
+                tool_messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tool_call_id or req_id,
+                        "content": json.dumps(
+                            {
+                                "req_id": req_id,
+                                "agent_id": target_agent_id,
+                                "tool_name": target_tool_name,
+                                "model_tool_name": tool_name,
+                                "ok": tool_result.ok,
+                                "exit_code": tool_result.exit_code,
+                                "canceled": tool_result.canceled,
+                                "result_json": tool_result.result_json,
+                                "error": tool_result.error,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    }
+                )
+
+            if invocations and tool_messages:
+                follow_payload = dict(payload)
+                follow_messages = list(payload.get("messages") or [])
+                follow_messages.append({"role": "assistant", "content": None, "tool_calls": tool_calls})
+                follow_messages.extend(tool_messages)
+                follow_payload["messages"] = follow_messages
+                follow_payload["tool_choice"] = "none"
+
+                handler = RequestHandler(api_key=auth_key, db=db, redis=redis, client=client)
+                resp = await handler.handle(
+                    payload=follow_payload,
+                    requested_model=requested_model,
+                    lookup_model_id=requested_model,
+                    api_style="openai",
+                    effective_provider_ids=effective_provider_ids,
+                    session_id=str(conv.id),
+                    assistant_id=UUID(str(getattr(assistant, "id", None))) if getattr(assistant, "id", None) else None,
+                    billing_reason="chat_tool_loop",
+                    idempotency_key=f"chat:{run.id}:tool_loop",
+                )
+
+                follow_response_payload: dict[str, Any] | None = None
+                try:
+                    raw = resp.body.decode("utf-8", errors="ignore")
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, dict):
+                        follow_response_payload = parsed
+                except Exception:
+                    follow_response_payload = None
+
+                delta_text = _extract_first_choice_text(follow_response_payload)
+                if delta_text and delta_text.strip():
+                    run.output_text = delta_text
+                    run.output_preview = delta_text.strip()[:380].rstrip()
+                else:
+                    run.status = "failed"
+                    run.error_code = "TOOL_LOOP_FAILED"
+                    run.error_message = "tool loop finished without assistant content"
+                    delta_text = None
+
+                run.response_payload = {
+                    "bridge": {
+                        "agent_ids": effective_bridge_agent_ids,
+                        "tool_invocations": [
+                            {
+                                "req_id": it.req_id,
+                                "agent_id": it.agent_id,
+                                "tool_name": it.tool_name,
+                                "tool_call_id": it.tool_call_id,
+                            }
+                            for it in invocations
+                        ],
+                    },
+                    "first_response": run.response_payload,
+                    "final_response": follow_response_payload,
+                }
+                db.add(run)
+                db.commit()
+                db.refresh(run)
+
+                # 补充一次 delta，前端能够看到工具调用后的最终回复
+                if delta_text:
+                    parts = [delta_text]
+                    yield _encode_sse_event(
+                        event_type="message.delta",
+                        data={
+                            "type": "message.delta",
+                            "conversation_id": str(conv.id),
+                            "assistant_message_id": str(assistant_message.id),
+                            "run_id": str(run.id),
+                            "delta": delta_text,
+                        },
+                    )
+
     if not errored and run.status == "succeeded" and run.output_text:
         finalize_assistant_message_after_user_sequence(
             db,

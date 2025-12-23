@@ -1,28 +1,6 @@
 version: "3.9"
 
 services:
-  bridge_gateway:
-    image: marshalleriksen/mcpproxy-gateway:${IMAGE_TAG:-latest}
-    container_name: apiproxy-bridge-gateway
-    restart: unless-stopped
-    env_file:
-      - .env
-    ports:
-      - "8088:8088"
-    command:
-      [
-        "gateway",
-        "serve",
-        "--listen",
-        ":8088",
-        "--tunnel-path",
-        "/bridge/tunnel",
-        "--agent-token-secret",
-        "${SECRET_KEY}",
-        "--internal-token",
-        "${BRIDGE_GATEWAY_INTERNAL_TOKEN}",
-      ]
-
   postgres:
     image: postgres:16-alpine
     container_name: apiproxy-postgres
@@ -65,8 +43,6 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      - BRIDGE_GATEWAY_URL=http://bridge_gateway:8088
     ports:
       - "8000:8000"
     depends_on:
@@ -74,8 +50,6 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-      bridge_gateway:
-        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -93,15 +67,11 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      - BRIDGE_GATEWAY_URL=http://bridge_gateway:8088
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      bridge_gateway:
-        condition: service_started
     volumes:
       - ./backend/logs:/app/logs
       - ./backend/media:/app/backend/media
@@ -113,13 +83,9 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    environment:
-      - BRIDGE_GATEWAY_URL=http://bridge_gateway:8088
     depends_on:
       redis:
         condition: service_healthy
-      bridge_gateway:
-        condition: service_started
     volumes:
       - ./backend/logs:/app/logs
       - ./backend/media:/app/backend/media
