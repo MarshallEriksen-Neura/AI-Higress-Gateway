@@ -106,6 +106,13 @@ type gatewayServer struct {
 	redis *redis.Client
 }
 
+type agentInfo struct {
+	AgentID     string `json:"agent_id"`
+	Status      string `json:"status"`
+	LastSeenAt  int64  `json:"last_seen_at"`
+	ConnectedAt int64  `json:"connected_at"`
+}
+
 type agentConn struct {
 	agentID       string
 	connSessionID string
@@ -198,6 +205,8 @@ func (s *gatewayServer) handleTunnelWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
+	// Allow larger frames (tool list/result chunks) than the nhooyr default 32KiB.
+	conn.SetReadLimit(512 * 1024)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	tmpSessionID := "ws_" + uuid.NewString()
@@ -208,6 +217,19 @@ func (s *gatewayServer) handleTunnelWS(w http.ResponseWriter, r *http.Request) {
 	for {
 		_, data, err := conn.Read(ctx)
 		if err != nil {
+			agentID := ""
+			if registered != nil {
+				agentID = registered.agentID
+			} else if pendingHello != nil {
+				agentID = pendingHello.agentID
+			}
+			logger.Info(
+				"agent connection closed",
+				"agent_id", agentID,
+				"remote", r.RemoteAddr,
+				"err", err.Error(),
+				"close_status", websocket.CloseStatus(err),
+			)
 			break
 		}
 		env, err := protocol.DecodeEnvelope(data)
@@ -393,28 +415,69 @@ func (s *gatewayServer) handleListAgents(w http.ResponseWriter, r *http.Request)
 	if !s.checkInternalAuth(w, r) {
 		return
 	}
-	type agentInfo struct {
-		AgentID     string `json:"agent_id"`
-		Status      string `json:"status"`
-		LastSeenAt  int64  `json:"last_seen_at"`
-		ConnectedAt int64  `json:"connected_at"`
-	}
+
 	resp := struct {
 		Agents []agentInfo `json:"agents"`
 	}{}
 
+	agents := s.collectAgents(r.Context())
+	resp.Agents = agents
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// collectAgents aggregates in-memory online agents and, if Redis is enabled,
+// supplements with registry entries from Redis for multi-instance awareness.
+func (s *gatewayServer) collectAgents(ctx context.Context) []agentInfo {
+	out := make(map[string]agentInfo)
+
+	// Prefer in-memory (definitive for this instance).
 	s.mu.RLock()
 	for _, a := range s.agents {
-		resp.Agents = append(resp.Agents, agentInfo{
+		out[a.agentID] = agentInfo{
 			AgentID:     a.agentID,
 			Status:      "online",
 			LastSeenAt:  a.lastSeenAt.Unix(),
 			ConnectedAt: a.connectedAt.Unix(),
-		})
+		}
 	}
 	s.mu.RUnlock()
 
-	writeJSON(w, http.StatusOK, resp)
+	// Supplement with Redis registry (other gateway instances).
+	if s.redis != nil {
+		prefix := s.opts.RedisKeyPrefix
+		if strings.TrimSpace(prefix) == "" {
+			prefix = "agent_online:"
+		}
+		iter := s.redis.Scan(ctx, 0, prefix+"*", 100).Iterator()
+		for iter.Next(ctx) {
+			key := iter.Val()
+			raw, err := s.redis.Get(ctx, key).Bytes()
+			if err != nil {
+				continue
+			}
+			var rv registryValue
+			if err := json.Unmarshal(raw, &rv); err != nil {
+				continue
+			}
+			agentID := strings.TrimPrefix(key, prefix)
+			if _, exists := out[agentID]; exists {
+				continue
+			}
+			out[agentID] = agentInfo{
+				AgentID:     agentID,
+				Status:      "cached", // seen via Redis, not necessarily connected to this instance
+				LastSeenAt:  rv.UpdatedAt,
+				ConnectedAt: rv.UpdatedAt,
+			}
+		}
+	}
+
+	result := make([]agentInfo, 0, len(out))
+	for _, v := range out {
+		result = append(result, v)
+	}
+	return result
 }
 
 func (s *gatewayServer) handleAgentSubresource(w http.ResponseWriter, r *http.Request) {

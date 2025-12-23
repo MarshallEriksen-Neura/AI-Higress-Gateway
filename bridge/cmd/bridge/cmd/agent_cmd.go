@@ -61,8 +61,8 @@ func newAgentServeMCPCmd() *cobra.Command {
 }
 
 type agentRuntime struct {
-	agentID string
-	agg     *mcpbridge.Aggregator
+	agentID        string
+	agg            *mcpbridge.Aggregator
 	pendingMu      sync.Mutex
 	pendingResults map[string]protocol.Envelope
 }
@@ -209,6 +209,8 @@ func connectAndServe(ctx context.Context, cfg *config.Config, rt *agentRuntime) 
 	if err != nil {
 		return fmt.Errorf("dial tunnel: %w", err)
 	}
+	// Allow larger frames from gateway than the default 32KiB limit.
+	conn.SetReadLimit(512 * 1024)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
 	session := &agentSession{
@@ -408,6 +410,11 @@ func (s *agentSession) readLoop(ctx context.Context) error {
 	for {
 		_, data, err := s.conn.Read(ctx)
 		if err != nil {
+			logger.Info(
+				"agent readLoop exit",
+				"err", err.Error(),
+				"close_status", websocket.CloseStatus(err),
+			)
 			if websocket.CloseStatus(err) != -1 {
 				return nil
 			}
