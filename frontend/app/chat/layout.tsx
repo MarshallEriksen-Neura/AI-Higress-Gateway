@@ -9,7 +9,7 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-[#fafbfc] via-[#f8f9fb] to-[#f5f6f8]">
+    <div className="flex h-screen w-full overflow-hidden bg-gradient-to-br from-[var(--background)] via-[var(--background)] to-[var(--muted)]">
       {/* 桌面端导航栏 - 在移动端隐藏 */}
       <div className="hidden md:block h-full">
         <ChatNavRail />

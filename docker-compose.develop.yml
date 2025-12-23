@@ -57,6 +57,7 @@ services:
     environment:
       - AVATAR_LOCAL_DIR=/app/media/avatars
     volumes:
+      - ./security:/app/security:ro
       - ./backend/logs:/app/logs
       - ./backend/media:/app/media
       # 开发模式: 挂载源代码实现热重载（可选）
@@ -93,6 +94,7 @@ services:
     environment:
       - AVATAR_LOCAL_DIR=/app/media/avatars
     volumes:
+      - ./security:/app/security:ro
       - ./backend/logs:/app/logs
       - ./backend/media:/app/media
       - ./backend/app:/app/app:ro
@@ -119,6 +121,7 @@ services:
     environment:
       - AVATAR_LOCAL_DIR=/app/media/avatars
     volumes:
+      - ./security:/app/security:ro
       - ./backend/logs:/app/logs
       - ./backend/media:/app/media
       - ./backend/app:/app/app:ro

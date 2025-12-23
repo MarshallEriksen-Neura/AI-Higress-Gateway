@@ -2,7 +2,7 @@
 
 import { useRef, useEffect } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Avatar } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Copy, ThumbsUp, ThumbsDown, RotateCw, Trash2 } from "lucide-react";
@@ -135,7 +135,7 @@ export function MessageListVirtual({
                         </span>
                       )}
                     </div>
-                    <Avatar className="w-8 h-8 flex-shrink-0 ring-1 ring-primary/10">
+                    <Avatar className="w-10 h-10 flex-shrink-0 ring-1 ring-primary/10">
                       <div className="w-full h-full bg-gradient-to-br from-primary/15 to-primary/25 flex items-center justify-center text-xs font-medium text-primary">
                         U
                       </div>
@@ -144,13 +144,18 @@ export function MessageListVirtual({
                 ) : (
                   /* 助手消息 */
                   <div className="flex gap-3 items-start group">
-                    <Avatar className="w-8 h-8 flex-shrink-0 ring-1 ring-border/30">
-                      <div className="w-full h-full bg-gradient-to-br from-muted/60 to-muted/40 flex items-center justify-center text-base">
+                    <Avatar className="w-10 h-10 flex-shrink-0 ring-1 ring-border/30">
+                      <AvatarImage
+                        src="/images/robot.png"
+                        alt="Assistant"
+                        className="object-cover"
+                      />
+                      <AvatarFallback className="bg-muted text-base">
                         🤖
-                      </div>
+                      </AvatarFallback>
                     </Avatar>
                     <div className="flex-1 max-w-[85%]">
-                      <div className="group/bubble relative bg-white rounded-[22px] rounded-tl-[6px] px-6 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.04),0_8px_32px_rgba(0,0,0,0.06)]">
+                      <div className="group/bubble relative bg-background rounded-[22px] rounded-tl-[6px] px-6 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.04),0_8px_32px_rgba(0,0,0,0.06)]">
                         {/* Markdown 内容区域 - 优化行高和间距 */}
                         <div className="prose prose-sm max-w-none">
                           <div className="text-[15px] leading-[1.7] whitespace-pre-wrap font-[system-ui,-apple-system,sans-serif] text-foreground/90">

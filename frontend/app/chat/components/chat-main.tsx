@@ -138,9 +138,9 @@ export function ChatMain() {
   };
 
   return (
-    <div className="flex h-full flex-col bg-gradient-to-b from-[#fafbfc] via-[#f8f9fb] to-[#f5f6f8]">
+    <div className="flex h-full flex-col bg-gradient-to-b from-background via-muted/30 to-muted/50">
       {/* 顶部：当前助手信息 - 毛玻璃效果 */}
-      <div className="backdrop-blur-2xl bg-white/60 border-b border-border/20 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-4 sticky top-0 z-10">
+      <div className="backdrop-blur-2xl bg-background/60 border-b border-border/20 shadow-[0_1px_3px_rgba(0,0,0,0.04)] p-4 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto flex items-center gap-3">
           <div className="text-2xl">🎓</div>
           <div className="flex-1 min-w-0">
@@ -181,7 +181,7 @@ export function ChatMain() {
       <div className="px-4 pb-6 pt-4 md:px-6 md:pb-8">
         <div className="max-w-4xl mx-auto">
           {/* 输入框容器 - 悬浮设计 */}
-          <div className="relative bg-white rounded-[28px] shadow-[0_8px_32px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)] border border-border/40 p-3 transition-shadow duration-200 hover:shadow-[0_12px_48px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.06)]">
+          <div className="relative bg-background rounded-[28px] shadow-[0_8px_32px_rgba(0,0,0,0.08),0_2px_8px_rgba(0,0,0,0.04)] border border-border/40 p-3 transition-shadow duration-200 hover:shadow-[0_12px_48px_rgba(0,0,0,0.12),0_4px_12px_rgba(0,0,0,0.06)]">
             <Textarea
               value={inputValue}
               onChange={(e) => setInputValue(e.target.value)}

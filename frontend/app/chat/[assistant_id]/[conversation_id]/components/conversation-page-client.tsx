@@ -45,21 +45,6 @@ const EvalPanel = dynamic(
   }
 );
 
-const BridgePanelClient = dynamic(
-  () =>
-    import("@/components/chat/bridge-panel-client").then((mod) => ({
-      default: mod.BridgePanelClient,
-    })),
-  {
-    loading: () => (
-      <div className="flex items-center justify-center h-full">
-        <Loader2 className="size-6 animate-spin text-muted-foreground" />
-      </div>
-    ),
-    ssr: false,
-  }
-);
-
 export function ConversationPageClient({
   assistantId,
   conversationId,
@@ -88,10 +73,6 @@ export function ConversationPageClient({
 
   const isImmersive = useChatLayoutStore((s) => s.isImmersive);
   const setIsImmersive = useChatLayoutStore((s) => s.setIsImmersive);
-  const isBridgePanelOpen = useChatLayoutStore((s) => s.isBridgePanelOpen);
-  const setIsBridgePanelOpen = useChatLayoutStore(
-    (s) => s.setIsBridgePanelOpen
-  );
 
   // 同步 URL 中的 assistantId 和 conversationId 到全局状态
   useEffect(() => {
@@ -450,15 +431,6 @@ export function ConversationPageClient({
   }, [setActiveEval]);
 
   // MCP 工具处理
-  const handleMcpAction = useCallback(() => {
-    const next = !useChatLayoutStore.getState().isBridgePanelOpen;
-    setIsBridgePanelOpen(next);
-  }, [setIsBridgePanelOpen]);
-
-  const handleCloseBridgePanel = useCallback(() => {
-    setIsBridgePanelOpen(false);
-  }, [setIsBridgePanelOpen]);
-
   if (!conversation) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -526,7 +498,6 @@ export function ConversationPageClient({
                   assistantId={assistantId}
                   overrideLogicalModel={overrideLogicalModel}
                   disabled={isArchived}
-                  onMcpAction={handleMcpAction}
                   className="h-full border-t-0"
                 />
               </div>
@@ -579,7 +550,6 @@ export function ConversationPageClient({
                       assistantId={assistantId}
                       overrideLogicalModel={overrideLogicalModel}
                       disabled={isArchived}
-                      onMcpAction={handleMcpAction}
                       className="h-full border-t-0"
                     />
                   </div>
@@ -592,14 +562,6 @@ export function ConversationPageClient({
                 <EvalPanel evalId={activeEvalId} onClose={handleCloseEval} />
               </div>
             )}
-            {isBridgePanelOpen && (
-              <div className="absolute inset-y-0 right-0 w-full md:w-96 border-l bg-background shadow-lg z-[105] overflow-hidden">
-                <BridgePanelClient
-                  conversationId={conversationId}
-                  onClose={handleCloseBridgePanel}
-                />
-              </div>
-            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -607,15 +569,6 @@ export function ConversationPageClient({
       {activeEvalId && !isImmersive && (
         <div className="fixed inset-y-0 right-0 w-full md:w-96 border-l bg-background shadow-lg z-50 overflow-y-auto">
           <EvalPanel evalId={activeEvalId} onClose={handleCloseEval} />
-        </div>
-      )}
-
-      {isBridgePanelOpen && !isImmersive && (
-        <div className="fixed inset-y-0 right-0 w-full md:w-96 border-l bg-background shadow-lg z-40 overflow-hidden">
-          <BridgePanelClient
-            conversationId={conversationId}
-            onClose={handleCloseBridgePanel}
-          />
         </div>
       )}
     </>

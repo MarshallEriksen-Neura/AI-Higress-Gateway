@@ -36,6 +36,7 @@ export const useNotifications = (params: NotificationQueryParams = {}) => {
     refresh,
   } = useApiGet<Notification[]>(url, {
     strategy: 'frequent',
+    refreshInterval: 60000, // 每60秒自动刷新
   });
 
   return {
@@ -56,8 +57,8 @@ export const useUnreadCount = () => {
     loading,
     refresh,
   } = useApiGet<UnreadCountResponse>('/v1/notifications/unread-count', {
-    strategy: 'realtime',
-    refreshInterval: 30000, // 每30秒自动刷新
+    strategy: 'frequent',
+    refreshInterval: 60000, // 每60秒自动刷新
   });
 
   return {

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import uuid
 from typing import Any
+from uuid import UUID
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException

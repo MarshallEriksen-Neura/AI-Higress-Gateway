@@ -87,6 +87,12 @@ Env (frontend) is in `frontend/.env.example` (`NEXT_PUBLIC_API_BASE_URL` → bac
 ### ⚙️ Configuration
 - Main settings in `backend/app/settings.py`; prefer env vars.
 - Generate `SECRET_KEY` via system API `POST /system/secret-key/generate` and put into `.env`.
+- JWT RSA keys (access/refresh signing) default to `security/private.pem` + `security/public.pem` (override with `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`). Generate once:
+  ```bash
+  openssl genrsa -out security/private.pem 2048
+  openssl rsa -in security/private.pem -pubout -out security/public.pem
+  ```
+  If using Docker, mount `./security:/app/security:ro` (already configured in compose files).
 - Redis/PostgreSQL URLs are read from `.env`; see sample values in the repo.
 - Optional: Celery broker/result can reuse Redis; see `.env` sample keys.
 - Example env keys:
@@ -253,6 +259,12 @@ bun dev       # 启动 Next.js 管理台
 ### ⚙️ 配置要点
 - 核心配置在 `backend/app/settings.py`，推荐使用环境变量。
 - 通过系统 API `POST /system/secret-key/generate` 生成 `SECRET_KEY` 写入 `.env`，避免提交真实密钥。
+- JWT RSA 密钥对默认路径 `security/private.pem`、`security/public.pem`（可用 `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` 覆盖）。生成示例：
+  ```bash
+  openssl genrsa -out security/private.pem 2048
+  openssl rsa -in security/private.pem -pubout -out security/public.pem
+  ```
+  使用 Docker 时确保挂载 `./security:/app/security:ro`（compose 已包含）。
 - Redis/PostgreSQL 连接信息从 `.env` 读取，可按需调整。
 - Celery 可复用 Redis 作为 broker/result（参考 `.env` 示例）。
 - 常用环境变量：

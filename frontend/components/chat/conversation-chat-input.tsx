@@ -14,18 +14,20 @@ export const ConversationChatInput = memo(function ConversationChatInput({
   overrideLogicalModel,
   disabled = false,
   className,
-  onMcpAction,
 }: {
   conversationId: string;
   assistantId: string;
   overrideLogicalModel?: string | null;
   disabled?: boolean;
   className?: string;
-  onMcpAction?: () => void;
 }) {
   const bridgeAgentIds =
     useChatStore((s) => s.conversationBridgeAgentIds[conversationId]) ??
     EMPTY_STRING_ARRAY;
+  const bridgeToolSelections =
+    useChatStore((s) => s.conversationBridgeToolSelections[conversationId]) ?? {};
+  const defaultBridgeToolSelections =
+    useChatStore((s) => s.defaultBridgeToolSelections) ?? {};
   const chatStreamingEnabled = useChatStore((s) => s.chatStreamingEnabled);
 
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
@@ -33,13 +35,29 @@ export const ConversationChatInput = memo(function ConversationChatInput({
 
   const handleSend = useCallback(
     async (payload: { content: string; model_preset?: Record<string, number> }) => {
+      const effectiveSelections: Record<string, string[]> = { ...defaultBridgeToolSelections };
+      Object.entries(bridgeToolSelections).forEach(([aid, tools]) => {
+        if (Array.isArray(tools) && tools.length) {
+          effectiveSelections[aid] = tools;
+        }
+      });
+      const effectiveAgentIds = Object.entries(effectiveSelections)
+        .filter(([, tools]) => Array.isArray(tools) && tools.length)
+        .map(([aid]) => aid);
+
       await sendMessage({
         content: payload.content,
         model_preset: payload.model_preset,
-        bridge_agent_ids: bridgeAgentIds.length ? bridgeAgentIds : undefined,
+        bridge_agent_ids: effectiveAgentIds.length ? effectiveAgentIds : undefined,
+        bridge_tool_selections: effectiveAgentIds.length
+          ? effectiveAgentIds.map((agentId) => ({
+              agent_id: agentId,
+              tool_names: effectiveSelections[agentId],
+            }))
+          : undefined,
       }, { streaming: chatStreamingEnabled });
     },
-    [sendMessage, bridgeAgentIds, chatStreamingEnabled]
+    [sendMessage, bridgeToolSelections, defaultBridgeToolSelections, chatStreamingEnabled]
   );
 
   const handleClearHistory = useCallback(async () => {
@@ -67,7 +85,6 @@ export const ConversationChatInput = memo(function ConversationChatInput({
       className={className}
       onSend={handleSlateSend}
       onClearHistory={handleClearHistory}
-      onMcpAction={onMcpAction}
     />
   );
 });

@@ -192,6 +192,9 @@ Request:
   "model_preset": {"temperature": 0.2},
   "bridge_agent_id": "aws-dev-server",
   "bridge_agent_ids": ["aws-dev-server", "home-nas"],
+  "bridge_tool_selections": [
+    {"agent_id": "aws-dev-server", "tool_names": ["search", "summarize"]}
+  ],
   "streaming": false
 }
 ```
@@ -202,8 +205,12 @@ Request:
   - 不传则保持原有“纯聊天 baseline”行为。
   - 当传入多个 Agent 时，后端会合并所有工具并注入模型；为了避免重名，会对工具名做别名映射（模型看到的是别名），实际执行时仍会路由到对应 Agent 的原始工具名。
   - 当前实现为 MVP：工具调用发生时，tool 输出日志通过 `/v1/bridge/events` 或 `/v1/bridge/tool-events` 另行查看。
+- `bridge_tool_selections`（可选）：为每个 Agent 指定要注入的工具子集。未提供时默认注入该 Agent 的全部工具。
+  - 单次最多 5 个 Agent，每个 Agent 最多 30 个工具名。
+  - 当 `bridge_tool_selections` 和 `bridge_agent_id(s)` 同时出现时，Agent 列表取二者并集（去重）。
 - `streaming`（可选，默认 `false`）：是否使用 SSE 流式返回。
-  - **当使用 `bridge_agent_id(s)` 时会回退到 non-stream**（当前 tool loop 仅在 non-stream 路径执行）。
+  - 仅当提供了 `bridge_tool_selections`（且至少选择一个工具）时才会注入并调用 MCP/Bridge 工具；未选择工具则按纯聊天处理。
+  - 支持与 MCP/Bridge 同时使用：流式结束后会补充执行工具调用并推送最终结果。
 
 Response:
 ```json

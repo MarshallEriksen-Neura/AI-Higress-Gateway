@@ -15,7 +15,6 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/lib/i18n-context";
@@ -23,7 +22,8 @@ import type { Message, RunSummary } from "@/lib/api-types";
 import type { ComparisonVariant } from "@/lib/stores/chat-comparison-store";
 import { cn } from "@/lib/utils";
 import { MessageContent } from "./message-content";
-import { AdaptiveCard } from "@/components/cards/adaptive-card";
+import { MessageBubble } from "./message-bubble";
+import { ToolReferences } from "./tool-references";
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useChatStore } from "@/lib/stores/chat-store";
 
@@ -89,6 +89,24 @@ export function MessageItem({
     isAssistant &&
     primaryStatus === "running" &&
     (message.content ?? "").trim().length === 0;
+  const toolInvocations = primaryRun?.tool_invocations ?? [];
+  const groupedInvocations = useMemo(
+    () =>
+      Array.from(
+        toolInvocations.reduce((acc, cur) => {
+          const agent = (cur.agent_id || "").trim();
+          if (!agent) return acc;
+          const entry = acc.get(agent) ?? new Set<string>();
+          if (cur.tool_name) entry.add(cur.tool_name);
+          acc.set(agent, entry);
+          return acc;
+        }, new Map<string, Set<string>>())
+      ).map(([agent, tools]) => ({
+        agent,
+        tools: Array.from(tools),
+      })),
+    [toolInvocations]
+  );
   const isRecent = Number.isFinite(createdMs)
     ? Date.now() - createdMs < 90_000
     : false;
@@ -147,32 +165,45 @@ export function MessageItem({
         isUser ? "justify-end" : "justify-start"
       )}
     >
-      {/* 助手头像 */}
+      {/* 助手头像（在气泡外） */}
       {isAssistant && (
         <div className="flex-shrink-0 mt-1">
-          <div className="flex size-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <Bot className="size-4" />
-          </div>
+          <Avatar aria-label={t("chat.message.assistant")} className="size-12 ring-2 ring-white/50 shadow-lg">
+            <AvatarImage
+              src="/images/robot.png"
+              alt={t("chat.message.assistant")}
+              className="object-cover"
+            />
+            <AvatarFallback className="text-primary bg-primary/10">
+              <Bot className="size-6" />
+            </AvatarFallback>
+          </Avatar>
         </div>
       )}
 
       {/* 消息内容 */}
       <div className={cn("flex flex-col gap-2 max-w-[80%]", isUser && "items-end")}>
         {/* 消息卡片 */}
-        <AdaptiveCard
-          showDecor={false}
-          variant="plain"
-          hoverScale={false}
-          className={cn(
-            "py-0 gap-0 shadow-sm",
-            isUser ? "bg-primary text-primary-foreground border-0" : "bg-card"
-          )}
-        >
-          <CardContent className="py-3 px-4">
+        <MessageBubble role={message.role}>
+          <div className="flex-1 min-w-0">
             {isAssistantPendingResponse ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="size-4 animate-spin" />
-                <span>{t("chat.message.loading")}</span>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5">
+                  {[0, 1, 2, 3, 4].map((i) => (
+                    <div
+                      key={i}
+                      className="size-2.5 rounded-full animate-pulse"
+                      style={{
+                        background: `hsl(${200 + i * 30}, 70%, 60%)`,
+                        animationDelay: `${i * 0.15}s`,
+                        animationDuration: '1.2s',
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Typing...
+                </div>
               </div>
             ) : isAssistant && comparisonVariants.length > 0 ? (
               <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
@@ -210,18 +241,24 @@ export function MessageItem({
                 ))}
               </Tabs>
             ) : (
-              <MessageContent
-                content={message.content}
-                role={message.role}
-                enableTypewriter={shouldTypewriter}
-                typewriterKey={effectiveTypewriterKey}
-              />
-            )}
-            {isAssistant && errorMessage ? (
-              <div className="mt-2 text-xs text-destructive">{errorMessage}</div>
-            ) : null}
-          </CardContent>
-        </AdaptiveCard>
+                <MessageContent
+                  content={message.content}
+                  role={message.role}
+                  enableTypewriter={shouldTypewriter}
+                  typewriterKey={effectiveTypewriterKey}
+                />
+              )}
+              {isAssistant && errorMessage ? (
+                <div className="mt-2 text-xs text-destructive">{errorMessage}</div>
+              ) : null}
+              {isAssistant && groupedInvocations.length ? (
+                <ToolReferences
+                  references={groupedInvocations}
+                  className="mt-3"
+                />
+              ) : null}
+          </div>
+        </MessageBubble>
 
         {/* 时间和操作按钮 */}
         <div className="flex items-center gap-2 px-1">
@@ -340,12 +377,12 @@ export function MessageItem({
       {/* 用户头像 */}
       {isUser && (
         <div className="flex-shrink-0 mt-1">
-          <Avatar aria-label={userDisplayName || t("chat.message.user")}>
+          <Avatar aria-label={userDisplayName || t("chat.message.user")} className="size-10">
             {userAvatarUrl ? (
               <AvatarImage src={userAvatarUrl} alt={userDisplayName || t("chat.message.user")} />
             ) : null}
             <AvatarFallback className="text-muted-foreground">
-              <User className="size-4" />
+              <User className="size-5" />
             </AvatarFallback>
           </Avatar>
         </div>

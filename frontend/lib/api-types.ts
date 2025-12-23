@@ -946,6 +946,10 @@ export interface SendMessageRequest {
   model_preset?: Record<string, any>;
   bridge_agent_id?: string;
   bridge_agent_ids?: string[];
+  bridge_tool_selections?: Array<{
+    agent_id: string;
+    tool_names: string[];
+  }>;
   streaming?: boolean;
 }
 

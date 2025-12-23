@@ -309,6 +309,7 @@ async def create_message_endpoint(
                 model_preset=payload.model_preset,
                 bridge_agent_id=payload.bridge_agent_id,
                 bridge_agent_ids=payload.bridge_agent_ids,
+                bridge_tool_selections=payload.bridge_tool_selections,
             ),
             media_type="text/event-stream",
         )
@@ -324,6 +325,7 @@ async def create_message_endpoint(
         model_preset=payload.model_preset,
         bridge_agent_id=payload.bridge_agent_id,
         bridge_agent_ids=payload.bridge_agent_ids,
+        bridge_tool_selections=payload.bridge_tool_selections,
     )
     run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
     return MessageCreateResponse(message_id=message_id, baseline_run=_run_to_summary(run))
