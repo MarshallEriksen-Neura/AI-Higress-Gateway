@@ -28,6 +28,8 @@ media/
 tmp.db
 celerybeat-schedule*
 *.sqlite*
+tests/
+scripts/
 
 # Tests and local artefacts not needed in runtime image
 tests/

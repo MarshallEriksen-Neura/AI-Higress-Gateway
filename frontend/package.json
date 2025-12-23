@@ -38,6 +38,7 @@
     "@radix-ui/react-visually-hidden": "^1.2.4",
     "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.13",
+    "@vercel/analytics": "^1.6.1",
     "add": "^2.0.6",
     "ahooks": "^3.9.6",
     "axios": "^1.13.2",
