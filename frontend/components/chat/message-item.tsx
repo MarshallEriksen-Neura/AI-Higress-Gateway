@@ -241,12 +241,23 @@ export function MessageItem({
                 ))}
               </Tabs>
             ) : (
-                <MessageContent
-                  content={message.content}
-                  role={message.role}
-                  enableTypewriter={shouldTypewriter}
-                  typewriterKey={effectiveTypewriterKey}
-                />
+                <>
+                  {isAssistant &&
+                  isRegenerating &&
+                  (message.content ?? "").trim().length === 0 ? (
+                    <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      {t("chat.message.loading")}
+                    </div>
+                  ) : (
+                    <MessageContent
+                      content={message.content}
+                      role={message.role}
+                      enableTypewriter={shouldTypewriter}
+                      typewriterKey={effectiveTypewriterKey}
+                    />
+                  )}
+                </>
               )}
               {isAssistant && errorMessage ? (
                 <div className="mt-2 text-xs text-destructive">{errorMessage}</div>

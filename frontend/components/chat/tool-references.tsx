@@ -1,73 +1,8 @@
-import { Globe, Search, Database, Code, FileText, Zap } from "lucide-react";
+"use client";
+
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import type { LucideIcon } from "lucide-react";
-
-/**
- * 工具名称映射配置
- * 将技术性的工具名转换为用户友好的描述
- */
-const TOOL_NAME_MAP: Record<string, { label: string; icon: LucideIcon }> = {
-  // Tavily 搜索工具
-  "tavily_remote_tavily_search": { label: "联网搜索", icon: Globe },
-  "tavily_remote_tavily_extract": { label: "网页提取", icon: FileText },
-  "tavily_remote_tavily_crawl": { label: "网站爬取", icon: Search },
-  "tavily_remote_tavily_map": { label: "网站地图", icon: Search },
-  
-  // 其他常见工具
-  "web_search": { label: "网络搜索", icon: Search },
-  "database_query": { label: "数据查询", icon: Database },
-  "code_execution": { label: "代码执行", icon: Code },
-  "file_read": { label: "文件读取", icon: FileText },
-};
-
-/**
- * Agent 名称映射
- * 将技术性的 agent ID 转换为友好名称
- */
-const AGENT_NAME_MAP: Record<string, string> = {
-  "my-agent": "AI 助手",
-  "tavily": "Tavily",
-  "search-agent": "搜索助手",
-};
-
-/**
- * 获取工具的友好显示信息
- */
-function getToolDisplay(toolName: string): { label: string; icon: LucideIcon } {
-  // 精确匹配
-  if (TOOL_NAME_MAP[toolName]) {
-    return TOOL_NAME_MAP[toolName];
-  }
-  
-  // 模糊匹配：包含关键词
-  const lowerTool = toolName.toLowerCase();
-  if (lowerTool.includes("search") || lowerTool.includes("tavily")) {
-    return { label: "联网搜索", icon: Globe };
-  }
-  if (lowerTool.includes("extract") || lowerTool.includes("fetch")) {
-    return { label: "网页提取", icon: FileText };
-  }
-  if (lowerTool.includes("crawl")) {
-    return { label: "网站爬取", icon: Search };
-  }
-  if (lowerTool.includes("database") || lowerTool.includes("query")) {
-    return { label: "数据查询", icon: Database };
-  }
-  if (lowerTool.includes("code") || lowerTool.includes("execute")) {
-    return { label: "代码执行", icon: Code };
-  }
-  
-  // 默认
-  return { label: toolName, icon: Zap };
-}
-
-/**
- * 获取 Agent 的友好名称
- */
-function getAgentName(agentId: string): string {
-  return AGENT_NAME_MAP[agentId] || agentId;
-}
+import { useI18n } from "@/lib/i18n-context";
 
 export interface ToolReference {
   agent: string;
@@ -88,27 +23,47 @@ export interface ToolReferencesProps {
  * - 半透明背景 + 精致图标
  */
 export function ToolReferences({ references, className }: ToolReferencesProps) {
+  const { t } = useI18n();
   if (!references.length) return null;
 
-  // 收集所有使用的工具（去重）
-  const allTools = new Set<string>();
-  references.forEach(ref => {
-    ref.tools.forEach(tool => allTools.add(tool));
-  });
+  const maxTitleItems = 20;
 
-  const uniqueTools = Array.from(allTools);
+  const normalized = references
+    .map((ref) => {
+      const agent = (ref.agent || "").trim();
+      const tools = Array.from(new Set((ref.tools || []).map((x) => (x || "").trim()).filter(Boolean)));
+      return { agent, tools };
+    })
+    .filter((ref) => ref.agent && ref.tools.length);
+  if (!normalized.length) return null;
 
   return (
     <div className={cn("flex flex-wrap items-center gap-2 mt-3", className)}>
-      {uniqueTools.map((tool) => {
-        const { label, icon: Icon } = getToolDisplay(tool);
-        
-        return (
+      {normalized.length === 1 ? (
+        <Badge
+          variant="secondary"
+          className={cn(
+            "px-2.5 py-1 rounded-full",
+            "bg-background/60 backdrop-blur-sm",
+            "border border-border/40",
+            "text-xs font-normal text-muted-foreground",
+            "hover:bg-background/80 hover:border-border/60",
+            "transition-all duration-200",
+            "cursor-default"
+          )}
+          title={
+            normalized[0].tools.slice(0, maxTitleItems).join(", ") +
+            (normalized[0].tools.length > maxTitleItems ? `, +${normalized[0].tools.length - maxTitleItems}` : "")
+          }
+        >
+          <span>{t("chat.tool_invocations.badge_single", { count: normalized[0].tools.length })}</span>
+        </Badge>
+      ) : (
+        normalized.map(({ agent, tools }) => (
           <Badge
-            key={tool}
+            key={agent}
             variant="secondary"
             className={cn(
-              "group relative",
               "px-2.5 py-1 rounded-full",
               "bg-background/60 backdrop-blur-sm",
               "border border-border/40",
@@ -117,13 +72,14 @@ export function ToolReferences({ references, className }: ToolReferencesProps) {
               "transition-all duration-200",
               "cursor-default"
             )}
-            title={tool}
+            title={tools.slice(0, maxTitleItems).join(", ") + (tools.length > maxTitleItems ? `, +${tools.length - maxTitleItems}` : "")}
           >
-            <Icon className="size-3 mr-1.5 opacity-60" strokeWidth={2} />
-            <span>{label}</span>
+            <span className="max-w-[220px] truncate">
+              {t("chat.tool_invocations.badge_agent", { agent, count: tools.length })}
+            </span>
           </Badge>
-        );
-      })}
+        ))
+      )}
     </div>
   );
 }
@@ -133,12 +89,13 @@ export function ToolReferences({ references, className }: ToolReferencesProps) {
  * 当需要显示是哪个 Agent 调用的工具时使用
  */
 export function ToolReferencesGrouped({ references, className }: ToolReferencesProps) {
+  const { t } = useI18n();
   if (!references.length) return null;
 
   return (
     <div className={cn("space-y-2 mt-3", className)}>
       {references.map(({ agent, tools }) => {
-        const agentName = getAgentName(agent);
+        const agentName = agent;
         
         return (
           <div key={agent} className="flex flex-wrap items-center gap-2">
@@ -146,8 +103,7 @@ export function ToolReferencesGrouped({ references, className }: ToolReferencesP
               {agentName}:
             </span>
             {tools.map((tool) => {
-              const { label, icon: Icon } = getToolDisplay(tool);
-              
+              const label = tool;
               return (
                 <Badge
                   key={`${agent}-${tool}`}
@@ -164,8 +120,7 @@ export function ToolReferencesGrouped({ references, className }: ToolReferencesP
                   )}
                   title={tool}
                 >
-                  <Icon className="size-3 mr-1.5 opacity-60" strokeWidth={2} />
-                  <span>{label}</span>
+                  <span>{label || t("chat.tool_invocations.unknown_tool")}</span>
                 </Badge>
               );
             })}

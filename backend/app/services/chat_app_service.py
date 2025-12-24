@@ -1,15 +1,40 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.logging_config import logger
+from app.repositories.chat_repository import (
+    delete_message,
+    get_assistant_message,
+    get_last_run_for_message,
+    get_previous_user_message,
+    persist_run,
+    refresh_run,
+    save_conversation_title,
+)
 from app.services.bridge_gateway_client import BridgeGatewayClient
+
+
+def _log_timing(stage: str, start: float, request_id: str, extra: str = "") -> float:
+    """记录阶段耗时并返回当前时间戳，用于性能分析"""
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    extra_str = f" | {extra}" if extra else ""
+    logger.info(
+        "[CHAT_TIMING] %s | %s | %.2fms%s",
+        request_id,
+        stage,
+        elapsed_ms,
+        extra_str,
+        extra={"biz": "chat_timing"},
+    )
+    return time.perf_counter()
 from app.services.bridge_tool_runner import (
     BridgeToolInvocation,
     bridge_tools_by_agent_to_openai_tools,
@@ -204,6 +229,36 @@ def _truncate_title_input(value: str, *, max_len: int = 1000) -> str:
     return text[:max_len].rstrip()
 
 
+def _enqueue_auto_title_task(
+    *,
+    conversation_id: UUID,
+    message_id: UUID,
+    user_id: UUID,
+    assistant_id: UUID,
+    requested_model_for_title_fallback: str | None,
+) -> None:
+    """
+    将自动标题生成任务异步入队（Celery）。
+
+    仅在满足条件（首条消息且标题为空）时调用。
+    """
+    try:
+        from app.celery_app import celery_app
+
+        celery_app.send_task(
+            "tasks.generate_conversation_title",
+            args=[
+                str(conversation_id),
+                str(message_id),
+                str(user_id),
+                str(assistant_id),
+                requested_model_for_title_fallback or "",
+            ],
+        )
+    except Exception as exc:  # pragma: no cover - 入队失败不影响主流程
+        logger.warning("enqueue auto_title task failed: %s", exc, exc_info=exc)
+
+
 async def _maybe_auto_title_conversation(
     db: Session,
     *,
@@ -313,10 +368,7 @@ async def _maybe_auto_title_conversation(
     if not title:
         return
 
-    conv.title = title
-    db.add(conv)
-    db.commit()
-    db.refresh(conv)
+    save_conversation_title(db, conversation=conv, title=title)
 
 
 async def send_message_and_run_baseline(
@@ -339,8 +391,15 @@ async def send_message_and_run_baseline(
     Returns:
         (message_id, baseline_run_id)
     """
+    # === 性能计时开始 ===
+    request_id = f"msg_{uuid.uuid4().hex[:8]}"
+    t_total_start = time.perf_counter()
+    t_stage = t_total_start
+    logger.info("[CHAT_TIMING] %s | START | non-stream conversation_id=%s", request_id, conversation_id)
+
     conv = get_conversation(db, conversation_id=conversation_id, user_id=UUID(str(current_user.id)))
     ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
+    t_stage = _log_timing("1_get_conversation_context", t_stage, request_id)
 
     # 余额校验（沿用网关规则）
     try:
@@ -350,6 +409,7 @@ async def send_message_and_run_baseline(
             "积分不足",
             details={"code": "CREDIT_NOT_ENOUGH", "balance": exc.balance},
         )
+    t_stage = _log_timing("2_ensure_account_usable", t_stage, request_id)
 
     assistant = get_assistant(db, assistant_id=UUID(str(conv.assistant_id)), user_id=UUID(str(current_user.id)))
     requested_model = override_logical_model or assistant.default_logical_model
@@ -357,6 +417,7 @@ async def send_message_and_run_baseline(
         requested_model = (getattr(ctx.api_key, "chat_default_logical_model", None) or "").strip() or DEFAULT_PROJECT_CHAT_MODEL
     if not requested_model:
         raise bad_request("未指定模型")
+    t_stage = _log_timing("3_get_assistant_model", t_stage, request_id, f"model={requested_model}")
 
     cfg = get_or_default_project_eval_config(db, project_id=ctx.project_id)
 
@@ -366,6 +427,7 @@ async def send_message_and_run_baseline(
         api_key=ctx.api_key,
         provider_scopes=list(getattr(cfg, "provider_scopes", None) or DEFAULT_PROVIDER_SCOPES),
     )
+    t_stage = _log_timing("4_get_provider_ids", t_stage, request_id, f"count={len(effective_provider_ids)}")
 
     if requested_model == "auto":
         candidates = list(cfg.candidate_logical_models or [])
@@ -419,8 +481,11 @@ async def send_message_and_run_baseline(
                 details={"project_id": str(ctx.project_id)},
             )
         requested_model = rec.candidates[0].logical_model
+        t_stage = _log_timing("5_auto_model_selection", t_stage, request_id, f"selected={requested_model}")
 
     user_message = create_user_message(db, conversation=conv, content_text=content)
+    t_stage = _log_timing("6_create_user_message", t_stage, request_id)
+
     payload = build_openai_request_payload(
         db,
         conversation=conv,
@@ -429,6 +494,7 @@ async def send_message_and_run_baseline(
         requested_logical_model=requested_model,
         model_preset_override=model_preset,
     )
+    t_stage = _log_timing("7_build_payload", t_stage, request_id, f"messages_count={len(payload.get('messages', []))}")
 
     bridge_tools_by_agent: dict[str, list[dict[str, Any]]] = {}
     openai_tools: list[dict[str, Any]] = []
@@ -441,6 +507,7 @@ async def send_message_and_run_baseline(
     )
 
     if effective_bridge_agent_ids:
+        t_bridge_start = time.perf_counter()
         try:
             bridge = BridgeGatewayClient()
             for aid in effective_bridge_agent_ids:
@@ -469,6 +536,7 @@ async def send_message_and_run_baseline(
         except Exception:
             # Best-effort: do not block baseline chat if bridge tools cannot be loaded.
             openai_tools = []
+        t_stage = _log_timing("8_load_bridge_tools", t_bridge_start, request_id, f"agents={len(effective_bridge_agent_ids)} tools={len(openai_tools)}")
 
     run = create_run_record(
         db,
@@ -478,8 +546,10 @@ async def send_message_and_run_baseline(
         requested_logical_model=requested_model,
         request_payload=payload,
     )
+    t_stage = _log_timing("9_create_run_record", t_stage, request_id)
 
     auth_key = _to_authenticated_api_key(api_key=ctx.api_key, current_user=current_user)
+    t_upstream_start = time.perf_counter()
     run = await execute_run_non_stream(
         db,
         redis=redis,
@@ -494,6 +564,7 @@ async def send_message_and_run_baseline(
         model_preset_override=model_preset,
         payload_override=payload,
     )
+    t_stage = _log_timing("10_execute_run_upstream", t_upstream_start, request_id, f"status={run.status} provider={run.selected_provider_id}")
 
     # Tool-calling loop (best-effort; only when选择了 Agent).
     if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
@@ -606,9 +677,7 @@ async def send_message_and_run_baseline(
                     "first_response": run.response_payload,
                     "final_response": follow_response_payload,
                 }
-                db.add(run)
-                db.commit()
-                db.refresh(run)
+                run = persist_run(db, run)
 
     # baseline 成功时写入 assistant message，作为后续上下文
     if run.status == "succeeded" and run.output_text:
@@ -618,25 +687,28 @@ async def send_message_and_run_baseline(
             user_sequence=int(user_message.sequence or 0),
             content_text=run.output_text,
         )
+    t_stage = _log_timing("11_save_assistant_message", t_stage, request_id)
 
-    # Auto-title conversation based on the first user question (best-effort)
+    # Auto-title conversation based on the first user question（异步入队，避免阻塞主流程）
+    t_title_start = time.perf_counter()
     try:
         if int(user_message.sequence or 0) == 1 and not (conv.title or "").strip():
-            await _maybe_auto_title_conversation(
-                db,
-                redis=redis,
-                client=client,
-                current_user=current_user,
-                conv=conv,
-                assistant=assistant,
-                effective_provider_ids=effective_provider_ids,
-                user_text=content,
-                user_sequence=int(user_message.sequence or 0),
+            _enqueue_auto_title_task(
+                conversation_id=UUID(str(conv.id)),
+                message_id=UUID(str(user_message.id)),
+                user_id=UUID(str(current_user.id)),
+                assistant_id=UUID(str(assistant.id)),
                 requested_model_for_title_fallback=requested_model,
             )
+            _log_timing("12_auto_title_enqueued", t_title_start, request_id)
     except Exception:  # pragma: no cover - best-effort only
         # Never break the main chat flow for title generation.
         pass
+
+    # === 性能计时结束 ===
+    total_ms = (time.perf_counter() - t_total_start) * 1000
+    logger.info("[CHAT_TIMING] %s | TOTAL | %.2fms | model=%s provider=%s status=%s",
+                request_id, total_ms, requested_model, run.selected_provider_id, run.status)
 
     return UUID(str(user_message.id)), UUID(str(run.id))
 
@@ -660,8 +732,15 @@ async def stream_message_and_run_baseline(
 
     注意：流式模式同样支持 bridge 工具调用（tool loop 在流式回复结束后进行补充调用）。
     """
+    # === 性能计时开始 ===
+    request_id = f"stream_{uuid.uuid4().hex[:8]}"
+    t_total_start = time.perf_counter()
+    t_stage = t_total_start
+    logger.info("[CHAT_TIMING] %s | START | stream conversation_id=%s", request_id, conversation_id)
+
     conv = get_conversation(db, conversation_id=conversation_id, user_id=UUID(str(current_user.id)))
     ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
+    t_stage = _log_timing("1_get_conversation_context", t_stage, request_id)
 
     try:
         ensure_account_usable(db, user_id=UUID(str(current_user.id)))
@@ -670,6 +749,7 @@ async def stream_message_and_run_baseline(
             "积分不足",
             details={"code": "CREDIT_NOT_ENOUGH", "balance": exc.balance},
         )
+    t_stage = _log_timing("2_ensure_account_usable", t_stage, request_id)
 
     assistant = get_assistant(db, assistant_id=UUID(str(conv.assistant_id)), user_id=UUID(str(current_user.id)))
     requested_model = override_logical_model or assistant.default_logical_model
@@ -677,6 +757,7 @@ async def stream_message_and_run_baseline(
         requested_model = (getattr(ctx.api_key, "chat_default_logical_model", None) or "").strip() or DEFAULT_PROJECT_CHAT_MODEL
     if not requested_model:
         raise bad_request("未指定模型")
+    t_stage = _log_timing("3_get_assistant_model", t_stage, request_id, f"model={requested_model}")
 
     cfg = get_or_default_project_eval_config(db, project_id=ctx.project_id)
     effective_provider_ids = get_effective_provider_ids_for_user(
@@ -685,6 +766,7 @@ async def stream_message_and_run_baseline(
         api_key=ctx.api_key,
         provider_scopes=list(getattr(cfg, "provider_scopes", None) or DEFAULT_PROVIDER_SCOPES),
     )
+    t_stage = _log_timing("4_get_provider_ids", t_stage, request_id, f"count={len(effective_provider_ids)}")
 
     if requested_model == "auto":
         candidates = list(cfg.candidate_logical_models or [])
@@ -734,6 +816,7 @@ async def stream_message_and_run_baseline(
                 details={"project_id": str(ctx.project_id)},
             )
         requested_model = rec.candidates[0].logical_model
+        t_stage = _log_timing("5_auto_model_selection", t_stage, request_id, f"selected={requested_model}")
 
     user_message = create_user_message(db, conversation=conv, content_text=content)
     assistant_message = create_assistant_message_placeholder_after_user(
@@ -741,6 +824,7 @@ async def stream_message_and_run_baseline(
         conversation_id=UUID(str(conv.id)),
         user_sequence=int(user_message.sequence or 0),
     )
+    t_stage = _log_timing("6_create_messages", t_stage, request_id)
 
     payload = build_openai_request_payload(
         db,
@@ -750,6 +834,7 @@ async def stream_message_and_run_baseline(
         requested_logical_model=requested_model,
         model_preset_override=model_preset,
     )
+    t_stage = _log_timing("7_build_payload", t_stage, request_id, f"messages_count={len(payload.get('messages', []))}")
 
     bridge_tools_by_agent: dict[str, list[dict[str, Any]]] = {}
     openai_tools: list[dict[str, Any]] = []
@@ -762,6 +847,7 @@ async def stream_message_and_run_baseline(
     )
 
     if effective_bridge_agent_ids:
+        t_bridge_start = time.perf_counter()
         try:
             bridge = BridgeGatewayClient()
             for aid in effective_bridge_agent_ids:
@@ -790,6 +876,7 @@ async def stream_message_and_run_baseline(
         except Exception:
             # Best-effort：加载失败不阻塞基线流式
             openai_tools = []
+        t_stage = _log_timing("8_load_bridge_tools", t_bridge_start, request_id, f"agents={len(effective_bridge_agent_ids)} tools={len(openai_tools)}")
 
     run = create_run_record(
         db,
@@ -799,6 +886,11 @@ async def stream_message_and_run_baseline(
         requested_logical_model=requested_model,
         request_payload=payload,
     )
+    t_stage = _log_timing("9_create_run_record", t_stage, request_id)
+
+    # 记录准备阶段总耗时
+    prep_ms = (time.perf_counter() - t_total_start) * 1000
+    logger.info("[CHAT_TIMING] %s | PREP_COMPLETE | %.2fms | ready_to_stream", request_id, prep_ms)
 
     yield _encode_sse_event(
         event_type="message.created",
@@ -814,6 +906,8 @@ async def stream_message_and_run_baseline(
     auth_key = _to_authenticated_api_key(api_key=ctx.api_key, current_user=current_user)
     parts: list[str] = []
     errored = False
+    t_stream_start = time.perf_counter()
+    first_chunk_received = False
 
     async for item in execute_run_stream(
         db,
@@ -835,6 +929,9 @@ async def stream_message_and_run_baseline(
         if itype == "run.delta":
             delta = item.get("delta")
             if isinstance(delta, str) and delta:
+                if not first_chunk_received:
+                    first_chunk_received = True
+                    _log_timing("10_first_chunk_received", t_stream_start, request_id)
                 parts.append(delta)
                 yield _encode_sse_event(
                     event_type="message.delta",
@@ -861,7 +958,8 @@ async def stream_message_and_run_baseline(
             )
             break
 
-    db.refresh(run)
+    t_stage = _log_timing("11_stream_complete", t_stream_start, request_id, f"chunks={len(parts)} errored={errored}")
+    run = refresh_run(db, run)
 
     # Tool-calling loop（流式结束后补充执行）
     if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
@@ -973,9 +1071,7 @@ async def stream_message_and_run_baseline(
                     "first_response": run.response_payload,
                     "final_response": follow_response_payload,
                 }
-                db.add(run)
-                db.commit()
-                db.refresh(run)
+                run = persist_run(db, run)
 
                 # 补充一次 delta，前端能够看到工具调用后的最终回复
                 if delta_text:
@@ -999,23 +1095,25 @@ async def stream_message_and_run_baseline(
             content_text=run.output_text,
         )
 
-    # Auto-title conversation (best-effort, same as non-streaming path)
+    # Auto-title conversation（异步入队，避免阻塞流式尾部）
+    t_title_start = time.perf_counter()
     try:
         if int(user_message.sequence or 0) == 1 and not (getattr(conv, "title", None) or "").strip():
-            await _maybe_auto_title_conversation(
-                db,
-                redis=redis,
-                client=client,
-                current_user=current_user,
-                conv=conv,
-                assistant=assistant,
-                effective_provider_ids=effective_provider_ids,
-                user_text=content,
-                user_sequence=int(user_message.sequence or 0),
+            _enqueue_auto_title_task(
+                conversation_id=UUID(str(conv.id)),
+                message_id=UUID(str(user_message.id)),
+                user_id=UUID(str(current_user.id)),
+                assistant_id=UUID(str(assistant.id)),
                 requested_model_for_title_fallback=requested_model,
             )
+            _log_timing("12_auto_title_enqueued", t_title_start, request_id)
     except Exception:  # pragma: no cover - best-effort only
         pass
+
+    # === 性能计时结束 ===
+    total_ms = (time.perf_counter() - t_total_start) * 1000
+    logger.info("[CHAT_TIMING] %s | TOTAL | %.2fms | model=%s provider=%s status=%s chunks=%d",
+                request_id, total_ms, requested_model, run.selected_provider_id, run.status, len(parts))
 
     yield _encode_sse_event(
         event_type="message.completed" if run.status == "succeeded" else "message.failed",
@@ -1046,24 +1144,13 @@ async def regenerate_assistant_message(
     - 删除原有 assistant 消息（避免重复显示）
     - 重新执行 baseline run，生成新的 assistant 消息
     """
-    assistant_msg = db.get(Message, assistant_message_id)
+    assistant_msg = get_assistant_message(db, assistant_message_id)
     if assistant_msg is None or str(assistant_msg.role or "") != "assistant":
         raise bad_request("只支持对助手消息重试", details={"message_id": str(assistant_message_id)})
 
     conv = get_conversation(db, conversation_id=UUID(str(assistant_msg.conversation_id)), user_id=UUID(str(current_user.id)))
 
-    user_msg = (
-        db.execute(
-            select(Message)
-            .where(
-                Message.conversation_id == assistant_msg.conversation_id,
-                Message.sequence == int(assistant_msg.sequence) - 1,
-                Message.role == "user",
-            )
-        )
-        .scalars()
-        .first()
-    )
+    user_msg = get_previous_user_message(db, assistant_msg)
     if user_msg is None:
         raise bad_request("未找到对应的用户消息，无法重试", details={"assistant_message_id": str(assistant_message_id)})
 
@@ -1074,8 +1161,7 @@ async def regenerate_assistant_message(
         raise bad_request("用户消息内容为空，无法重试", details={"assistant_message_id": str(assistant_message_id)})
 
     # 删除原 assistant 消息，避免历史残留
-    db.delete(assistant_msg)
-    db.commit()
+    delete_message(db, assistant_msg)
 
     ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
 
@@ -1090,16 +1176,7 @@ async def regenerate_assistant_message(
     assistant = get_assistant(db, assistant_id=UUID(str(conv.assistant_id)), user_id=UUID(str(current_user.id)))
 
     # 复用上一条 run 的模型，否则按默认/项目回退
-    last_run = (
-        db.execute(
-            select(Run)
-            .where(Run.message_id == user_msg.id)
-            .order_by(Run.created_at.desc())
-            .limit(1)
-        )
-        .scalars()
-        .first()
-    )
+    last_run = get_last_run_for_message(db, user_msg.id)
     requested_model = last_run.requested_logical_model if last_run else assistant.default_logical_model
     if requested_model == PROJECT_INHERIT_SENTINEL:
         requested_model = (getattr(ctx.api_key, "chat_default_logical_model", None) or "").strip() or DEFAULT_PROJECT_CHAT_MODEL

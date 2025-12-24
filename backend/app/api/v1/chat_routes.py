@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import json
+import time
 import uuid
 from typing import Any
 
@@ -46,6 +47,20 @@ from app.settings import settings
 from app.upstream import detect_request_format
 
 router = APIRouter(tags=["chat"])
+
+
+def _log_timing(stage: str, start: float, request_id: str, extra: str = "") -> float:
+    """记录阶段耗时并返回当前时间戳"""
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    extra_str = f" [{extra}]" if extra else ""
+    logger.info(
+        "[TIMING] %s | %s | %.2fms%s",
+        request_id,
+        stage,
+        elapsed_ms,
+        extra_str,
+    )
+    return time.perf_counter()
 
 
 @router.post("/v1/chat/completions")

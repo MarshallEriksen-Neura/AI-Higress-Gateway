@@ -39,6 +39,7 @@ celery_app.conf.update(
     imports=(
         "app.tasks",
         "app.tasks.registration",
+        "app.tasks.conversation_title",
         "app.tasks.api_key_health",
         "app.tasks.session_maintenance",
         "app.tasks.credit_billing",

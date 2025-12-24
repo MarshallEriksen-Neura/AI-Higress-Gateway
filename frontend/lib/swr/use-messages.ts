@@ -4,9 +4,10 @@ import useSWR, { useSWRConfig } from 'swr';
 import { useMemo } from 'react';
 import { messageService } from '@/http/message';
 import { streamSSERequest } from '@/lib/bridge/sse';
+import { useBridgeAgents } from '@/lib/swr/use-bridge';
 import { SWRCacheManager, cacheStrategies } from './cache';
 import { ErrorHandler } from '@/lib/errors';
-import { useChatStore } from '@/lib/stores/chat-store';
+import { useConversationPending } from '@/lib/hooks/use-conversation-pending';
 import type {
   GetMessagesParams,
   MessagesResponse,
@@ -109,6 +110,17 @@ export function useSendMessageToConversation(
   overrideLogicalModel?: string | null
 ) {
   const { mutate: globalMutate } = useSWRConfig();
+  const { agents: bridgeAgents } = useBridgeAgents();
+  const { setPending } = useConversationPending();
+
+  const availableBridgeAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const agent of bridgeAgents || []) {
+      const id = typeof agent.agent_id === 'string' ? agent.agent_id.trim() : '';
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [bridgeAgents]);
 
   return async (
     conversationId: string,
@@ -120,23 +132,73 @@ export function useSendMessageToConversation(
     // 使用字符串 key 确保与 MessageList/useMessages 默认第一页一致（limit=50）
     const messagesKey = `/v1/conversations/${conversationId}/messages?limit=50`;
     const wantsStreaming = !!options?.streaming;
-    const markPending = (pending: boolean) =>
-      useChatStore.getState().setConversationPending(conversationId, pending);
+    const markPending = (pending: boolean) => setPending(conversationId, pending);
     const shouldShowPendingLoader = true;
 
     try {
       if (shouldShowPendingLoader) {
         markPending(true);
       }
-      const payload: SendMessageRequest = { ...request };
+      const sanitizeBridgePayload = (raw: SendMessageRequest): SendMessageRequest => {
+        // 若当前无可用 Bridge Agent，则不携带 bridge 字段，避免错误降级/空调用
+        if (!availableBridgeAgentIds.size) {
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          const { bridge_agent_id, bridge_agent_ids, bridge_tool_selections, ...rest } = raw;
+          return { ...rest };
+        }
+
+        const filterId = (value: unknown): string | null => {
+          const v = typeof value === 'string' ? value.trim() : '';
+          return v && availableBridgeAgentIds.has(v) ? v : null;
+        };
+
+        const filteredAgentIds = Array.isArray(raw.bridge_agent_ids)
+          ? raw.bridge_agent_ids
+              .map((id) => filterId(id))
+              .filter((id): id is string => !!id)
+          : [];
+
+        const singleAgentId = filterId(raw.bridge_agent_id);
+
+        const filteredToolSelections = Array.isArray(raw.bridge_tool_selections)
+          ? raw.bridge_tool_selections
+              .map((sel) => {
+                const agentId = filterId((sel as any)?.agent_id);
+                if (!agentId) return null;
+                const names = Array.isArray((sel as any)?.tool_names)
+                  ? (sel as any).tool_names
+                      .map((n: unknown) => (typeof n === 'string' ? n.trim() : ''))
+                      .filter(Boolean)
+                  : [];
+                if (!names.length) return null;
+                return { agent_id: agentId, tool_names: names };
+              })
+              .filter((x): x is { agent_id: string; tool_names: string[] } => !!x)
+          : [];
+
+        const next: SendMessageRequest = {
+          ...raw,
+          bridge_agent_id: singleAgentId ?? undefined,
+          bridge_agent_ids: filteredAgentIds.length ? filteredAgentIds : undefined,
+          bridge_tool_selections: filteredToolSelections.length ? filteredToolSelections : undefined,
+        };
+
+        // 如果经过过滤后没有任何有效的 bridge 选择，则删除相关字段
+        if (!next.bridge_agent_id && !next.bridge_agent_ids && !next.bridge_tool_selections) {
+          delete (next as any).bridge_agent_id;
+          delete (next as any).bridge_agent_ids;
+          delete (next as any).bridge_tool_selections;
+        }
+
+        return next;
+      };
+
+      const payload: SendMessageRequest = sanitizeBridgePayload({ ...request });
       if (overrideLogicalModel) {
         payload.override_logical_model = overrideLogicalModel;
       }
-      const hasBridgeTools =
-        !!payload.bridge_agent_id ||
-        (Array.isArray(payload.bridge_agent_ids) && payload.bridge_agent_ids.length > 0);
 
-      if (wantsStreaming && !hasBridgeTools) {
+      if (wantsStreaming) {
         const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
         const tempUserMessageId = `temp-${nonce}`;
         const tempAssistantMessageId = `temp-assistant-${nonce}`;

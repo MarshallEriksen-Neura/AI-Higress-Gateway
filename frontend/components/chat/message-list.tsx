@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Bot, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
 import { toast } from "sonner";
@@ -18,9 +18,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MessageItem } from "./message-item";
-import { MessageBubble } from "./message-bubble";
 import { ErrorAlert } from "./error-alert";
 import { AddComparisonDialog } from "./add-comparison-dialog";
+import { ConversationPendingIndicator } from "./conversation-pending-indicator";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors/error-display";
 import { useMessages } from "@/lib/swr/use-messages";
@@ -32,6 +32,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useAssistant } from "@/lib/swr/use-assistants";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useConversationPending } from "@/lib/hooks/use-conversation-pending";
 import {
   useChatComparisonStore,
   type ComparisonVariant,
@@ -69,6 +70,7 @@ export const MessageList = memo(function MessageList({
   const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
   const isPendingResponse =
     useChatStore((s) => s.conversationPending[conversationId]) ?? false;
+  const { runWithPending } = useConversationPending();
 
   const deleteConversation = useDeleteConversation();
 
@@ -233,9 +235,11 @@ export const MessageList = memo(function MessageList({
     if (!isPendingResponse) return displayRows;
     return displayRows.filter(
       (row) =>
-        row.message.role !== "assistant" || (row.message.content || "").trim().length > 0
+        row.message.role !== "assistant" ||
+        row.message.message_id === regeneratingId ||
+        (row.message.content || "").trim().length > 0
     );
-  }, [displayRows, isPendingResponse]);
+  }, [displayRows, isPendingResponse, regeneratingId]);
 
   const latestAssistantMessageId = useMemo(() => {
     for (let idx = renderRows.length - 1; idx >= 0; idx -= 1) {
@@ -256,8 +260,25 @@ export const MessageList = memo(function MessageList({
         return next;
       });
       try {
-        await messageService.regenerateMessage(assistantMessageId);
-        await mutateMessages();
+        // 先在本地清空该条 assistant 内容，避免“旧答案”残留影响观感
+        setAllMessages((prev) =>
+          prev.map((item) => {
+            if (item.message.message_id !== assistantMessageId) return item;
+            if (item.message.role !== "assistant") return item;
+            return {
+              ...item,
+              message: { ...item.message, content: "" },
+            };
+          })
+        );
+        await runWithPending(
+          conversationId,
+          async () => {
+            await messageService.regenerateMessage(assistantMessageId);
+            await mutateMessages();
+          },
+          { minDurationMs: 250 }
+        );
       } catch (error) {
         console.error("Failed to regenerate message", error);
         const message =
@@ -269,7 +290,7 @@ export const MessageList = memo(function MessageList({
         setRegeneratingId(null);
       }
     },
-    [mutateMessages, t]
+    [conversationId, mutateMessages, runWithPending, t]
   );
 
   const handleDeleteMessage = useCallback(
@@ -666,40 +687,8 @@ export const MessageList = memo(function MessageList({
         </div>
       )}
 
-      {/* 非流式等待回复时的趣味 loading */}
-      {isPendingResponse && (
-        <div className="px-4 pb-6">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 mt-1">
-              <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary ring-2 ring-white/50 shadow-lg">
-                <Bot className="size-6" aria-hidden="true" />
-              </div>
-            </div>
-            <div className="max-w-[80%]">
-              <MessageBubble role="assistant">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <div
-                        key={i}
-                        className="size-2.5 rounded-full animate-pulse"
-                        style={{
-                          background: `hsl(${200 + i * 30}, 70%, 60%)`,
-                          animationDelay: `${i * 0.15}s`,
-                          animationDuration: '1.2s',
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Typing...
-                  </div>
-                </div>
-              </MessageBubble>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 等待回复时的 loading（非流式 / 流式首包前 / 重新生成） */}
+      <ConversationPendingIndicator conversationId={conversationId} />
 
       <AddComparisonDialog
         open={compareDialogOpen}

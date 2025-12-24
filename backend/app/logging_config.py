@@ -156,6 +156,11 @@ def infer_log_business(record: logging.LogRecord) -> str:
     We rely on record.pathname (callsite) because most modules import the shared
     `logger` instance (name always "apiproxy"), so record.name is not enough.
     """
+    # Honor explicitly assigned biz (e.g. logger.info(..., extra={"biz": "chat_timing"})).
+    existing_biz = getattr(record, "biz", None)
+    if isinstance(existing_biz, str) and existing_biz.strip():
+        return existing_biz.strip()
+
     name = record.name or ""
     if name.startswith("uvicorn.access"):
         return "access"
