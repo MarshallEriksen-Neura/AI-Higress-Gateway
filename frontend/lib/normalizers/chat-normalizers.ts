@@ -130,6 +130,58 @@ export function normalizeConversationsResponse(
  * @param content - 后端返回的消息内容结构
  * @returns 前端使用的消息内容字符串
  */
+function extractUrl(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed || null;
+  }
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const nested = record.url ?? record.image_url ?? record.imageUrl;
+    if (typeof nested === 'string') {
+      const trimmed = nested.trim();
+      if (trimmed) return trimmed;
+    }
+  }
+  return null;
+}
+
+function stringifyContentSegment(segment: any): string {
+  if (!segment) return '';
+  if (typeof segment === 'string') return segment;
+  if (typeof segment !== 'object') return '';
+
+  const type = typeof segment.type === 'string' ? segment.type.toLowerCase() : '';
+  const text = typeof segment.text === 'string' ? segment.text : '';
+
+  if (text && (!type || type === 'text')) {
+    return text;
+  }
+
+  const imageUrl =
+    extractUrl(segment.image_url) ??
+    extractUrl(segment.imageUrl);
+  if (imageUrl && (type === 'image' || type === 'image_url' || type === 'input_image')) {
+    return imageUrl;
+  }
+
+  const fileUrl = extractUrl(segment.file_url) ?? extractUrl(segment.fileUrl);
+  if (fileUrl && type === 'file') {
+    return `[文件: ${fileUrl}]`;
+  }
+
+  if (text) {
+    return text;
+  }
+  if (imageUrl) {
+    return imageUrl;
+  }
+  if (fileUrl) {
+    return `[文件: ${fileUrl}]`;
+  }
+  return '';
+}
+
 export function normalizeMessageContent(content: MessageContent | unknown): string {
   // 兼容后端返回字符串或未知结构，尽量保留已有文本，避免回流时把流式内容清空
   if (typeof content === 'string') {
@@ -138,15 +190,9 @@ export function normalizeMessageContent(content: MessageContent | unknown): stri
 
   if (Array.isArray(content)) {
     const merged = content
-      .map((item) => {
-        if (typeof item === 'string') return item;
-        if (item && typeof item === 'object' && typeof (item as any).text === 'string') {
-          return (item as any).text as string;
-        }
-        return '';
-      })
+      .map((item) => stringifyContentSegment(item))
       .filter(Boolean)
-      .join('');
+      .join('\n\n');
     if (merged) return merged;
   }
 
@@ -157,15 +203,8 @@ export function normalizeMessageContent(content: MessageContent | unknown): stri
     return record.text;
   }
 
-  if ((record as unknown as MessageContent).type === 'text') {
-    return typeof record.text === 'string' ? record.text : '';
-  }
-  if ((record as unknown as MessageContent).type === 'image') {
-    return `[图片: ${(record as unknown as MessageContent).image_url}]`;
-  }
-  if ((record as unknown as MessageContent).type === 'file') {
-    return `[文件: ${(record as unknown as MessageContent).file_url}]`;
-  }
+  const single = stringifyContentSegment(record);
+  if (single) return single;
 
   return '';
 }

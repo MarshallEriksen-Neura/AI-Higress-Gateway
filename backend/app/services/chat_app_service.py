@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.services.bridge_gateway_client import BridgeGatewayClient
@@ -27,7 +28,7 @@ from app.api.v1.chat.request_handler import RequestHandler
 from app.auth import AuthenticatedAPIKey
 from app.errors import bad_request
 from app.jwt_auth import AuthenticatedUser
-from app.models import APIKey
+from app.models import APIKey, Message, Run
 from app.services.bandit_policy_service import recommend_challengers
 from app.services.chat_history_service import (
     create_assistant_message_after_user,
@@ -239,6 +240,10 @@ async def _maybe_auto_title_conversation(
     ctx = resolve_project_context(db, project_id=UUID(str(conv.api_key_id)), current_user=current_user)
 
     title_model_raw = (getattr(assistant, "title_logical_model", None) or "").strip()
+    if not title_model_raw:
+        title_model_raw = (getattr(assistant, "default_logical_model", None) or "").strip()
+    if not title_model_raw:
+        title_model_raw = (requested_model_for_title_fallback or "").strip()
     if not title_model_raw:
         return
 

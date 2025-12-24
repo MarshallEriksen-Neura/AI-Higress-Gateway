@@ -59,9 +59,9 @@ export interface ConversationsResponseBackend {
  * 后端返回的是结构化对象，而非字符串
  */
 export interface MessageContent {
-  type: 'text' | 'image' | 'file';
+  type: 'text' | 'image' | 'image_url' | 'input_image' | 'file';
   text?: string;
-  image_url?: string;
+  image_url?: string | { url?: string };
   file_url?: string;
 }
 

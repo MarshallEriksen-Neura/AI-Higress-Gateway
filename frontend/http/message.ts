@@ -16,7 +16,8 @@ import {
   type RunDetailBackend,
 } from '@/lib/normalizers/chat-normalizers';
 
-const SEND_MESSAGE_TIMEOUT_MS = 120_000;
+// 非流式请求可能等待较长生成时间，适当放宽超时避免大模型长回复被前端中断
+const SEND_MESSAGE_TIMEOUT_MS = 300_000;
 
 /**
  * 消息和 Run 管理服务
