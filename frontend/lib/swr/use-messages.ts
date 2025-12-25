@@ -442,9 +442,7 @@ export function useSendMessageToConversation(
               if (finalRun) baselineRun = finalRun;
 
               const outputText = getString(rec, 'output_text');
-              if (!assistantText && outputText) {
-                assistantText = outputText;
-              }
+              if (outputText) assistantText = outputText;
 
               void globalMutate(
                 messagesKey,

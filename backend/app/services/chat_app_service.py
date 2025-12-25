@@ -27,7 +27,7 @@ from app.services.bridge_tool_runner import (
     invoke_bridge_tool_and_wait,
 )
 from app.services.run_event_bus import build_run_event_envelope, publish_run_event_best_effort
-from app.services.tool_loop_runner import ToolLoopRunner
+from app.services.tool_loop_runner import ToolLoopRunner, split_text_into_deltas
 
 try:
     from redis.asyncio import Redis
@@ -1028,13 +1028,17 @@ async def send_message_and_run_baseline(
     # Tool-calling loop（兼容模式：仍是请求内执行，但过程写入 RunEvent 作为真相）。
     if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
         t_tool_loop_start = time.perf_counter()
+        tool_loop_provider_ids = effective_provider_ids
+        pinned_provider_id = str(getattr(run, "selected_provider_id", None) or "").strip()
+        if pinned_provider_id and pinned_provider_id in tool_loop_provider_ids:
+            tool_loop_provider_ids = {pinned_provider_id}
 
         runner = _create_standard_tool_loop_runner(
             db=db,
             redis=redis,
             client=client,
             auth_key=auth_key,
-            effective_provider_ids=effective_provider_ids,
+            effective_provider_ids=tool_loop_provider_ids,
             conversation_id=str(conv.id),
             assistant_id=UUID(str(getattr(assistant, "id", None))) if getattr(assistant, "id", None) else None,
             requested_model=requested_model,
@@ -1344,13 +1348,17 @@ async def stream_message_and_run_baseline(
     # Tool-calling loop（流式结束后补充执行）
     if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
         t_tool_loop_start = time.perf_counter()
+        tool_loop_provider_ids = effective_provider_ids
+        pinned_provider_id = str(getattr(run, "selected_provider_id", None) or "").strip()
+        if pinned_provider_id and pinned_provider_id in tool_loop_provider_ids:
+            tool_loop_provider_ids = {pinned_provider_id}
 
         runner = _create_standard_tool_loop_runner(
             db=db,
             redis=redis,
             client=client,
             auth_key=auth_key,
-            effective_provider_ids=effective_provider_ids,
+            effective_provider_ids=tool_loop_provider_ids,
             conversation_id=str(conv.id),
             assistant_id=UUID(str(getattr(assistant, "id", None))) if getattr(assistant, "id", None) else None,
             requested_model=requested_model,
@@ -1403,17 +1411,19 @@ async def stream_message_and_run_baseline(
             run = persist_run(db, run)
 
             if delta_text:
-                parts = [delta_text]
-                yield _encode_sse_event(
-                    event_type="message.delta",
-                    data={
-                        "type": "message.delta",
-                        "conversation_id": str(conv.id),
-                        "assistant_message_id": str(assistant_message.id),
-                        "run_id": str(run.id),
-                        "delta": delta_text,
-                    },
-                )
+                parts = []
+                for chunk in split_text_into_deltas(delta_text):
+                    parts.append(chunk)
+                    yield _encode_sse_event(
+                        event_type="message.delta",
+                        data={
+                            "type": "message.delta",
+                            "conversation_id": str(conv.id),
+                            "assistant_message_id": str(assistant_message.id),
+                            "run_id": str(run.id),
+                            "delta": chunk,
+                        },
+                    )
 
     if not errored and run.status == "succeeded" and run.output_text:
         finalize_assistant_message_after_user_sequence(
@@ -1589,12 +1599,17 @@ async def regenerate_assistant_message(
     )
 
     if run.status == "succeeded" and effective_bridge_agent_ids and openai_tools:
+        tool_loop_provider_ids = effective_provider_ids
+        pinned_provider_id = str(getattr(run, "selected_provider_id", None) or "").strip()
+        if pinned_provider_id and pinned_provider_id in tool_loop_provider_ids:
+            tool_loop_provider_ids = {pinned_provider_id}
+
         runner = _create_standard_tool_loop_runner(
             db=db,
             redis=redis,
             client=client,
             auth_key=auth_key,
-            effective_provider_ids=effective_provider_ids,
+            effective_provider_ids=tool_loop_provider_ids,
             conversation_id=str(conv.id),
             assistant_id=UUID(str(getattr(assistant, "id", None))) if getattr(assistant, "id", None) else None,
             requested_model=requested_model,
