@@ -159,6 +159,17 @@ _THINK_BLOCK_RE = re.compile(r"<think>[\s\S]*?</think>", re.IGNORECASE)
 _THINK_UNCLOSED_RE = re.compile(r"<think>[\s\S]*\Z", re.IGNORECASE)
 _THINK_CLOSE_TAG_RE = re.compile(r"</think>", re.IGNORECASE)
 
+# Common wrapping quote pairs for generated titles.
+_TITLE_QUOTE_PAIRS: dict[str, str] = {
+    '"': '"',
+    "'": "'",
+    "“": "”",
+    "‘": "’",
+    "《": "》",
+    "「": "」",
+    "『": "』",
+}
+
 _TOOL_TAG_STREAM_TRIGGER_RE = re.compile(
     r"(FUNC_TRIGGER_[^\s]*?_END|<function_calls>|<function_call>)",
     re.IGNORECASE,
@@ -230,7 +241,12 @@ def _sanitize_conversation_title(value: str) -> str:
         return ""
 
     # Remove common wrapping quotes
-    if len(title) >= 2 and title[0] == title[-1] and title[0] in {"'", '"', "“", "”", "‘", "’", "《", "》"}:
+    while len(title) >= 2:
+        first = title[0]
+        last = title[-1]
+        expected_last = _TITLE_QUOTE_PAIRS.get(first)
+        if expected_last is None or expected_last != last:
+            break
         title = title[1:-1].strip()
 
     # Collapse whitespace
