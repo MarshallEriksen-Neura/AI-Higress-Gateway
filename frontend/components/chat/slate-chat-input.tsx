@@ -1,26 +1,24 @@
 "use client";
 
-import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import type { ClipboardEvent, KeyboardEvent } from "react";
 import { createEditor, Descendant, Editor, Transforms, Element as SlateElement } from "slate";
 import { withReact, ReactEditor } from "slate-react";
 import { withHistory } from "slate-history";
-import { useSize, useDebounceFn } from "ahooks";
+import { toast } from "sonner";
+
 import { useI18n } from "@/lib/i18n-context";
+import { useChatModelParametersStore } from "@/lib/stores/chat-model-parameters-store";
 import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
 import { cn } from "@/lib/utils";
-import { toast } from "sonner";
+
+import { ChatEditor } from "./chat-input/chat-editor";
+import { ChatToolbar } from "./chat-input/chat-toolbar";
 import { ImagePreviewGrid } from "./chat-input/image-attachments";
 import { buildModelPreset } from "./chat-input/model-preset";
 import { encodeImageFileToCompactDataUrl } from "./chat-input/image-encoding";
 import { composeMessageContent, isMessageTooLong } from "./chat-input/message-content";
-import { ChatEditor } from "./chat-input/chat-editor";
-import { ChatToolbar } from "./chat-input/chat-toolbar";
-import {
-  DEFAULT_MODEL_PARAMETERS,
-  type ModelParameters,
-} from "./chat-input/types";
-import type { ModelParameterEnabled } from "./chat-input/model-parameters-popover";
+import type { ModelParameters } from "./chat-input/types";
 
 export type { ModelParameters } from "./chat-input/types";
 
@@ -62,7 +60,6 @@ export interface SlateChatInputProps {
       ) => Promise<void>);
   onClearHistory?: () => Promise<void>;
   className?: string;
-  defaultParameters?: Partial<ModelParameters>;
 }
 
 export function SlateChatInput({
@@ -71,7 +68,6 @@ export function SlateChatInput({
   onSend,
   onClearHistory,
   className,
-  defaultParameters = {},
 }: SlateChatInputProps) {
   const { t } = useI18n();
   const { preferences } = useUserPreferencesStore();
@@ -80,23 +76,12 @@ export function SlateChatInput({
   const [isClearing, setIsClearing] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
   const [images, setImages] = useState<string[]>([]);
-  const containerRef = useRef<HTMLDivElement>(null);
   const editorRef = useRef<HTMLDivElement>(null);
-  
-  // 监听容器大小变化
-  const containerSize = useSize(containerRef);
-  
-  // 模型参数状态
-  const [parameters, setParameters] = useState<ModelParameters>({
-    ...DEFAULT_MODEL_PARAMETERS,
-    ...defaultParameters,
-  });
-  const [paramEnabled, setParamEnabled] = useState<ModelParameterEnabled>({
-    temperature: false,
-    top_p: false,
-    frequency_penalty: false,
-    presence_penalty: false,
-  });
+
+  // 模型参数状态（持久化）：用户设置后后续每次发送都会沿用
+  const parameters = useChatModelParametersStore((s) => s.parameters);
+  const setParameters = useChatModelParametersStore((s) => s.setParameters);
+  const resetModelParameters = useChatModelParametersStore((s) => s.reset);
 
   // 初始化编辑器内容
   const initialValue: Descendant[] = useMemo(
@@ -108,31 +93,6 @@ export function SlateChatInput({
     ],
     []
   );
-
-  // 防抖调整编辑器高度
-  const { run: adjustEditorHeight } = useDebounceFn(
-    () => {
-      if (!editorRef.current || !containerSize) return;
-      
-      // 计算可用高度：容器高度 - 工具栏高度(约44px) - padding
-      const toolbarHeight = 44;
-      const padding = 32; // 上下 padding
-      const availableHeight = (containerSize.height || 0) - toolbarHeight - padding;
-      
-      // 设置最小高度为3行（约72px），最大为可用高度
-      const minHeight = 72;
-      const maxHeight = Math.max(minHeight, availableHeight);
-      
-      editorRef.current.style.minHeight = `${minHeight}px`;
-      editorRef.current.style.maxHeight = `${maxHeight}px`;
-    },
-    { wait: 150 }
-  );
-
-  // 当容器大小变化时调整编辑器高度
-  useEffect(() => {
-    adjustEditorHeight();
-  }, [containerSize, adjustEditorHeight]);
 
   // 获取纯文本内容
   const getTextContent = useCallback(() => {
@@ -256,7 +216,7 @@ export function SlateChatInput({
         return;
       }
 
-      const model_preset = buildModelPreset(paramEnabled, parameters);
+      const model_preset = buildModelPreset(parameters);
       if (onSend) {
         if (onSend.length <= 1) {
           await (onSend as any)({
@@ -278,7 +238,7 @@ export function SlateChatInput({
     } finally {
       setIsSending(false);
     }
-  }, [getTextContent, images, disabled, onSend, parameters, clearEditor, t, paramEnabled]);
+  }, [getTextContent, images, disabled, onSend, parameters, clearEditor, t]);
 
   // 清空历史记录
   const handleClearHistory = useCallback(async () => {
@@ -333,62 +293,62 @@ export function SlateChatInput({
   );
 
   return (
-    <div 
-      ref={containerRef}
-      className={cn("flex flex-col gap-3 p-4 border-t bg-background h-full", className)}
-    >
-      <ImagePreviewGrid
-        images={images}
-        disabled={disabled || isSending}
-        onRemoveImage={removeImage}
-        uploadedAltPrefix={t("chat.message.uploaded_image")}
-        removeLabel={t("chat.message.remove_image")}
-      />
+    <div className={cn("relative flex h-full flex-col bg-background", className)}>
+      <div className="flex min-h-0 flex-1 flex-col justify-end px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
+        <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-3">
+          <ImagePreviewGrid
+            images={images}
+            disabled={disabled || isSending}
+            onRemoveImage={removeImage}
+            uploadedAltPrefix={t("chat.message.uploaded_image")}
+            removeLabel={t("chat.message.remove_image")}
+          />
 
-      {/* 输入框容器 - 包含编辑器和工具栏 */}
-      <div className="relative flex flex-col border rounded-md bg-background focus-within:ring-2 focus-within:ring-ring flex-1">
-        <ChatEditor
-          editor={editor}
-          editorRef={editorRef}
-          initialValue={initialValue}
-          disabled={disabled}
-          isSending={isSending}
-          placeholder={
-            disabled ? t("chat.conversation.archived_notice") : t("chat.message.input_placeholder")
-          }
-          onKeyDown={handleKeyDown}
-          onPaste={handlePaste}
-        />
+          <div
+            className={cn(
+              "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-background shadow-[0_16px_48px_rgba(0,0,0,0.10)]",
+              "supports-[backdrop-filter]:bg-background/80 supports-[backdrop-filter]:backdrop-blur-md",
+              "dark:shadow-[0_16px_48px_rgba(0,0,0,0.35)]",
+              "focus-within:ring-2 focus-within:ring-ring/40"
+            )}
+          >
+            <ChatEditor
+              editor={editor}
+              editorRef={editorRef}
+              initialValue={initialValue}
+              disabled={disabled}
+              isSending={isSending}
+              placeholder={
+                disabled ? t("chat.conversation.archived_notice") : t("chat.message.input_placeholder")
+              }
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              className="flex-1 min-h-0"
+            />
 
-        <ChatToolbar
-          conversationId={conversationId}
-          disabled={disabled}
-          isSending={isSending}
-          isClearing={isClearing}
-          clearDialogOpen={clearDialogOpen}
-          onClearDialogOpenChange={setClearDialogOpen}
-          onClearHistory={onClearHistory ? () => void handleClearHistory() : undefined}
-          onSend={() => void handleSend()}
-          sendHint={sendHint}
-          parameters={parameters}
-          paramEnabled={paramEnabled}
-          onParametersChange={setParameters}
-          onParamEnabledChange={setParamEnabled}
-          onResetParameters={() => {
-            setParameters({ ...DEFAULT_MODEL_PARAMETERS, ...defaultParameters });
-            setParamEnabled({
-              temperature: false,
-              top_p: false,
-              frequency_penalty: false,
-              presence_penalty: false,
-            });
-          }}
-          onFilesSelected={handleFilesSelected}
-        />
-      </div>
+            <ChatToolbar
+              conversationId={conversationId}
+              disabled={disabled}
+              isSending={isSending}
+              isClearing={isClearing}
+              clearDialogOpen={clearDialogOpen}
+              onClearDialogOpenChange={setClearDialogOpen}
+              onClearHistory={onClearHistory ? () => void handleClearHistory() : undefined}
+              onSend={() => void handleSend()}
+              sendHint={sendHint}
+              parameters={parameters}
+              onParametersChange={setParameters}
+              onResetParameters={() => {
+                resetModelParameters();
+              }}
+              onFilesSelected={handleFilesSelected}
+            />
+          </div>
 
-      <div className="text-xs text-muted-foreground text-center">
-        {isSending ? t("chat.message.sending") : sendHint}
+          <div className="text-xs text-muted-foreground text-center">
+            {isSending ? t("chat.message.sending") : sendHint}
+          </div>
+        </div>
       </div>
     </div>
   );

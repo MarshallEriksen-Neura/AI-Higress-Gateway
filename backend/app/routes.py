@@ -52,6 +52,7 @@ from .log_sanitizer import sanitize_headers_for_log
 from .logging_config import logger
 from .services.avatar_service import ensure_avatar_storage_dir
 from .services.bootstrap_admin import ensure_initial_admin
+from app.provider.config import get_provider_config, load_provider_configs
 
 
 async def handle_unexpected_error(request: Request, exc: Exception):

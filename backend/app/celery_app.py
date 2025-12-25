@@ -38,7 +38,9 @@ celery_app.conf.update(
     # 显式导入子模块里的任务，避免 worker 只加载 app.tasks/__init__.py 而漏掉 registration.* 等任务。
     imports=(
         "app.tasks",
+        "app.tasks.chat_run",
         "app.tasks.registration",
+        "app.tasks.conversation_title",
         "app.tasks.api_key_health",
         "app.tasks.session_maintenance",
         "app.tasks.credit_billing",

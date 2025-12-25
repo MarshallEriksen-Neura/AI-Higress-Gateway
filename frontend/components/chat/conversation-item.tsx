@@ -69,7 +69,6 @@ export function ConversationItem({
     setShowRenameDialog(false);
   };
 
-
   // 格式化时间显示
   const formatLastActivity = (dateString: string) => {
     const date = new Date(dateString);
@@ -106,7 +105,7 @@ export function ConversationItem({
       <AdaptiveCard
         showDecor={false}
         selected={isSelected}
-        className="cursor-pointer transition-all hover:shadow-md hover:scale-100"
+        className="cursor-pointer transition-all hover:bg-muted/40 hover:shadow-md hover:scale-100 data-[state=selected]:hover:bg-transparent"
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
         tabIndex={0}
@@ -115,7 +114,7 @@ export function ConversationItem({
         aria-pressed={isSelected}
       >
         <CardHeader>
-          <CardTitle className="text-base">
+          <CardTitle className="text-[15px] leading-snug">
             {showTitleSkeleton ? (
               <div className="flex items-center gap-2">
                 <Skeleton className="h-4 w-32" />
@@ -127,7 +126,7 @@ export function ConversationItem({
               conversation.title || t("chat.conversation.untitled")
             )}
           </CardTitle>
-          <CardDescription>
+          <CardDescription className="text-xs text-muted-foreground/75">
             {t("chat.conversation.last_activity")}: {formatLastActivity(conversation.last_activity_at)}
           </CardDescription>
           <CardAction>

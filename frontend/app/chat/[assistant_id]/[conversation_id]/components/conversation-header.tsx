@@ -27,7 +27,6 @@ import { useAssistant } from "@/lib/swr/use-assistants";
 import { useProjectChatSettings } from "@/lib/swr/use-project-chat-settings";
 import { useSelectableChatModels } from "@/lib/swr/use-selectable-chat-models";
 
-const INHERIT_VALUE = "__inherit__";
 const PROJECT_INHERIT_SENTINEL = "__project__";
 
 export function ConversationHeader({
@@ -57,12 +56,13 @@ export function ConversationHeader({
   const { settings: projectSettings } = useProjectChatSettings(selectedProjectId);
 
   const currentOverride = conversationModelOverrides[conversationId] ?? null;
-  const selectedValue = currentOverride ?? INHERIT_VALUE;
 
   const effectiveAssistantDefaultModel =
     assistant?.default_logical_model === PROJECT_INHERIT_SENTINEL
       ? projectSettings?.default_logical_model || "auto"
       : assistant?.default_logical_model || "auto";
+
+  const effectiveSelectedModel = currentOverride ?? effectiveAssistantDefaultModel;
 
   const { filterOptions } = useSelectableChatModels(
     selectedProjectId,
@@ -72,10 +72,11 @@ export function ConversationHeader({
   );
   const [modelSearch, setModelSearch] = useState("");
 
-  const filteredModels = useMemo(
-    () => filterOptions(modelSearch),
-    [filterOptions, modelSearch]
-  );
+  const filteredModels = useMemo(() => {
+    const models = filterOptions(modelSearch);
+    if (models.some((model) => model.value === effectiveSelectedModel)) return models;
+    return [{ value: effectiveSelectedModel, label: effectiveSelectedModel }, ...models];
+  }, [effectiveSelectedModel, filterOptions, modelSearch]);
 
   const conversationPending =
     useChatStore((s) => s.conversationPending[conversationId]) ?? false;
@@ -84,7 +85,7 @@ export function ConversationHeader({
   const displayTitle = hasTitle ? title!.trim() : t("chat.conversation.untitled");
 
   return (
-    <div className="flex items-center justify-between gap-2 md:gap-3 border-b bg-background px-3 md:px-4 py-2">
+    <div className="flex items-center justify-between gap-2 md:gap-3 border-b border-border/20 bg-background px-3 md:px-4 py-2 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium flex items-center gap-2">
           {isTitlePending ? (
@@ -98,16 +99,12 @@ export function ConversationHeader({
             displayTitle
           )}
         </div>
-        <div className="truncate text-xs text-muted-foreground hidden md:block">
-          {t("chat.header.model_label")}:{" "}
-          {currentOverride || effectiveAssistantDefaultModel}
-        </div>
       </div>
 
       <div className="flex items-center gap-1 md:gap-2">
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/50">
+            <div className="flex items-center gap-2 rounded-full border border-border/30 bg-muted/20 px-2.5 py-1 transition-colors hover:bg-muted/35">
               <span className="text-xs text-muted-foreground hidden md:inline">
                 {t("chat.message.streaming_label")}
               </span>
@@ -125,7 +122,7 @@ export function ConversationHeader({
 
         <Tooltip>
           <TooltipTrigger asChild>
-            <div className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-muted/50">
+            <div className="flex items-center gap-2 rounded-full border border-border/30 bg-muted/20 px-2.5 py-1 transition-colors hover:bg-muted/35">
               <span className="text-xs text-muted-foreground hidden md:inline">
                 {t("chat.eval.streaming_label")}
               </span>
@@ -167,19 +164,18 @@ export function ConversationHeader({
         {/* 模型选择器 - 移动端缩小 */}
         <div className="w-[140px] md:w-[220px]">
           <Select
-            value={selectedValue}
+            value={effectiveSelectedModel}
             onValueChange={(value) => {
-              if (value === INHERIT_VALUE) {
-                setConversationModelOverride(conversationId, null);
-              } else {
-                setConversationModelOverride(conversationId, value);
-              }
+              setConversationModelOverride(
+                conversationId,
+                value === effectiveAssistantDefaultModel ? null : value
+              );
             }}
             onOpenChange={(open) => {
               if (!open) setModelSearch("");
             }}
           >
-            <SelectTrigger className="h-8 md:h-9 text-xs md:text-sm">
+            <SelectTrigger className="h-8 rounded-full border-border/40 bg-muted/20 px-3 text-xs font-medium shadow-sm transition-colors hover:bg-muted/35 focus:ring-1 focus:ring-ring/30 focus:ring-offset-0 md:h-9 md:text-sm">
               <SelectValue placeholder={t("chat.header.model_placeholder")} />
             </SelectTrigger>
             <SelectContent>
@@ -191,14 +187,8 @@ export function ConversationHeader({
                   className="h-9"
                 />
               </div>
-              <SelectItem value={INHERIT_VALUE}>
-                {t("chat.header.model_inherit")}
-                {effectiveAssistantDefaultModel
-                  ? ` (${effectiveAssistantDefaultModel})`
-                  : ""}
-              </SelectItem>
               {filteredModels.map((model) => (
-                <SelectItem key={model.value} value={model.value}>
+                <SelectItem key={model.value} value={model.value} textValue={model.label}>
                   {model.label}
                 </SelectItem>
               ))}

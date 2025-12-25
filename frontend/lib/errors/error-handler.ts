@@ -4,7 +4,7 @@
  * 提供错误标准化、分类和转换功能
  */
 
-import { AxiosError } from 'axios';
+import type { AxiosError } from 'axios';
 import { StandardError, ErrorCategory, ErrorSeverity } from './types';
 import { ERROR_MAP, STATUS_CODE_MAP, categorizeByStatus, severityByStatus } from './error-map';
 

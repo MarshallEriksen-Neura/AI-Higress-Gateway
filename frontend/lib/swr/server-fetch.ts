@@ -1,4 +1,3 @@
-import axios, { type AxiosRequestConfig } from 'axios';
 import { cookies } from 'next/headers';
 
 /**
@@ -43,29 +42,47 @@ export async function serverFetch<T>(
     // 与 fetch 的 no-store 行为保持一致，避免使用缓存
     normalizedHeaders['Cache-Control'] = 'no-store';
 
-    const axiosConfig: AxiosRequestConfig = {
-      baseURL: apiUrl,
-      url: endpoint,
-      method: (options?.method as AxiosRequestConfig['method']) ?? 'GET',
-      headers: normalizedHeaders,
-      data: options?.body,
-      signal: options?.signal ?? undefined,
-      // 交由 axios 返回响应对象，由下方统一处理状态码
-      validateStatus: () => true,
-    };
+    const url = new URL(endpoint, apiUrl);
+    const method = options?.method ?? 'GET';
 
-    const res = await axios.request<T>(axiosConfig);
+    const { headers: _ignoredHeaders, body: rawBody, method: _ignoredMethod, signal: _ignoredSignal, ...rest } =
+      options ?? {};
+    const hasBody = typeof rawBody !== 'undefined';
+    const isBodyAllowed = method !== 'GET' && method !== 'HEAD';
+    const body = hasBody && isBodyAllowed ? rawBody : undefined;
+
+    const res = await fetch(url, {
+      ...rest,
+      method,
+      headers: normalizedHeaders,
+      cache: 'no-store',
+      signal: options?.signal ?? undefined,
+      body,
+    });
 
     if (res.status === 401) {
       console.log(`[serverFetch] 401 Unauthorized: ${endpoint} (token may be expired)`);
       return null;
     }
-    if (res.status < 200 || res.status >= 300) {
+    if (!res.ok) {
       console.error(`[serverFetch] Failed: ${endpoint}`, res.status);
       return null;
     }
 
-    return res.data;
+    if (res.status === 204) return null;
+
+    const contentType = res.headers.get('content-type') || '';
+    if (!contentType.includes('application/json')) {
+      console.error(`[serverFetch] Unexpected content-type: ${endpoint}`, contentType);
+      return null;
+    }
+
+    try {
+      return (await res.json()) as T;
+    } catch (parseError) {
+      console.error(`[serverFetch] Failed to parse JSON: ${endpoint}`, parseError);
+      return null;
+    }
   } catch (error) {
     console.error(`[serverFetch] Error: ${endpoint}`, error);
     return null;

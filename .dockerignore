@@ -13,6 +13,7 @@ __pycache__
 .env.*
 logs
 *.log
+docs/
 
 # Editor / IDE files
 .vscode

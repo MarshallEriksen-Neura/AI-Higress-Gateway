@@ -13,7 +13,7 @@ export type TunableModelParameterKey =
   | "presence_penalty";
 
 export const DEFAULT_MODEL_PARAMETERS: ModelParameters = {
-  temperature: 1.0,
+  temperature: 0.7,
   top_p: 1.0,
   frequency_penalty: 0.0,
   presence_penalty: 0.0,

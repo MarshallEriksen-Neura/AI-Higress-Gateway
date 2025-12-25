@@ -56,8 +56,8 @@ export function ProjectSelector() {
 
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor="project-selector" className="text-sm font-medium">
-        {t("chat.project.title")}:
+      <label htmlFor="project-selector" className="sr-only">
+        {t("chat.project.title")}
       </label>
       <Select 
         value={selectedProjectId || ""} 

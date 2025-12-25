@@ -59,9 +59,9 @@ export interface ConversationsResponseBackend {
  * 后端返回的是结构化对象，而非字符串
  */
 export interface MessageContent {
-  type: 'text' | 'image' | 'file';
+  type: 'text' | 'image' | 'image_url' | 'input_image' | 'file';
   text?: string;
-  image_url?: string;
+  image_url?: string | { url?: string };
   file_url?: string;
 }
 
@@ -89,7 +89,7 @@ export interface MessageBackend {
 export interface RunSummaryBackend {
   run_id: string;
   requested_logical_model: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
   output_preview?: string;
   latency_ms?: number; // 后端使用 latency_ms
   cost_credits?: number; // 后端使用 cost_credits
@@ -99,6 +99,13 @@ export interface RunSummaryBackend {
     agent_id: string;
     tool_name: string;
     tool_call_id?: string | null;
+    state?: 'running' | 'done' | 'failed' | 'timeout' | 'canceled';
+    duration_ms?: number;
+    ok?: boolean;
+    canceled?: boolean;
+    exit_code?: number;
+    error?: Record<string, any> | null;
+    result_preview?: string | null;
   }>;
 }
 

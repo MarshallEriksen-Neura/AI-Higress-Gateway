@@ -3,21 +3,15 @@
 import { Settings2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 
-import type { TunableModelParameterKey, ModelParameters } from "./types";
-
-export type ModelParameterEnabled = Partial<Record<TunableModelParameterKey, boolean>>;
+import { DEFAULT_MODEL_PARAMETERS, type ModelParameters, type TunableModelParameterKey } from "./types";
 
 export type ModelParametersPopoverProps = {
-  idPrefix: string;
   disabled?: boolean;
-  enabled: ModelParameterEnabled;
   parameters: ModelParameters;
-  onEnabledChange: (next: ModelParameterEnabled) => void;
   onParametersChange: (next: ModelParameters) => void;
   onReset: () => void;
   title: string;
@@ -26,27 +20,19 @@ export type ModelParametersPopoverProps = {
 };
 
 export function ModelParametersPopover({
-  idPrefix,
   disabled = false,
-  enabled,
   parameters,
-  onEnabledChange,
   onParametersChange,
   onReset,
   title,
   resetLabel,
   labels,
 }: ModelParametersPopoverProps) {
-  const hasActive = Boolean(
-    enabled.temperature ||
-      enabled.top_p ||
-      enabled.frequency_penalty ||
-      enabled.presence_penalty
-  );
-
-  const toggle = (key: TunableModelParameterKey, value: boolean) => {
-    onEnabledChange({ ...enabled, [key]: value });
-  };
+  const hasOverrides =
+    parameters.temperature !== DEFAULT_MODEL_PARAMETERS.temperature ||
+    parameters.top_p !== DEFAULT_MODEL_PARAMETERS.top_p ||
+    parameters.frequency_penalty !== DEFAULT_MODEL_PARAMETERS.frequency_penalty ||
+    parameters.presence_penalty !== DEFAULT_MODEL_PARAMETERS.presence_penalty;
 
   const setValue = (key: TunableModelParameterKey, value: number | undefined) => {
     if (value == null) return;
@@ -59,7 +45,7 @@ export function ModelParametersPopover({
         <Button
           type="button"
           size="icon-sm"
-          variant={hasActive ? "secondary" : "ghost"}
+          variant={hasOverrides ? "secondary" : "ghost"}
           disabled={disabled}
           aria-label={title}
           title={title}
@@ -72,17 +58,9 @@ export function ModelParametersPopover({
         <div className="space-y-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(enabled.temperature)}
-                  onCheckedChange={(v) => toggle("temperature", Boolean(v))}
-                  id={`${idPrefix}-param-temperature`}
-                  disabled={disabled}
-                />
-                <Label className="text-xs" htmlFor={`${idPrefix}-param-temperature`}>
-                  {labels.temperature}
-                </Label>
-              </div>
+              <Label className="text-xs">
+                {labels.temperature}
+              </Label>
               <span className="text-xs text-muted-foreground">
                 {parameters.temperature.toFixed(1)}
               </span>
@@ -93,23 +71,15 @@ export function ModelParametersPopover({
               min={0}
               max={2}
               step={0.1}
-              disabled={!enabled.temperature || disabled}
+              disabled={disabled}
             />
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(enabled.top_p)}
-                  onCheckedChange={(v) => toggle("top_p", Boolean(v))}
-                  id={`${idPrefix}-param-top_p`}
-                  disabled={disabled}
-                />
-                <Label className="text-xs" htmlFor={`${idPrefix}-param-top_p`}>
-                  {labels.top_p}
-                </Label>
-              </div>
+              <Label className="text-xs">
+                {labels.top_p}
+              </Label>
               <span className="text-xs text-muted-foreground">
                 {parameters.top_p.toFixed(1)}
               </span>
@@ -120,23 +90,15 @@ export function ModelParametersPopover({
               min={0}
               max={1}
               step={0.1}
-              disabled={!enabled.top_p || disabled}
+              disabled={disabled}
             />
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(enabled.frequency_penalty)}
-                  onCheckedChange={(v) => toggle("frequency_penalty", Boolean(v))}
-                  id={`${idPrefix}-param-frequency_penalty`}
-                  disabled={disabled}
-                />
-                <Label className="text-xs" htmlFor={`${idPrefix}-param-frequency_penalty`}>
-                  {labels.frequency_penalty}
-                </Label>
-              </div>
+              <Label className="text-xs">
+                {labels.frequency_penalty}
+              </Label>
               <span className="text-xs text-muted-foreground">
                 {parameters.frequency_penalty.toFixed(1)}
               </span>
@@ -147,23 +109,15 @@ export function ModelParametersPopover({
               min={0}
               max={2}
               step={0.1}
-              disabled={!enabled.frequency_penalty || disabled}
+              disabled={disabled}
             />
           </div>
 
           <div className="space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  checked={Boolean(enabled.presence_penalty)}
-                  onCheckedChange={(v) => toggle("presence_penalty", Boolean(v))}
-                  id={`${idPrefix}-param-presence_penalty`}
-                  disabled={disabled}
-                />
-                <Label className="text-xs" htmlFor={`${idPrefix}-param-presence_penalty`}>
-                  {labels.presence_penalty}
-                </Label>
-              </div>
+              <Label className="text-xs">
+                {labels.presence_penalty}
+              </Label>
               <span className="text-xs text-muted-foreground">
                 {parameters.presence_penalty.toFixed(1)}
               </span>
@@ -174,7 +128,7 @@ export function ModelParametersPopover({
               min={0}
               max={2}
               step={0.1}
-              disabled={!enabled.presence_penalty || disabled}
+              disabled={disabled}
             />
           </div>
 

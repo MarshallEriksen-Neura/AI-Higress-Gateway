@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import fnmatch
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import get_db_session
 from app.deps import get_db, get_redis
-from app.models import APIKey, Base, User
+from app.models import APIKey, Base, Provider, User
 from app.services.api_key_service import (
     APIKeyExpiry,
     build_api_key_prefix,
@@ -30,7 +30,13 @@ def install_inmemory_db(app, *, token_plain: str = "timeline") -> sessionmaker[S
     )
     Base.metadata.create_all(bind=engine)
 
-    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+    SessionLocal = sessionmaker(
+        bind=engine,
+        autoflush=False,
+        autocommit=False,
+        future=True,
+        expire_on_commit=False,
+    )
 
     def override_get_db():
         db = SessionLocal()
@@ -52,6 +58,13 @@ def install_inmemory_db(app, *, token_plain: str = "timeline") -> sessionmaker[S
 
     with SessionLocal() as session:
         seed_user_and_key(session, token_plain=token_plain)
+        # Seed a default public provider so that provider access filtering can succeed in tests
+        # (一些聊天/评测路径会要求当前项目存在至少一个可用 Provider)。
+        exists = session.execute(select(Provider.id).limit(1)).first()
+        if not exists:
+            provider = Provider(provider_id="mock", name="Mock Provider", base_url="https://mock.local")
+            session.add(provider)
+            session.commit()
 
     def _cleanup() -> None:
         Base.metadata.drop_all(bind=engine)
@@ -128,6 +141,7 @@ class InMemoryRedis:
         self._counters: dict[str, int] = {}
         self._zsets: dict[str, dict[str, float]] = {}
         self._lists: dict[str, list[str]] = {}
+        self._pubsub_channels: dict[str, set["asyncio.Queue[str]"]] = {}
 
     async def get(self, key: str):
         return self._data.get(key)
@@ -193,6 +207,47 @@ class InMemoryRedis:
                 self._lists.pop(key, None)
         return removed
 
+    # --- PubSub operations (minimal subset used by RunEvent hot channel) ---
+
+    async def publish(self, channel: str, message: str) -> int:
+        import asyncio
+
+        queues = list(self._pubsub_channels.get(str(channel), set()))
+        delivered = 0
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        for q in queues:
+            try:
+                # In tests, the ASGI app runs in a different thread/event loop than the test thread.
+                # Use loop.call_soon_threadsafe to safely deliver messages across loops.
+                target_loop = getattr(q, "_loop", None)
+                if (
+                    target_loop is not None
+                    and hasattr(target_loop, "call_soon_threadsafe")
+                    and getattr(target_loop, "is_running", lambda: False)()
+                    and current_loop is not None
+                    and target_loop is not current_loop
+                ):
+                    target_loop.call_soon_threadsafe(q.put_nowait, str(message))
+                    delivered += 1
+                    continue
+
+                q.put_nowait(str(message))
+                delivered += 1
+            except asyncio.QueueFull:
+                continue
+            except Exception:
+                continue
+
+        return delivered
+
+    def pubsub(self):
+        return _InMemoryPubSub(self)
+
     # --- Set operations (minimal subset used by proxy pool) ---
 
     async def sadd(self, key: str, *members: str) -> int:
@@ -238,7 +293,6 @@ class InMemoryRedis:
         if not lst:
             self._lists[key] = []
             return True
-
         n = len(lst)
         s = int(start)
         e = int(stop)
@@ -284,6 +338,51 @@ class InMemoryRedis:
         if e < s:
             return []
         return list(lst[s : e + 1])
+
+
+class _InMemoryPubSub:
+    def __init__(self, redis: InMemoryRedis) -> None:
+        import asyncio
+
+        self._redis = redis
+        self._channels: set[str] = set()
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+
+    async def subscribe(self, *channels: str) -> None:
+        for ch in channels:
+            name = str(ch)
+            self._channels.add(name)
+            self._redis._pubsub_channels.setdefault(name, set()).add(self._queue)
+
+    async def unsubscribe(self, *channels: str) -> None:
+        targets = [str(c) for c in channels] if channels else list(self._channels)
+        for ch in targets:
+            self._channels.discard(ch)
+            queues = self._redis._pubsub_channels.get(ch)
+            if queues is not None:
+                queues.discard(self._queue)
+                if not queues:
+                    self._redis._pubsub_channels.pop(ch, None)
+
+    async def close(self) -> None:
+        await self.unsubscribe()
+
+    async def get_message(
+        self, *, ignore_subscribe_messages: bool = True, timeout: float | None = None
+    ):
+        _ = ignore_subscribe_messages
+        import asyncio
+
+        try:
+            if timeout is None:
+                data = await self._queue.get()
+            elif timeout <= 0:
+                data = self._queue.get_nowait()
+            else:
+                data = await asyncio.wait_for(self._queue.get(), timeout=timeout)
+        except (asyncio.QueueEmpty, asyncio.TimeoutError):
+            return None
+        return {"type": "message", "data": data}
 
 
 __all__ = ["InMemoryRedis", "auth_headers", "install_inmemory_db", "jwt_auth_headers", "seed_user_and_key"]

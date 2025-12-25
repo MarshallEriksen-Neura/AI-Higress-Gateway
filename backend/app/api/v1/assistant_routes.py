@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import json
+import os
+import time
+from contextlib import suppress
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 try:
     from redis.asyncio import Redis
@@ -14,6 +20,8 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from app.deps import get_db, get_http_client, get_redis
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
+from app.models import Message
+from app.repositories.run_event_repository import append_run_event, list_run_events
 from app.schemas import (
     AssistantPresetCreateRequest,
     AssistantPresetListResponse,
@@ -31,6 +39,9 @@ from app.schemas import (
     RunSummary,
 )
 from app.services import chat_app_service
+from app.services.run_cancel_service import mark_run_canceled
+from app.services.run_event_bus import build_run_event_envelope, publish_run_event_best_effort, run_event_channel
+from app.services.run_event_bus import subscribe_run_events
 from app.services.chat_history_service import (
     clear_conversation_messages,
     create_assistant,
@@ -51,6 +62,25 @@ router = APIRouter(
     tags=["assistants"],
     dependencies=[Depends(require_jwt_token)],
 )
+
+def _encode_sse_event(*, event_type: str, data: Any) -> bytes:
+    """
+    SSE 编码：同时发送 `event:` 与 `data:`；data 中一般也包含 `type` 字段便于统一解析。
+    """
+    lines: list[str] = []
+    event = str(event_type or "").strip()
+    if event:
+        lines.append(f"event: {event}")
+
+    if isinstance(data, (bytes, bytearray)):
+        payload = data.decode("utf-8", errors="ignore")
+        lines.append(f"data: {payload}")
+    elif isinstance(data, str):
+        lines.append(f"data: {data}")
+    else:
+        lines.append(f"data: {json.dumps(data, ensure_ascii=False)}")
+
+    return ("\n".join(lines) + "\n\n").encode("utf-8")
 
 
 def _assistant_to_response(obj) -> AssistantPresetResponse:
@@ -296,37 +326,160 @@ async def create_message_endpoint(
 
     # streaming=true 或 Accept:text/event-stream 均触发 SSE
     stream = bool(payload.streaming) or wants_event_stream
+    # 测试环境下跳过真正的 Celery 调度，沿用“请求内执行”以避免 broker 依赖导致卡住。
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        if stream:
+            return StreamingResponse(
+                chat_app_service.stream_message_and_run_baseline(
+                    db,
+                    redis=redis,
+                    client=client,
+                    current_user=current_user,
+                    conversation_id=conversation_id,
+                    content=payload.content,
+                    override_logical_model=payload.override_logical_model,
+                    model_preset=payload.model_preset,
+                    bridge_agent_id=payload.bridge_agent_id,
+                    bridge_agent_ids=payload.bridge_agent_ids,
+                    bridge_tool_selections=payload.bridge_tool_selections,
+                ),
+                media_type="text/event-stream",
+            )
+
+        message_id, run_id = await chat_app_service.send_message_and_run_baseline(
+            db,
+            redis=redis,
+            client=client,
+            current_user=current_user,
+            conversation_id=conversation_id,
+            content=payload.content,
+            override_logical_model=payload.override_logical_model,
+            model_preset=payload.model_preset,
+            bridge_agent_id=payload.bridge_agent_id,
+            bridge_agent_ids=payload.bridge_agent_ids,
+            bridge_tool_selections=payload.bridge_tool_selections,
+        )
+        run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
+        return MessageCreateResponse(message_id=message_id, baseline_run=_run_to_summary(run))
+
+    async def _wait_for_terminal_event(*, run_id: UUID, after_seq: int) -> None:
+        last_seq = int(after_seq or 0)
+        # DB replay（防止 worker 很快写完导致我们错过热通道事件）
+        for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=1000):
+            seq = int(getattr(ev, "seq", 0) or 0)
+            if seq <= last_seq:
+                continue
+            last_seq = seq
+            et = str(getattr(ev, "event_type", "") or "")
+            if et in {"message.completed", "message.failed"}:
+                return
+
+        async for env in subscribe_run_events(redis, run_id=run_id, after_seq=last_seq, request=request):
+            if not isinstance(env, dict):
+                continue
+            if str(env.get("type") or "") == "heartbeat":
+                continue
+            try:
+                seq = int(env.get("seq") or 0)
+            except Exception:
+                seq = 0
+            if seq <= last_seq:
+                continue
+            last_seq = seq
+            et = str(env.get("event_type") or "")
+            if et in {"message.completed", "message.failed"}:
+                return
+
     if stream:
-        return StreamingResponse(
-            chat_app_service.stream_message_and_run_baseline(
-                db,
-                redis=redis,
-                client=client,
-                current_user=current_user,
-                conversation_id=conversation_id,
-                content=payload.content,
-                override_logical_model=payload.override_logical_model,
-                model_preset=payload.model_preset,
-                bridge_agent_id=payload.bridge_agent_id,
-                bridge_agent_ids=payload.bridge_agent_ids,
-                bridge_tool_selections=payload.bridge_tool_selections,
-            ),
-            media_type="text/event-stream",
+        (
+            message_id,
+            run_id,
+            assistant_message_id,
+            created_payload,
+            created_seq,
+            _bridge_agent_ids,
+        ) = await chat_app_service.create_message_and_queue_baseline_run(
+            db,
+            redis=redis,
+            client=client,
+            current_user=current_user,
+            conversation_id=conversation_id,
+            content=payload.content,
+            streaming=True,
+            override_logical_model=payload.override_logical_model,
+            model_preset=payload.model_preset,
+            bridge_agent_id=payload.bridge_agent_id,
+            bridge_agent_ids=payload.bridge_agent_ids,
+            bridge_tool_selections=payload.bridge_tool_selections,
         )
 
-    message_id, run_id = await chat_app_service.send_message_and_run_baseline(
+        async def _gen():
+            last_seq = int(created_seq or 0)
+            yield _encode_sse_event(event_type="message.created", data=created_payload)
+
+            # 先回放 DB 中的缺失 message.* 事件，再订阅 Redis 热通道实时续订
+            for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=1000):
+                seq = int(getattr(ev, "seq", 0) or 0)
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+                et = str(getattr(ev, "event_type", "") or "")
+                if not et.startswith("message."):
+                    continue
+                data = getattr(ev, "payload", None) or {}
+                yield _encode_sse_event(event_type=et, data=data)
+                if et in {"message.completed", "message.failed"}:
+                    yield _encode_sse_event(event_type="done", data="[DONE]")
+                    return
+
+            async for env in subscribe_run_events(redis, run_id=run_id, after_seq=last_seq, request=request):
+                if not isinstance(env, dict):
+                    continue
+                if str(env.get("type") or "") == "heartbeat":
+                    continue
+                try:
+                    seq = int(env.get("seq") or 0)
+                except Exception:
+                    seq = 0
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+
+                et = str(env.get("event_type") or "")
+                if not et.startswith("message."):
+                    continue
+                data = env.get("payload") if isinstance(env.get("payload"), dict) else {}
+                yield _encode_sse_event(event_type=et, data=data)
+                if et in {"message.completed", "message.failed"}:
+                    break
+
+            yield _encode_sse_event(event_type="done", data="[DONE]")
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    (
+        message_id,
+        run_id,
+        _assistant_message_id,
+        _created_payload,
+        created_seq,
+        _bridge_agent_ids,
+    ) = await chat_app_service.create_message_and_queue_baseline_run(
         db,
         redis=redis,
         client=client,
         current_user=current_user,
         conversation_id=conversation_id,
         content=payload.content,
+        streaming=False,
         override_logical_model=payload.override_logical_model,
         model_preset=payload.model_preset,
         bridge_agent_id=payload.bridge_agent_id,
         bridge_agent_ids=payload.bridge_agent_ids,
         bridge_tool_selections=payload.bridge_tool_selections,
     )
+
+    await _wait_for_terminal_event(run_id=run_id, after_seq=int(created_seq or 0))
     run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
     return MessageCreateResponse(message_id=message_id, baseline_run=_run_to_summary(run))
 
@@ -386,6 +539,238 @@ def get_run_endpoint(
         created_at=run.created_at,
         updated_at=run.updated_at,
     )
+
+
+@router.post("/v1/runs/{run_id}/cancel", response_model=RunDetailResponse)
+async def cancel_run_endpoint(
+    run_id: UUID,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> RunDetailResponse:
+    """
+    取消一个 run（best-effort）：
+    - 写入 Redis cancel 标记，供 worker 及时终止；
+    - 将 run 状态置为 canceled，并追加 run.canceled / message.failed 事件（便于 SSE 订阅方收敛终态）。
+    """
+    run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
+
+    try:
+        await mark_run_canceled(redis, run_id=run_id)
+    except Exception:
+        # cancel flag 失败不阻断（仍尽量写 DB 终态）
+        pass
+
+    if str(run.status or "") not in {"succeeded", "failed", "canceled"}:
+        run.status = "canceled"
+        run.error_code = "CANCELED"
+        run.error_message = "canceled"
+        run.finished_at = datetime.now(UTC)
+        db.add(run)
+        db.commit()
+        db.refresh(run)
+
+        def _append_and_publish(event_type: str, payload: dict[str, Any]) -> None:
+            row = append_run_event(db, run_id=run_id, event_type=event_type, payload=payload)
+            created_at_iso = None
+            try:
+                created_at_iso = row.created_at.isoformat() if getattr(row, "created_at", None) is not None else None
+            except Exception:
+                created_at_iso = None
+            publish_run_event_best_effort(
+                redis,
+                run_id=run_id,
+                envelope=build_run_event_envelope(
+                    run_id=run_id,
+                    seq=int(getattr(row, "seq", 0) or 0),
+                    event_type=str(getattr(row, "event_type", event_type) or event_type),
+                    created_at_iso=created_at_iso,
+                    payload=payload,
+                ),
+            )
+
+        _append_and_publish("run.canceled", {"type": "run.canceled", "run_id": str(run_id)})
+
+        # 尽量补齐 message.failed payload 的上下文字段（用于兼容 message.* SSE 消费者）
+        conv_id = None
+        user_message_id = None
+        assistant_message_id = None
+        msg = db.execute(select(Message).where(Message.id == run.message_id)).scalars().first()
+        if msg is not None:
+            conv_id = str(msg.conversation_id)
+            user_message_id = str(msg.id)
+            try:
+                assistant_seq = int(msg.sequence or 0) + 1
+                assistant_msg = (
+                    db.execute(
+                        select(Message).where(
+                            Message.conversation_id == msg.conversation_id,
+                            Message.sequence == assistant_seq,
+                            Message.role == "assistant",
+                        )
+                    )
+                    .scalars()
+                    .first()
+                )
+                if assistant_msg is not None:
+                    assistant_message_id = str(assistant_msg.id)
+            except Exception:
+                assistant_message_id = None
+
+        _append_and_publish(
+            "message.failed",
+            {
+                "type": "message.failed",
+                "conversation_id": conv_id,
+                "user_message_id": user_message_id,
+                "assistant_message_id": assistant_message_id,
+                "baseline_run": _run_to_summary(run).model_dump(mode="json"),
+                "output_text": None,
+            },
+        )
+
+    return RunDetailResponse(
+        run_id=run.id,
+        message_id=run.message_id,
+        requested_logical_model=run.requested_logical_model,
+        selected_provider_id=run.selected_provider_id,
+        selected_provider_model=run.selected_provider_model,
+        status=run.status,
+        output_preview=run.output_preview,
+        output_text=run.output_text,
+        request_payload=run.request_payload,
+        response_payload=run.response_payload,
+        latency_ms=run.latency_ms,
+        error_code=run.error_code,
+        created_at=run.created_at,
+        updated_at=run.updated_at,
+    )
+
+
+@router.get("/v1/runs/{run_id}/events")
+async def stream_run_events_endpoint(
+    run_id: UUID,
+    request: Request,
+    after_seq: int | None = Query(default=None, ge=0),
+    limit: int = Query(default=200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> StreamingResponse:
+    """
+    RunEvent 事件流订阅（SSE replay）：
+    - 先从 DB 真相回放缺失事件（after_seq 之后）
+    - 再订阅 Redis 热通道实时接收新事件
+    """
+    _ = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
+
+    last_seq = int(after_seq or 0)
+
+    async def _gen():
+        nonlocal last_seq
+        # 先订阅 Redis，再进行 DB replay：避免 replay 与 subscribe 之间的时间窗导致事件丢失。
+        channel = run_event_channel(run_id=run_id)
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(channel)
+        last_activity = time.monotonic()
+
+        try:
+            # DB 真相回放（after_seq 之后）
+            for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=limit):
+                seq = int(getattr(ev, "seq", 0) or 0)
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+                created_at_iso = None
+                try:
+                    created_at_iso = ev.created_at.isoformat() if getattr(ev, "created_at", None) is not None else None
+                except Exception:
+                    created_at_iso = None
+
+                yield _encode_sse_event(
+                    event_type=str(getattr(ev, "event_type", "event") or "event"),
+                    data={
+                        "type": "run.event",
+                        "run_id": str(run_id),
+                        "seq": seq,
+                        "event_type": str(getattr(ev, "event_type", "event") or "event"),
+                        "created_at": created_at_iso,
+                        "payload": getattr(ev, "payload", None) or {},
+                    },
+                )
+
+            yield _encode_sse_event(
+                event_type="replay.done",
+                data={"type": "replay.done", "run_id": str(run_id), "after_seq": last_seq},
+            )
+
+            # Redis 热通道实时续订
+            while True:
+                try:
+                    if await request.is_disconnected():
+                        break
+                except Exception:  # pragma: no cover
+                    break
+
+                msg: dict[str, Any] | None
+                try:
+                    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+                except Exception:
+                    msg = None
+
+                if isinstance(msg, dict) and msg.get("type") == "message":
+                    raw = msg.get("data")
+                    if isinstance(raw, (bytes, bytearray)):
+                        raw_str = raw.decode("utf-8", errors="ignore")
+                    elif isinstance(raw, str):
+                        raw_str = raw
+                    else:
+                        raw_str = ""
+
+                    env: dict[str, Any] | None = None
+                    if raw_str:
+                        try:
+                            parsed = json.loads(raw_str)
+                            if isinstance(parsed, dict):
+                                env = parsed
+                        except Exception:
+                            env = None
+
+                    if not isinstance(env, dict):
+                        continue
+
+                    if str(env.get("type") or "") == "heartbeat":
+                        yield _encode_sse_event(event_type="heartbeat", data=env)
+                        continue
+
+                    try:
+                        seq = int(env.get("seq") or 0)
+                    except Exception:
+                        seq = 0
+                    if seq <= last_seq:
+                        continue
+
+                    last_seq = seq
+                    last_activity = time.monotonic()
+                    event_type = str(env.get("event_type") or "run.event")
+                    yield _encode_sse_event(event_type=event_type, data=env)
+                    continue
+
+                if time.monotonic() - last_activity >= 15.0:
+                    last_activity = time.monotonic()
+                    yield _encode_sse_event(
+                        event_type="heartbeat",
+                        data={"type": "heartbeat", "ts": int(time.time()), "run_id": str(run_id), "after_seq": last_seq},
+                    )
+        except Exception:
+            return
+        finally:
+            with suppress(Exception):
+                await pubsub.unsubscribe(channel)
+            with suppress(Exception):
+                await pubsub.close()
+
+    return StreamingResponse(_gen(), media_type="text/event-stream")
 
 
 @router.post("/v1/messages/{assistant_message_id}/regenerate", response_model=MessageRegenerateResponse)

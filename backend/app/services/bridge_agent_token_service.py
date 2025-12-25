@@ -103,10 +103,16 @@ class BridgeAgentTokenService:
         """
         Cache current version in Redis for Gateway verification. Ignore failures gracefully.
         """
-        ttl_seconds = int((expires_at - datetime.datetime.now(datetime.UTC)).total_seconds())
+        # SQLite 等后端可能会把 timezone=True 的 DateTime 读成 naive datetime；
+        # 为避免 offset-naive/aware 运算异常，这里统一按 UTC 处理。
+        exp = expires_at
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=datetime.UTC)
+
+        ttl_seconds = int((exp - datetime.datetime.now(datetime.UTC)).total_seconds())
         if ttl_seconds <= 0:
             ttl_seconds = 1
-        payload = {"version": int(version), "expires_at": expires_at.isoformat()}
+        payload = {"version": int(version), "expires_at": exp.isoformat()}
         try:
             await redis_set_json(self.redis, self._redis_key(user_id=user_id, agent_id=agent_id), payload, ttl_seconds=ttl_seconds)
         except Exception:
@@ -119,6 +125,18 @@ class BridgeAgentTokenService:
             BridgeAgentToken.agent_id == agent_id,
         )
         return self.db.execute(stmt).scalars().first()
+
+    @staticmethod
+    def _as_utc(dt: datetime.datetime) -> datetime.datetime:
+        """
+        Normalize datetime values to timezone-aware UTC.
+
+        Note: SQLite 等数据库在读取 timezone=True 字段时可能返回 naive datetime，
+        这里统一做兼容，避免 naive/aware 比较与运算异常。
+        """
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=datetime.UTC)
+        return dt.astimezone(datetime.UTC)
 
     async def issue_token(
         self,
@@ -133,6 +151,10 @@ class BridgeAgentTokenService:
         validate_agent_id(agent_id)
         now = datetime.datetime.now(datetime.UTC)
         record = self._fetch_record(user_id=user_id, agent_id=agent_id)
+
+        if record is not None:
+            record.issued_at = self._as_utc(record.issued_at)
+            record.expires_at = self._as_utc(record.expires_at)
 
         is_expired = bool(record and record.expires_at <= now)
         should_rotate = reset or is_expired or record is None
@@ -176,6 +198,9 @@ class BridgeAgentTokenService:
         self.db.add(record)
         self.db.commit()
         self.db.refresh(record)
+
+        record.issued_at = self._as_utc(record.issued_at)
+        record.expires_at = self._as_utc(record.expires_at)
 
         await self._cache_version(user_id=user_id, agent_id=agent_id, version=record.version, expires_at=record.expires_at)
 

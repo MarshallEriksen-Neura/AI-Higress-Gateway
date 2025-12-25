@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Bot, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
 import { toast } from "sonner";
@@ -18,9 +18,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { MessageItem } from "./message-item";
-import { MessageBubble } from "./message-bubble";
 import { ErrorAlert } from "./error-alert";
 import { AddComparisonDialog } from "./add-comparison-dialog";
+import { ConversationPendingIndicator } from "./conversation-pending-indicator";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors/error-display";
 import { useMessages } from "@/lib/swr/use-messages";
@@ -32,6 +32,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useAssistant } from "@/lib/swr/use-assistants";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useConversationPending } from "@/lib/hooks/use-conversation-pending";
 import {
   useChatComparisonStore,
   type ComparisonVariant,
@@ -69,10 +70,17 @@ export const MessageList = memo(function MessageList({
   const setSelectedConversation = useChatStore((s) => s.setSelectedConversation);
   const isPendingResponse =
     useChatStore((s) => s.conversationPending[conversationId]) ?? false;
+  const { runWithPending } = useConversationPending();
 
   const deleteConversation = useDeleteConversation();
 
   const [regeneratingId, setRegeneratingId] = useState<string | null>(null);
+  const [regenerateMessageDialogOpen, setRegenerateMessageDialogOpen] =
+    useState(false);
+  const [regenerateTarget, setRegenerateTarget] = useState<{
+    assistantMessageId: string;
+    sourceUserMessageId?: string;
+  } | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [isDeletingConversation, setIsDeletingConversation] = useState(false);
   const [deletingMessageId, setDeletingMessageId] = useState<string | null>(null);
@@ -81,7 +89,7 @@ export const MessageList = memo(function MessageList({
   const [regenErrorById, setRegenErrorById] = useState<Record<string, string>>({});
   const [cursor, setCursor] = useState<string | undefined>();
   const [allMessages, setAllMessages] = useState<
-    Array<{ message: Message; run?: RunSummary }>
+    Array<{ message: Message; run?: RunSummary; runs?: RunSummary[] }>
   >([]);
   const parentRef = useRef<HTMLDivElement>(null);
   const variantsByKey = useChatComparisonStore((s) => s.variantsByKey);
@@ -213,7 +221,7 @@ export const MessageList = memo(function MessageList({
     for (const item of displayMessages) {
       if (item.message.role === "user") {
         lastUserMessageId = item.message.message_id;
-        lastUserRuns = item.run ? [item.run] : [];
+        lastUserRuns = (item.runs && item.runs.length ? item.runs : item.run ? [item.run] : []);
         rows.push({ message: item.message, runs: [] });
         continue;
       }
@@ -233,9 +241,11 @@ export const MessageList = memo(function MessageList({
     if (!isPendingResponse) return displayRows;
     return displayRows.filter(
       (row) =>
-        row.message.role !== "assistant" || (row.message.content || "").trim().length > 0
+        row.message.role !== "assistant" ||
+        row.message.message_id === regeneratingId ||
+        (row.message.content || "").trim().length > 0
     );
-  }, [displayRows, isPendingResponse]);
+  }, [displayRows, isPendingResponse, regeneratingId]);
 
   const latestAssistantMessageId = useMemo(() => {
     for (let idx = renderRows.length - 1; idx >= 0; idx -= 1) {
@@ -256,8 +266,25 @@ export const MessageList = memo(function MessageList({
         return next;
       });
       try {
-        await messageService.regenerateMessage(assistantMessageId);
-        await mutateMessages();
+        // 先在本地清空该条 assistant 内容，避免“旧答案”残留影响观感
+        setAllMessages((prev) =>
+          prev.map((item) => {
+            if (item.message.message_id !== assistantMessageId) return item;
+            if (item.message.role !== "assistant") return item;
+            return {
+              ...item,
+              message: { ...item.message, content: "" },
+            };
+          })
+        );
+        await runWithPending(
+          conversationId,
+          async () => {
+            await messageService.regenerateMessage(assistantMessageId);
+            await mutateMessages();
+          },
+          { minDurationMs: 250 }
+        );
       } catch (error) {
         console.error("Failed to regenerate message", error);
         const message =
@@ -269,7 +296,15 @@ export const MessageList = memo(function MessageList({
         setRegeneratingId(null);
       }
     },
-    [mutateMessages, t]
+    [conversationId, mutateMessages, runWithPending, t]
+  );
+
+  const openRegenerateDialog = useCallback(
+    (assistantMessageId: string, sourceUserMessageId?: string) => {
+      setRegenerateTarget({ assistantMessageId, sourceUserMessageId });
+      setRegenerateMessageDialogOpen(true);
+    },
+    []
   );
 
   const handleDeleteMessage = useCallback(
@@ -575,7 +610,7 @@ export const MessageList = memo(function MessageList({
       {/* 虚拟列表容器 */}
       <div
         ref={parentRef}
-        className="flex-1 overflow-y-auto px-4 py-6"
+        className="flex-1 overflow-y-auto py-6"
         role="log"
         aria-live="polite"
         aria-atomic="false"
@@ -584,71 +619,73 @@ export const MessageList = memo(function MessageList({
           contain: "strict",
         }}
       >
-        <div
-          style={{
-            height: `${rowVirtualizer.getTotalSize()}px`,
-            width: "100%",
-            position: "relative",
-          }}
-        >
-          {rowVirtualizer.getVirtualItems().map((virtualItem) => {
-            const item = renderRows[virtualItem.index];
-            if (!item) return null;
+        <div className="mx-auto w-full max-w-3xl px-4">
+          <div
+            style={{
+              height: `${rowVirtualizer.getTotalSize()}px`,
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualItem) => {
+              const item = renderRows[virtualItem.index];
+              if (!item) return null;
 
-            return (
-              <div
-                key={virtualItem.key}
-                data-index={virtualItem.index}
-                ref={rowVirtualizer.measureElement}
-                style={{
-                  position: "absolute",
-                  top: 0,
-                  left: 0,
-                  width: "100%",
-                  transform: `translateY(${virtualItem.start}px)`,
-                }}
-              >
-                <div className="pb-6">
-                  <MessageItem
-                    message={item.message}
-                    runs={item.runs}
-                    runSourceMessageId={item.runSourceMessageId}
-                    userAvatarUrl={user?.avatar ?? null}
-                    userDisplayName={user?.display_name ?? user?.username ?? null}
-                    onViewDetails={onViewDetails}
-                    onTriggerEval={onTriggerEval}
-                    showEvalButton={showEvalButton}
-                    comparisonVariants={
-                      variantsByKey[`${conversationId}:${item.message.message_id}`] ?? []
-                    }
-                    onAddComparison={(_, sourceUserMessageId) =>
-                      openCompareDialog(
-                        item.message.message_id,
-                        sourceUserMessageId,
-                        item.runs?.[0]?.requested_logical_model
-                      )
-                    }
-                    isLatestAssistant={item.message.message_id === latestAssistantMessageId}
-                    onRegenerate={handleRegenerate}
-                    isRegenerating={regeneratingId === item.message.message_id}
-                    onDeleteMessage={
-                      item.message.message_id === latestAssistantMessageId
-                        ? () => {
-                            setDeleteMessageTarget(item.message.message_id);
-                            setDeleteMessageDialogOpen(true);
-                          }
-                        : undefined
-                    }
-                    isDeletingMessage={deletingMessageId === item.message.message_id}
-                    disableActions={disabledActions || isLoading}
-                    errorMessage={regenErrorById[item.message.message_id] ?? null}
-                    enableTypewriter
-                    typewriterKey={`${item.message.conversation_id}:${item.message.created_at}`}
-                  />
+              return (
+                <div
+                  key={virtualItem.key}
+                  data-index={virtualItem.index}
+                  ref={rowVirtualizer.measureElement}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualItem.start}px)`,
+                  }}
+                >
+                  <div className="pb-6">
+                    <MessageItem
+                      message={item.message}
+                      runs={item.runs}
+                      runSourceMessageId={item.runSourceMessageId}
+                      userAvatarUrl={user?.avatar ?? null}
+                      userDisplayName={user?.display_name ?? user?.username ?? null}
+                      onViewDetails={onViewDetails}
+                      onTriggerEval={onTriggerEval}
+                      showEvalButton={showEvalButton}
+                      comparisonVariants={
+                        variantsByKey[`${conversationId}:${item.message.message_id}`] ?? []
+                      }
+                      onAddComparison={(_, sourceUserMessageId) =>
+                        openCompareDialog(
+                          item.message.message_id,
+                          sourceUserMessageId,
+                          item.runs?.[0]?.requested_logical_model
+                        )
+                      }
+                      isLatestAssistant={item.message.message_id === latestAssistantMessageId}
+                      onRegenerate={openRegenerateDialog}
+                      isRegenerating={regeneratingId === item.message.message_id}
+                      onDeleteMessage={
+                        item.message.message_id === latestAssistantMessageId
+                          ? () => {
+                              setDeleteMessageTarget(item.message.message_id);
+                              setDeleteMessageDialogOpen(true);
+                            }
+                          : undefined
+                      }
+                      isDeletingMessage={deletingMessageId === item.message.message_id}
+                      disableActions={disabledActions || isLoading}
+                      errorMessage={regenErrorById[item.message.message_id] ?? null}
+                      enableTypewriter
+                      typewriterKey={`${item.message.conversation_id}:${item.message.created_at}`}
+                    />
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -666,40 +703,8 @@ export const MessageList = memo(function MessageList({
         </div>
       )}
 
-      {/* 非流式等待回复时的趣味 loading */}
-      {isPendingResponse && (
-        <div className="px-4 pb-6">
-          <div className="flex items-start gap-3">
-            <div className="flex-shrink-0 mt-1">
-              <div className="flex size-12 items-center justify-center rounded-full bg-primary/10 text-primary ring-2 ring-white/50 shadow-lg">
-                <Bot className="size-6" aria-hidden="true" />
-              </div>
-            </div>
-            <div className="max-w-[80%]">
-              <MessageBubble role="assistant">
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1.5">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <div
-                        key={i}
-                        className="size-2.5 rounded-full animate-pulse"
-                        style={{
-                          background: `hsl(${200 + i * 30}, 70%, 60%)`,
-                          animationDelay: `${i * 0.15}s`,
-                          animationDuration: '1.2s',
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    Typing...
-                  </div>
-                </div>
-              </MessageBubble>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 等待回复时的 loading（非流式 / 流式首包前 / 重新生成） */}
+      <ConversationPendingIndicator conversationId={conversationId} />
 
       <AddComparisonDialog
         open={compareDialogOpen}
@@ -735,6 +740,41 @@ export const MessageList = memo(function MessageList({
               ) : (
                 t("chat.action.confirm")
               )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={regenerateMessageDialogOpen}
+        onOpenChange={(open) => {
+          setRegenerateMessageDialogOpen(open);
+          if (!open) setRegenerateTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("chat.message.regenerate")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("chat.message.regenerate_confirm")}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={regeneratingId !== null}>
+              {t("chat.action.cancel")}
+            </AlertDialogCancel>
+            <AlertDialogAction
+              disabled={regeneratingId !== null || !regenerateTarget}
+              onClick={() => {
+                if (regenerateTarget) {
+                  void handleRegenerate(
+                    regenerateTarget.assistantMessageId,
+                    regenerateTarget.sourceUserMessageId
+                  );
+                }
+              }}
+            >
+              {t("chat.action.confirm")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

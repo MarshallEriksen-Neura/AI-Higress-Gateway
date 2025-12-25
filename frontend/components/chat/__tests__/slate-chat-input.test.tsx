@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SlateChatInput } from "../slate-chat-input";
 import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
+import { useChatModelParametersStore } from "@/lib/stores/chat-model-parameters-store";
 
 // Mock i18n
 vi.mock("@/lib/i18n-context", () => ({
@@ -20,6 +21,7 @@ describe("SlateChatInput", () => {
   beforeEach(() => {
     localStorage.clear();
     useUserPreferencesStore.setState({ preferences: { sendShortcut: "ctrl-enter" } });
+    useChatModelParametersStore.getState().reset();
   });
 
   it("应该正确渲染组件", () => {

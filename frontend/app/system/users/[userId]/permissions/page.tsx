@@ -1,6 +1,7 @@
-import { adminService } from "@/http/admin";
 import { PermissionsPageClient } from "./components/permissions-page-client";
 import { notFound } from "next/navigation";
+import { serverFetch } from "@/lib/swr/server-fetch";
+import type { UserInfo } from "@/lib/api-types";
 
 interface PageProps {
   params: Promise<{
@@ -12,16 +13,8 @@ export default async function UserPermissionsPage({ params }: PageProps) {
   // Next.js 15 中 params 是 Promise，这里先解包
   const { userId } = await params;
 
-  let user = null;
-
-  try {
-    // Fetch user data on the server
-    const users = await adminService.getAllUsers();
-    user = users.find((u) => u.id === userId) || null;
-  } catch (error) {
-    console.error("Failed to fetch user:", error);
-    notFound();
-  }
+  const users = await serverFetch<UserInfo[]>("/admin/users");
+  const user = users?.find((u) => u.id === userId) ?? null;
 
   if (!user) {
     notFound();

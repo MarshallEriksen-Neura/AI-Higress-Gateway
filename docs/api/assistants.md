@@ -209,8 +209,8 @@ Request:
   - 单次最多 5 个 Agent，每个 Agent 最多 30 个工具名。
   - 当 `bridge_tool_selections` 和 `bridge_agent_id(s)` 同时出现时，Agent 列表取二者并集（去重）。
 - `streaming`（可选，默认 `false`）：是否使用 SSE 流式返回。
-  - 仅当提供了 `bridge_tool_selections`（且至少选择一个工具）时才会注入并调用 MCP/Bridge 工具；未选择工具则按纯聊天处理。
-  - 支持与 MCP/Bridge 同时使用：流式结束后会补充执行工具调用并推送最终结果。
+  - 当提供 `bridge_agent_id` / `bridge_agent_ids` 且该 Agent 存在可用工具时，后端会向模型注入工具并允许 tool_calls；`bridge_tool_selections` 仅用于限制注入的工具子集。
+  - 流式模式下：先推送模型的 `message.delta`，若模型触发 tool_calls，会在流式结束后执行工具循环并补充推送最终回复（仍然通过 `message.delta`）。
 
 Response:
 ```json
@@ -233,9 +233,12 @@ Response:
 }
 ```
 
+说明：
+- 当工具循环达到上限或超时，会将 `baseline_run.status` 标记为 `failed`，并在 `baseline_run.error_code` 返回错误码（示例：`TOOL_LOOP_FAILED` / `TOOL_LOOP_MAX_ROUNDS` / `TOOL_LOOP_MAX_INVOCATIONS` / `TOOL_LOOP_TIMEOUT`）。
+
 #### Streaming (SSE) Response
 
-当 `streaming=true`（或请求头包含 `Accept: text/event-stream`）且未使用 `bridge_agent_id(s)` 时，返回 `text/event-stream`：
+当 `streaming=true`（或请求头包含 `Accept: text/event-stream`）时，返回 `text/event-stream`：
 
 - `event: message.created`：包含 `user_message_id` / `assistant_message_id` / `baseline_run`
 - `event: message.delta`：增量 token（字段 `delta`）
@@ -260,3 +263,42 @@ Response:
 ### GET `/v1/runs/{run_id}`
 
 惰性加载 run 详情（包含 request/response payload 与 output_text）。
+
+### POST `/v1/runs/{run_id}/cancel`
+
+取消一个 run（best-effort）。
+
+行为：
+- 写入 Redis cancel 标记，供 worker 及时终止执行；
+- 将 `Run.status` 置为 `canceled`，并追加事件：
+  - `run.canceled`
+  - `message.failed`（用于兼容 `message.*` SSE 订阅方及时收敛终态）
+
+Response：同 `GET /v1/runs/{run_id}`（返回更新后的 RunDetail）。
+
+### GET `/v1/runs/{run_id}/events`
+
+订阅 Run 的执行事件流（SSE replay，用于断线重连回放）。
+
+Query:
+- `after_seq`（可选，默认 `0`）：从该序号之后开始回放/续订（用于断线重连）。
+- `limit`（可选，默认 `200`，最大 `1000`）：本次从 DB 回放的最大事件数量。
+
+Response（`text/event-stream`）：
+- DB 回放阶段：按 `seq` 升序输出事件；每条事件的 `event:` 为该行的 `event_type`（例如 `message.created` / `tool.status` / `message.completed` 等）。
+- `event: replay.done`：表示 DB 回放完成，后续进入 Redis 热通道实时订阅；`data.type` 为 `replay.done`。
+- `event: heartbeat`：空闲时心跳；`data.type` 为 `heartbeat`。
+
+`data` 结构（每条 run event）：
+```json
+{
+  "type": "run.event",
+  "run_id": "uuid",
+  "seq": 1,
+  "event_type": "message.created",
+  "created_at": "2025-12-25T00:00:00+00:00",
+  "payload": {
+    "type": "message.created"
+  }
+}
+```

@@ -9,6 +9,7 @@ import {
   PlugZap,
   Sparkles,
   Plus,
+  Layers,
   RotateCw,
   Trash2,
   Loader2,
@@ -17,13 +18,14 @@ import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useI18n } from "@/lib/i18n-context";
 import type { Message, RunSummary } from "@/lib/api-types";
 import type { ComparisonVariant } from "@/lib/stores/chat-comparison-store";
 import { cn } from "@/lib/utils";
 import { MessageContent } from "./message-content";
 import { MessageBubble } from "./message-bubble";
-import { ToolReferences } from "./tool-references";
+import { ToolInvocationBubbles } from "./tool-invocation-bubbles";
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useChatStore } from "@/lib/stores/chat-store";
 
@@ -90,23 +92,6 @@ export function MessageItem({
     primaryStatus === "running" &&
     (message.content ?? "").trim().length === 0;
   const toolInvocations = primaryRun?.tool_invocations ?? [];
-  const groupedInvocations = useMemo(
-    () =>
-      Array.from(
-        toolInvocations.reduce((acc, cur) => {
-          const agent = (cur.agent_id || "").trim();
-          if (!agent) return acc;
-          const entry = acc.get(agent) ?? new Set<string>();
-          if (cur.tool_name) entry.add(cur.tool_name);
-          acc.set(agent, entry);
-          return acc;
-        }, new Map<string, Set<string>>())
-      ).map(([agent, tools]) => ({
-        agent,
-        tools: Array.from(tools),
-      })),
-    [toolInvocations]
-  );
   const isRecent = Number.isFinite(createdMs)
     ? Date.now() - createdMs < 90_000
     : false;
@@ -126,7 +111,7 @@ export function MessageItem({
     const items: Array<{
       key: string;
       label: string;
-      status?: "queued" | "running" | "succeeded" | "failed";
+      status?: "queued" | "running" | "succeeded" | "failed" | "canceled";
       content?: string;
       errorMessage?: string;
     }> = [];
@@ -225,6 +210,10 @@ export function MessageItem({
                       <div className="text-sm text-muted-foreground">
                         {t("chat.message.add_comparison_generating")}
                       </div>
+                    ) : item.status === "canceled" ? (
+                      <div className="text-sm text-muted-foreground">
+                        {t("chat.run.status_canceled")}
+                      </div>
                     ) : item.status === "failed" ? (
                       <div className="text-sm text-destructive">
                         {item.errorMessage || t("chat.message.add_comparison_failed")}
@@ -241,20 +230,33 @@ export function MessageItem({
                 ))}
               </Tabs>
             ) : (
-                <MessageContent
-                  content={message.content}
-                  role={message.role}
-                  enableTypewriter={shouldTypewriter}
-                  typewriterKey={effectiveTypewriterKey}
-                />
+                <>
+                  {isAssistant &&
+                  isRegenerating &&
+                  (message.content ?? "").trim().length === 0 ? (
+                    <div className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="size-4 animate-spin" />
+                      {t("chat.message.loading")}
+                    </div>
+                  ) : (
+                    <MessageContent
+                      content={message.content}
+                      role={message.role}
+                      enableTypewriter={shouldTypewriter}
+                      typewriterKey={effectiveTypewriterKey}
+                    />
+                  )}
+                </>
               )}
               {isAssistant && errorMessage ? (
                 <div className="mt-2 text-xs text-destructive">{errorMessage}</div>
               ) : null}
-              {isAssistant && groupedInvocations.length ? (
-                <ToolReferences
-                  references={groupedInvocations}
-                  className="mt-3"
+              {isAssistant && primaryRun ? (
+                <ToolInvocationBubbles
+                  runId={primaryRun.run_id}
+                  runStatus={primaryRun.status}
+                  seedInvocations={toolInvocations}
+                  conversationId={message.conversation_id}
                 />
               ) : null}
           </div>
@@ -282,8 +284,8 @@ export function MessageItem({
                   size="icon-sm"
                   disabled={disableActions || isRegenerating}
                   onClick={() => onRegenerate(message.message_id, runSourceMessageId)}
-                  title={t("chat.action.retry")}
-                  aria-label={t("chat.action.retry")}
+                  title={t("chat.message.regenerate")}
+                  aria-label={t("chat.message.regenerate")}
                 >
                   {isRegenerating ? (
                     <Loader2 className="size-3.5 animate-spin" />
@@ -297,6 +299,7 @@ export function MessageItem({
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  className="text-destructive hover:text-destructive hover:bg-destructive/10"
                   disabled={disableActions || isDeletingMessage}
                   onClick={onDeleteMessage}
                   title={t("chat.message.delete")}
@@ -338,6 +341,45 @@ export function MessageItem({
                       <Eye className="size-3.5" />
                     </Button>
                   )}
+
+                  {/* 多 run 展示：弹出列表（baseline 之外的 runs） */}
+                  {onViewDetails && runs.length > 1 ? (
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          title={t("chat.run.more_runs")}
+                          aria-label={t("chat.run.more_runs")}
+                        >
+                          <Layers className="size-3.5" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-72 p-2">
+                        <div className="px-2 py-1 text-xs text-muted-foreground">
+                          {t("chat.run.more_runs")}
+                        </div>
+                        <div className="space-y-1">
+                          {runs.map((r) => (
+                            <Button
+                              key={r.run_id}
+                              variant="ghost"
+                              size="sm"
+                              className="w-full justify-between"
+                              onClick={() => onViewDetails(r.run_id)}
+                            >
+                              <span className="truncate">
+                                {r.requested_logical_model}
+                              </span>
+                              <span className="ml-3 text-xs text-muted-foreground">
+                                {t(`chat.run.status_${r.status}`)}
+                              </span>
+                            </Button>
+                          ))}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  ) : null}
 
                   {/* 添加对比按钮 */}
                   {onAddComparison &&

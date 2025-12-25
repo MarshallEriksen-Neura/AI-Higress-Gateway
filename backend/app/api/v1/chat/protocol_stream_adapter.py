@@ -260,6 +260,8 @@ class ClaudeToOpenAIStreamAdapter:
                 outputs.append(b"data: [DONE]\n\n")
                 return outputs
 
+        return outputs
+
 
 async def _convert_claude_sse_to_openai_sse(
     iterator: AsyncIterator[bytes],

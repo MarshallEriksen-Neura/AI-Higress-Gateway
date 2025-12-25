@@ -1,7 +1,7 @@
-import { adminService } from "@/http/admin";
 import { notFound } from "next/navigation";
 import { UserRolesPageClient } from "./components/user-roles-page-client";
 import type { UserInfo } from "@/lib/api-types";
+import { serverFetch } from "@/lib/swr/server-fetch";
 
 interface PageProps {
   params: Promise<{
@@ -13,16 +13,8 @@ export default async function UserRolesPage({ params }: PageProps) {
   // Next.js 15 中 params 是 Promise，这里先解包
   const { userId } = await params;
 
-  let user: UserInfo | null = null;
-
-  try {
-    const users = await adminService.getAllUsers();
-    user = (users.find((u) => u.id === userId) as UserInfo | undefined) || null;
-  } catch (error) {
-    // 在服务端记录错误日志，前端统一走 notFound 逻辑
-    console.error("Failed to fetch user:", error);
-    notFound();
-  }
+  const users = await serverFetch<UserInfo[]>("/admin/users");
+  const user = users?.find((u) => u.id === userId) ?? null;
 
   if (!user) {
     notFound();

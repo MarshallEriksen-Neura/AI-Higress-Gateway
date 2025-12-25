@@ -106,7 +106,7 @@ dist/
 specs/
 .specs/
 plans/
-
+media/
 .kiro/
 .secrets.baseline/
 # ============================================

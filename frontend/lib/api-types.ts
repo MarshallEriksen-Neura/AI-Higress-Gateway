@@ -918,7 +918,7 @@ export interface Message {
 export interface RunSummary {
   run_id: string;
   requested_logical_model: string;
-  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'canceled';
   output_preview?: string;
   latency?: number;
   error_code?: string;
@@ -927,6 +927,13 @@ export interface RunSummary {
     agent_id: string;
     tool_name: string;
     tool_call_id?: string | null;
+    state?: 'running' | 'done' | 'failed' | 'timeout' | 'canceled';
+    duration_ms?: number;
+    ok?: boolean;
+    canceled?: boolean;
+    exit_code?: number;
+    error?: Record<string, any> | null;
+    result_preview?: string | null;
   }>;
 }
 
@@ -971,7 +978,12 @@ export interface GetMessagesParams {
 export interface MessagesResponse {
   items: Array<{
     message: Message;
-    run?: RunSummary; // assistant 消息包含 run 摘要
+    /**
+     * 兼容字段：历史代码只使用单个 run（通常为 baseline）。
+     * 新代码优先使用 runs 数组以支持“多 run 展示”。
+     */
+    run?: RunSummary;
+    runs?: RunSummary[];
   }>;
   next_cursor?: string;
 }

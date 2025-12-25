@@ -5,7 +5,7 @@ import { Send, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ClearHistoryAction } from "@/components/chat/chat-input/clear-history-action";
 import { ImageUploadAction } from "@/components/chat/chat-input/image-attachments";
-import { ModelParametersPopover, type ModelParameterEnabled } from "@/components/chat/chat-input/model-parameters-popover";
+import { ModelParametersPopover } from "@/components/chat/chat-input/model-parameters-popover";
 import { McpSelector } from "@/components/chat/chat-input/mcp-selector";
 import { useI18n } from "@/lib/i18n-context";
 import type { ModelParameters } from "@/components/chat/chat-input/types";
@@ -21,9 +21,7 @@ interface ChatToolbarProps {
   onSend: () => void;
   sendHint: string;
   parameters: ModelParameters;
-  paramEnabled: ModelParameterEnabled;
   onParametersChange: (params: ModelParameters) => void;
-  onParamEnabledChange: (enabled: ModelParameterEnabled) => void;
   onResetParameters: () => void;
   onFilesSelected: (files: FileList | null) => Promise<void>;
 }
@@ -39,9 +37,7 @@ export function ChatToolbar({
   onSend,
   sendHint,
   parameters,
-  paramEnabled,
   onParametersChange,
-  onParamEnabledChange,
   onResetParameters,
   onFilesSelected,
 }: ChatToolbarProps) {
@@ -57,11 +53,8 @@ export function ChatToolbar({
         />
 
         <ModelParametersPopover
-          idPrefix={`chat-${conversationId}`}
           disabled={disabled || isSending}
-          enabled={paramEnabled}
           parameters={parameters}
-          onEnabledChange={onParamEnabledChange}
           onParametersChange={onParametersChange}
           onReset={onResetParameters}
           title={t("chat.message.model_parameters")}

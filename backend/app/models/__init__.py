@@ -32,6 +32,7 @@ from .registration_window import RegistrationWindow, RegistrationWindowStatus
 from .role import Role
 from .role_permission import RolePermission
 from .run import Run
+from .run_event import RunEvent
 from .system_gateway_config import GatewayConfig
 from .upstream_proxy import UpstreamProxyConfig, UpstreamProxyEndpoint, UpstreamProxySource
 from .user import User
@@ -80,6 +81,7 @@ __all__ = [
     "Role",
     "RolePermission",
     "Run",
+    "RunEvent",
     "TimestampMixin",
     "UUIDPrimaryKeyMixin",
     "UpstreamProxyConfig",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from contextlib import asynccontextmanager
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from app.routes import create_app
 from app.schemas import LogicalModel, ModelCapability, PhysicalModel, ProviderConfig
 from app.settings import settings
 from app.storage.redis_service import LOGICAL_MODEL_KEY_TEMPLATE
+from app.tasks import conversation_title
 from tests.utils import InMemoryRedis, install_inmemory_db, jwt_auth_headers
 
 
@@ -175,12 +177,16 @@ def app_with_mock_chat(monkeypatch):
     SessionLocal = install_inmemory_db(app)
 
     # Seed a public provider so provider access filtering can succeed.
+    # install_inmemory_db 里已提供默认 mock provider，这里做幂等处理避免重复插入。
     from app.models import Provider
+    from sqlalchemy import select
 
     with SessionLocal() as db:
-        provider = Provider(provider_id="mock", name="Mock Provider", base_url="https://mock.local")
-        db.add(provider)
-        db.commit()
+        exists = db.execute(select(Provider.id).where(Provider.provider_id == "mock")).scalars().first()
+        if exists is None:
+            provider = Provider(provider_id="mock", name="Mock Provider", base_url="https://mock.local")
+            db.add(provider)
+            db.commit()
 
     redis = InMemoryRedis()
 
@@ -423,10 +429,20 @@ def test_eval_context_features_fallback_to_project_ai(app_with_mock_chat, monkey
         assert features.get("risk_tier") == "low"
 
 
-def test_conversation_auto_title_generated_from_first_message(app_with_mock_chat):
-    app, SessionLocal, _ = app_with_mock_chat
+def test_conversation_auto_title_generated_from_first_message(app_with_mock_chat, monkeypatch):
+    app, SessionLocal, redis = app_with_mock_chat
     user_id, api_key_id = _get_seed_ids(SessionLocal)
     headers = jwt_auth_headers(str(user_id))
+
+    @asynccontextmanager
+    async def _http_client_for_title():
+        transport = httpx.MockTransport(_mock_send)
+        async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+            yield client
+
+    monkeypatch.setattr(conversation_title, "_get_title_session_factory", lambda: SessionLocal)
+    monkeypatch.setattr(conversation_title, "_get_title_redis", lambda: redis)
+    monkeypatch.setattr(conversation_title, "_title_http_client", _http_client_for_title)
 
     with TestClient(app) as client:
         # create assistant with title model enabled
@@ -461,6 +477,19 @@ def test_conversation_auto_title_generated_from_first_message(app_with_mock_chat
             json={"content": "你好"},
         )
         assert resp.status_code == 200
+        message_id = resp.json()["message_id"]
+        requested_model = resp.json()["baseline_run"]["requested_logical_model"]
+
+        # 触发异步标题生成逻辑（直接调用任务而非等待 Celery worker）
+        asyncio.run(
+            conversation_title.generate_conversation_title(
+                conversation_id=str(conversation_id),
+                message_id=str(message_id),
+                user_id=str(user_id),
+                assistant_id=str(assistant_id),
+                requested_model_for_title_fallback=requested_model,
+            )
+        )
 
         # list conversations should include the generated title
         resp = client.get(f"/v1/conversations?assistant_id={assistant_id}", headers=headers)
@@ -495,10 +524,20 @@ def test_project_chat_settings_get_and_update(app_with_mock_chat):
         assert data["title_logical_model"] == "test-model"
 
 
-def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_chat):
-    app, SessionLocal, _ = app_with_mock_chat
+def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_chat, monkeypatch):
+    app, SessionLocal, redis = app_with_mock_chat
     user_id, api_key_id = _get_seed_ids(SessionLocal)
     headers = jwt_auth_headers(str(user_id))
+
+    @asynccontextmanager
+    async def _http_client_for_title():
+        transport = httpx.MockTransport(_mock_send)
+        async with httpx.AsyncClient(transport=transport, timeout=30.0) as client:
+            yield client
+
+    monkeypatch.setattr(conversation_title, "_get_title_session_factory", lambda: SessionLocal)
+    monkeypatch.setattr(conversation_title, "_get_title_redis", lambda: redis)
+    monkeypatch.setattr(conversation_title, "_title_http_client", _http_client_for_title)
 
     with TestClient(app) as client:
         # set project defaults
@@ -540,7 +579,19 @@ def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_cha
             json={"content": "你好"},
         )
         assert resp.status_code == 200
-        assert resp.json()["baseline_run"]["requested_logical_model"] == "test-model-2"
+        message_id = resp.json()["message_id"]
+        requested_model = resp.json()["baseline_run"]["requested_logical_model"]
+        assert requested_model == "test-model-2"
+
+        asyncio.run(
+            conversation_title.generate_conversation_title(
+                conversation_id=str(conversation_id),
+                message_id=str(message_id),
+                user_id=str(user_id),
+                assistant_id=str(assistant_id),
+                requested_model_for_title_fallback=requested_model,
+            )
+        )
 
         resp = client.get(f"/v1/conversations?assistant_id={assistant_id}", headers=headers)
         assert resp.status_code == 200

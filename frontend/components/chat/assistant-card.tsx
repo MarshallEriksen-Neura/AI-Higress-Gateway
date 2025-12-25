@@ -86,7 +86,7 @@ export function AssistantCard({
       <AdaptiveCard
         showDecor={false}
         selected={isSelected}
-        className="cursor-pointer transition-all hover:shadow-md hover:scale-100"
+        className="cursor-pointer transition-all hover:bg-muted/40 hover:shadow-md hover:scale-100 data-[state=selected]:hover:bg-transparent"
         onClick={handleCardClick}
         onKeyDown={handleKeyDown}
         tabIndex={0}
@@ -95,8 +95,8 @@ export function AssistantCard({
         aria-pressed={isSelected}
       >
         <CardHeader>
-          <CardTitle>{assistant.name}</CardTitle>
-          <CardDescription>
+          <CardTitle className="text-[15px] leading-snug">{assistant.name}</CardTitle>
+          <CardDescription className="text-xs text-muted-foreground/75">
             {t("chat.assistant.default_model")}: {assistant.default_logical_model}
           </CardDescription>
           <CardAction>

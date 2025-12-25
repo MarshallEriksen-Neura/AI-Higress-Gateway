@@ -15,8 +15,7 @@ import {
   type SendMessageResponseBackend,
   type RunDetailBackend,
 } from '@/lib/normalizers/chat-normalizers';
-
-const SEND_MESSAGE_TIMEOUT_MS = 120_000;
+import { SEND_MESSAGE_TIMEOUT_MS, RUN_DETAIL_TIMEOUT_MS } from '@/config/timeouts';
 
 /**
  * 消息和 Run 管理服务
@@ -61,8 +60,11 @@ export const messageService = {
    * 重新生成助手消息
    */
   regenerateMessage: async (assistantMessageId: string): Promise<RegenerateMessageResponse> => {
+    // 复用较长超时，避免大模型重新生成时被前端 10s 默认超时打断
     const { data } = await httpClient.post<RegenerateMessageResponse>(
-      `/v1/messages/${assistantMessageId}/regenerate`
+      `/v1/messages/${assistantMessageId}/regenerate`,
+      undefined,
+      { timeout: SEND_MESSAGE_TIMEOUT_MS }
     );
     return data;
   },
@@ -78,7 +80,9 @@ export const messageService = {
    * 获取 Run 详情（惰性加载完整数据）
    */
   getRun: async (runId: string): Promise<RunDetail> => {
-    const { data } = await httpClient.get<RunDetailBackend>(`/v1/runs/${runId}`);
+    const { data } = await httpClient.get<RunDetailBackend>(`/v1/runs/${runId}`, {
+      timeout: RUN_DETAIL_TIMEOUT_MS,
+    });
     return normalizeRunDetail(data);
   },
 };

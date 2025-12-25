@@ -507,7 +507,7 @@ export function ConversationPageClient({
       </div>
 
       <Dialog open={isImmersive} onOpenChange={setIsImmersive}>
-        <DialogContent className="max-w-[100vw] w-screen h-screen p-0 border-0 rounded-none bg-background flex flex-col z-[100]">
+        <DialogContent className="max-w-[100vw] w-screen h-screen p-0 border-0 rounded-none bg-background flex flex-col z-[100] [&>button]:hidden">
           <VisuallyHidden>
             <DialogTitle>{t("chat.header.immersive_title")}</DialogTitle>
           </VisuallyHidden>

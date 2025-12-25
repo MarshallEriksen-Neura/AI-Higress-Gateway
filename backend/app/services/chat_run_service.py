@@ -148,7 +148,9 @@ def create_run_record(
     message_id: UUID,
     requested_logical_model: str,
     request_payload: dict[str, Any],
+    status: str = "running",
 ) -> Run:
+    status = str(status or "").strip() or "running"
     run = Run(
         message_id=message_id,
         user_id=user_id,
@@ -156,8 +158,8 @@ def create_run_record(
         requested_logical_model=requested_logical_model,
         selected_provider_id=None,
         selected_provider_model=None,
-        status="running",
-        started_at=datetime.now(UTC),
+        status=status,
+        started_at=datetime.now(UTC) if status == "running" else None,
         finished_at=None,
         latency_ms=None,
         cost_credits=None,

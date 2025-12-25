@@ -14,6 +14,7 @@ interface ChatEditorProps {
   placeholder: string;
   onKeyDown: (event: KeyboardEvent) => void;
   onPaste: (event: ClipboardEvent) => void;
+  className?: string;
 }
 
 export function ChatEditor({
@@ -25,9 +26,13 @@ export function ChatEditor({
   placeholder,
   onKeyDown,
   onPaste,
+  className,
 }: ChatEditorProps) {
   return (
-    <div ref={editorRef} className="flex-1 px-3 pt-3 pb-2 overflow-y-auto">
+    <div
+      ref={editorRef}
+      className={cn("flex-1 min-h-0 px-3 pt-3 pb-2 overflow-y-auto min-h-[72px]", className)}
+    >
       <Slate editor={editor} initialValue={initialValue}>
         <Editable
           placeholder={placeholder}

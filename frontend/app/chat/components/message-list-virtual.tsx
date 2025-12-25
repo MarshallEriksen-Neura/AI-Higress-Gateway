@@ -125,7 +125,7 @@ export function MessageListVirtual({
                   <div className="flex gap-3 justify-end items-start group">
                     <div className="flex flex-col items-end gap-2 max-w-[70%]">
                       <div className="relative bg-gradient-to-br from-[#7c3aed] via-[#6d28d9] to-[#5b21b6] text-white rounded-[22px] rounded-tr-[6px] rounded-br-[22px] rounded-bl-[22px] px-5 py-3.5 shadow-[0_8px_24px_rgba(124,58,237,0.25)]">
-                        <p className="text-[15px] leading-[1.6] whitespace-pre-wrap font-[system-ui,-apple-system,sans-serif]">
+                        <p className="text-[15px] leading-[1.65] tracking-[0.01em] whitespace-pre-wrap break-words">
                           {message.content}
                         </p>
                       </div>
@@ -158,7 +158,7 @@ export function MessageListVirtual({
                       <div className="group/bubble relative bg-background rounded-[22px] rounded-tl-[6px] px-6 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.04),0_8px_32px_rgba(0,0,0,0.06)]">
                         {/* Markdown 内容区域 - 优化行高和间距 */}
                         <div className="prose prose-sm max-w-none">
-                          <div className="text-[15px] leading-[1.7] whitespace-pre-wrap font-[system-ui,-apple-system,sans-serif] text-foreground/90">
+                          <div className="text-[15px] leading-[1.7] tracking-[0.01em] whitespace-pre-wrap break-words text-foreground/90">
                             {/* 解析内容中的关键词并高亮 */}
                             {message.content.split('\n').map((line, idx) => {
                               // 检测列表项

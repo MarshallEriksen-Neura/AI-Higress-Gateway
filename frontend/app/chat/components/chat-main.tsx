@@ -191,7 +191,7 @@ export function ChatMain() {
                   ? "输入您的消息，按 Enter 键发送..."
                   : "输入您的消息，按 Ctrl + Enter 键发送..."
               }
-              className="min-h-[72px] max-h-[200px] border-0 bg-transparent rounded-2xl resize-none focus-visible:ring-0 focus-visible:ring-offset-0 pr-32 text-[15px] leading-[1.6] placeholder:text-muted-foreground/40 font-[system-ui,-apple-system,sans-serif]"
+              className="min-h-[72px] max-h-[200px] border-0 bg-transparent rounded-2xl resize-none focus-visible:ring-0 focus-visible:ring-offset-0 pr-32 text-[15px] leading-[1.65] tracking-[0.01em] placeholder:text-muted-foreground/40"
             />
             {/* 工具栏 */}
             <div className="absolute bottom-3 right-3 flex items-center gap-1">

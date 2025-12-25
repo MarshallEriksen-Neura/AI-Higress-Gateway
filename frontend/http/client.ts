@@ -1,6 +1,9 @@
+"use client";
+
 import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError, InternalAxiosRequestConfig } from 'axios';
 import { tokenManager } from '@/lib/auth/token-manager';
 import { ErrorHandler } from '@/lib/errors';
+import { HTTP_DEFAULT_TIMEOUT_MS } from '@/config/timeouts';
 
 // 认证状态变更回调
 let authErrorCallback: (() => void) | null = null;
@@ -102,7 +105,7 @@ const refreshAccessToken = async (): Promise<string> => {
 const createHttpClient = (): AxiosInstance => {
   const instance = axios.create({
     baseURL: BASE_URL,
-    timeout: 10000,
+    timeout: HTTP_DEFAULT_TIMEOUT_MS,
     // 需要携带跨域 Cookie 才能拿到后端设置的 HttpOnly refresh_token
     withCredentials: true,
     headers: {

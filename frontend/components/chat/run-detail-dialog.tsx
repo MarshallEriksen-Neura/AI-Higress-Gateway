@@ -1,6 +1,6 @@
 "use client";
 
-import { Loader2, CheckCircle2, XCircle, Clock, Coins } from "lucide-react";
+import { Loader2, CheckCircle2, XCircle, Clock, Coins, Ban } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,11 @@ export function RunDetailDialog({
         icon: XCircle,
         label: t("chat.run.status_failed"),
         className: "text-red-600 dark:text-red-400",
+      },
+      canceled: {
+        icon: Ban,
+        label: t("chat.run.status_canceled"),
+        className: "text-muted-foreground",
       },
     };
 
