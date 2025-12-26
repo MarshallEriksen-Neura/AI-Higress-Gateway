@@ -1210,6 +1210,23 @@
 
 
 
+### 2. 短链图片读取（签名 URL）
+
+当 `POST /v1/images/generations` 返回的 `data[*].url` 为网关短链（`/media/images/...`）时，
+该 URL 可在有效期内直接访问图片内容（无需登录/无需 API Key）。
+
+**接口**: `GET /media/images/{object_key}`
+
+**描述**: 通过签名短链读取 OSS 私有桶中的图片对象。
+
+**认证**: 无（通过签名参数校验）
+
+**查询参数**:
+- `expires` (int, 必填): 过期时间戳（Unix seconds）
+- `sig` (string, 必填): HMAC 签名
+
+**成功响应**: `200 OK`，返回图片二进制内容（`Content-Type` 为 `image/png`/`image/jpeg`/`image/webp` 等）
+
 ### 计费规则
 
 网关在记录一次 LLM 调用的 usage 时，会根据 token 用量和配置计算本次应扣的积分：

@@ -27,6 +27,7 @@ export const ConversationChatInput = memo(function ConversationChatInput({
   className?: string;
 }) {
   const { t } = useI18n();
+  const projectId = useChatStore((s) => s.selectedProjectId);
   const bridgeToolSelections =
     useChatStore((s) => s.conversationBridgeToolSelections[conversationId]) ?? {};
   const defaultBridgeToolSelections =
@@ -96,6 +97,13 @@ export const ConversationChatInput = memo(function ConversationChatInput({
 
   const handleImageSend = useCallback(
     async (payload: { prompt: string; params: ImageGenParams }) => {
+      const trimmedPrompt = payload.prompt.trim();
+      if (!trimmedPrompt) return;
+      if (!payload.params.model) {
+        toast.error(t("chat.image_gen.select_model"));
+        return;
+      }
+
       const taskId = uuidv4();
       const createdAt = Date.now();
 
@@ -103,12 +111,13 @@ export const ConversationChatInput = memo(function ConversationChatInput({
         id: taskId,
         conversationId,
         status: "pending",
-        prompt: payload.prompt,
+        prompt: trimmedPrompt,
         params: {
           model: payload.params.model,
-          prompt: payload.prompt,
+          prompt: trimmedPrompt,
           n: payload.params.n,
           size: payload.params.size,
+          response_format: "url",
         },
         createdAt,
       });
@@ -116,9 +125,10 @@ export const ConversationChatInput = memo(function ConversationChatInput({
       try {
         const result = await generateImage({
           model: payload.params.model,
-          prompt: payload.prompt,
+          prompt: trimmedPrompt,
           n: payload.params.n,
           size: payload.params.size,
+          response_format: "url",
         });
         updateImageGenTask(taskId, { status: "success", result });
         toast.success(t("chat.image_gen.success"));
@@ -138,6 +148,7 @@ export const ConversationChatInput = memo(function ConversationChatInput({
     <SlateChatInput
       conversationId={conversationId}
       assistantId={assistantId}
+      projectId={projectId}
       disabled={disabled}
       className={className}
       onSend={handleSlateSend}

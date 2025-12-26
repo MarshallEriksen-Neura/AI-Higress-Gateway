@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import {
   Select,
@@ -49,13 +49,11 @@ export function ImageGenParamsBar({
     return imageModels[0]?.logical_id || "";
   }, [imageModels, params.model]);
 
-  // If the model changed due to validation, notify parent
-  if (selectedModel && selectedModel !== params.model) {
-     // Side-effect in render is bad, but we rely on parent to pass correct initial state or user interaction
-     // For now we just display correctly, but effective param might be desync until user changes it.
-     // Better: useEffect to sync? Or just let user select.
-     // We will stick to controlled component pattern.
-  }
+  useEffect(() => {
+    if (!selectedModel) return;
+    if (selectedModel === params.model) return;
+    onChange({ ...params, model: selectedModel });
+  }, [selectedModel, params, onChange]);
 
   return (
     <div className="flex items-center gap-4 px-4 py-2 border-b bg-muted/30 text-xs">
@@ -63,7 +61,7 @@ export function ImageGenParamsBar({
       <div className="flex items-center gap-2">
         <Label className="text-muted-foreground whitespace-nowrap">{t("chat.image_gen.model")}</Label>
         <Select
-          value={params.model}
+          value={selectedModel}
           onValueChange={(val) => onChange({ ...params, model: val })}
           disabled={disabled || imageModels.length === 0}
         >

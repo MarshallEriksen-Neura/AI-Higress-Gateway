@@ -357,6 +357,45 @@ export function useSendMessageToConversation(
           };
         };
 
+        const normalizeSseEvent = (
+          outer: Record<string, unknown>,
+          sseEvent: string
+        ): {
+          type: string;
+          record: Record<string, unknown>;
+          outer: Record<string, unknown>;
+        } | null => {
+          const rawOuterType = getString(outer, 'type');
+          const outerType = rawOuterType && rawOuterType !== 'message' ? rawOuterType : '';
+          const fallbackEvent = typeof sseEvent === 'string' && sseEvent !== 'message' ? sseEvent : '';
+
+          if (outerType === 'run.event') {
+            const eventType = getString(outer, 'event_type') || fallbackEvent;
+            const payload = toRecord(outer['payload']);
+            const runId = getString(outer, 'run_id');
+            if (payload) {
+              const payloadType = getString(payload, 'type') || eventType;
+              const payloadRunId = getString(payload, 'run_id');
+              const mergedPayload =
+                runId && !payloadRunId ? { ...payload, run_id: runId } : payload;
+              return {
+                type: payloadType,
+                record: mergedPayload,
+                outer,
+              };
+            }
+            return {
+              type: eventType,
+              record: outer,
+              outer,
+            };
+          }
+
+          const type = outerType || fallbackEvent;
+          if (!type) return null;
+          return { type, record: outer, outer };
+        };
+
         const streamUrl = `/v1/conversations/${conversationId}/messages`;
 
         await streamSSERequest(
@@ -377,18 +416,21 @@ export function useSendMessageToConversation(
             } catch {
               return;
             }
-            const rec = toRecord(parsed);
-            if (!rec) return;
-            const type = getString(rec, 'type') || msg.event || '';
+            const outer = toRecord(parsed);
+            if (!outer) return;
+            const normalized = normalizeSseEvent(outer, msg.event);
+            if (!normalized) return;
+            const { type, record: rec, outer: outerRec } = normalized;
             if (!type) return;
 
             if (type === 'message.created') {
-              const newUserId = getString(rec, 'user_message_id');
-              const newAssistantId = getString(rec, 'assistant_message_id');
+              const newUserId = getString(rec, 'user_message_id') || getString(outerRec, 'user_message_id');
+              const newAssistantId =
+                getString(rec, 'assistant_message_id') || getString(outerRec, 'assistant_message_id');
               if (newUserId) userMessageId = newUserId;
               if (newAssistantId) assistantMessageId = newAssistantId;
 
-              baselineRun = parseRunSummary(rec['baseline_run']);
+              baselineRun = parseRunSummary(rec['baseline_run'] ?? outerRec['baseline_run']);
 
               void globalMutate(
                 messagesKey,
@@ -420,14 +462,14 @@ export function useSendMessageToConversation(
 
             // 兼容：若后端未来在 chat SSE 里直接透传 tool.* 事件，这里同步写入工具事件 store
             if (type === 'tool.status' || type === 'tool.result') {
-              const runId = getString(rec, 'run_id');
+              const runId = getString(rec, 'run_id') || getString(outerRec, 'run_id');
               if (!runId) return;
               useRunToolEventsStore.getState().apply_tool_event(runId, 0, rec as any);
               return;
             }
 
             if (type === 'message.delta') {
-              const delta = getString(rec, 'delta');
+              const delta = getString(rec, 'delta') || getString(outerRec, 'delta');
               if (!delta) return;
               assistantBuffer += delta;
               clearPending();
@@ -438,10 +480,10 @@ export function useSendMessageToConversation(
             if (type === 'message.completed' || type === 'message.failed') {
               flushBuffer(true);
               clearPending();
-              const finalRun = parseRunSummary(rec['baseline_run']);
+              const finalRun = parseRunSummary(rec['baseline_run'] ?? outerRec['baseline_run']);
               if (finalRun) baselineRun = finalRun;
 
-              const outputText = getString(rec, 'output_text');
+              const outputText = getString(rec, 'output_text') || getString(outerRec, 'output_text');
               if (outputText) assistantText = outputText;
 
               void globalMutate(

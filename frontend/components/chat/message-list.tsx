@@ -119,8 +119,10 @@ export const MessageList = memo(function MessageList({
   } | null>(null);
 
   // Get image generation tasks
-  const imageTasks = useImageGenStore((s) => 
-    s.tasks.filter(t => t.conversationId === conversationId)
+  const imageGenTasks = useImageGenStore((s) => s.tasks);
+  const imageTasks = useMemo(
+    () => imageGenTasks.filter((t) => t.conversationId === conversationId),
+    [imageGenTasks, conversationId]
   );
 
   useEffect(() => {

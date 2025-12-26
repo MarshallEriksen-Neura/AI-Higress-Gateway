@@ -34,6 +34,7 @@ interface ChatToolbarProps {
   onParametersChange: (params: ModelParameters) => void;
   onResetParameters: () => void;
   onFilesSelected: (files: FileList | null) => Promise<void>;
+  hideModeSwitcher?: boolean;
 }
 
 export function ChatToolbar({
@@ -52,6 +53,7 @@ export function ChatToolbar({
   onParametersChange,
   onResetParameters,
   onFilesSelected,
+  hideModeSwitcher = false,
 }: ChatToolbarProps) {
   const { t } = useI18n();
 
@@ -59,23 +61,30 @@ export function ChatToolbar({
     <div className="flex items-center justify-between px-2 py-2 border-t bg-muted/30">
       <div className="flex items-center gap-1">
         {/* Mode Switcher */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon-sm" disabled={disabled || isSending} title="Switch Mode">
-              <Plus className="size-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start">
-            <DropdownMenuItem onClick={() => onModeChange?.("chat")}>
-              <MessageSquare className="size-4 mr-2" />
-              {t("chat.image_gen.mode_chat")}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onModeChange?.("image")}>
-              <ImageIcon className="size-4 mr-2" />
-              {t("chat.image_gen.mode_image")}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {!hideModeSwitcher && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                disabled={disabled || isSending}
+                title={t("chat.image_gen.switch_mode")}
+              >
+                <Plus className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => onModeChange?.("chat")}>
+                <MessageSquare className="size-4 mr-2" />
+                {t("chat.image_gen.mode_chat")}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onModeChange?.("image")}>
+                <ImageIcon className="size-4 mr-2" />
+                {t("chat.image_gen.mode_image")}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
 
         <ImageUploadAction
           disabled={disabled || isSending || mode === "image"}

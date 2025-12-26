@@ -23,6 +23,10 @@
 
 请求/响应 schema（后端源）：`backend/app/schemas/image.py`
 
+补充：当调用方请求 `response_format="url"` 时：
+- 若配置了阿里 OSS（`IMAGE_OSS_*`），网关会返回 `/media/images/...` 形式的签名短链 URL（无需登录/无需 API Key）；
+- 若未配置 OSS，网关会退化为 `data:image/...;base64,...` 的 Data URL（前端可直接渲染）。
+
 ### 2) 模型能力（capabilities）
 
 文生图能力以 `image_generation` 表示：
@@ -170,4 +174,3 @@ type ImageGenMessage = {
 - 用户在 Chat 输入框输入 prompt，切到“文生图”后发送，可在对话流中看到生成过程态与最终图片。
 - 图片模型仅显示具备 `image_generation` 能力的模型；发送时不会影响聊天模式默认模型。
 - 点击图片打开详情 Modal，能查看 prompt/参数并下载图片；未实现的“重绘/变体”有清晰的禁用提示。
-

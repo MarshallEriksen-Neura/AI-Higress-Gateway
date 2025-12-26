@@ -46,6 +46,7 @@ const MAX_IMAGES = 3;
 export interface SlateChatInputProps {
   conversationId: string;
   assistantId?: string;
+  projectId?: string | null;
   disabled?: boolean;
   
   // Mode support
@@ -53,6 +54,7 @@ export interface SlateChatInputProps {
   onModeChange?: (mode: ComposerMode) => void;
   imageGenParams?: ImageGenParams;
   onImageGenParamsChange?: (params: ImageGenParams) => void;
+  hideModeSwitcher?: boolean;
 
   onSend?:
     | ((
@@ -80,11 +82,13 @@ export interface SlateChatInputProps {
 
 export function SlateChatInput({
   conversationId,
+  projectId = null,
   disabled = false,
   mode = "chat",
   onModeChange,
   imageGenParams,
   onImageGenParamsChange,
+  hideModeSwitcher = false,
   onSend,
   onImageSend,
   onClearHistory,
@@ -326,7 +330,7 @@ export function SlateChatInput({
 
   return (
     <div className={cn("relative flex h-full flex-col bg-background", className)}>
-      <div className="flex min-h-0 flex-1 flex-col justify-end px-4 pt-4 pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
+      <div className="flex min-h-0 flex-1 flex-col justify-end px-4 pt-1  pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
         <div className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col gap-3">
           {mode === "chat" && (
             <ImagePreviewGrid
@@ -348,6 +352,7 @@ export function SlateChatInput({
           >
             {mode === "image" && imageGenParams && onImageGenParamsChange && (
               <ImageGenParamsBar
+                projectId={projectId}
                 params={imageGenParams}
                 onChange={onImageGenParamsChange}
                 disabled={disabled || isSending}
@@ -388,6 +393,7 @@ export function SlateChatInput({
                 resetModelParameters();
               }}
               onFilesSelected={handleFilesSelected}
+              hideModeSwitcher={hideModeSwitcher}
             />
           </div>
 

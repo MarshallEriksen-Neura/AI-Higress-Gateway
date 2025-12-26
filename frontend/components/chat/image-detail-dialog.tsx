@@ -56,7 +56,9 @@ export function ImageDetailDialog({
               {t("chat.image_gen.download")}
             </Button>
             <DialogClose asChild>
-               {/* Close button is handled by DialogContent usually, but we can add extra if needed */}
+              <Button variant="ghost" size="icon-sm" aria-label={t("chat.action.close")}>
+                <X className="size-4" aria-hidden="true" />
+              </Button>
             </DialogClose>
           </div>
         </DialogHeader>
@@ -72,7 +74,7 @@ export function ImageDetailDialog({
                 className="max-w-full max-h-full object-contain rounded shadow-sm"
               />
             ) : (
-              <div className="text-muted-foreground">No image data</div>
+              <div className="text-muted-foreground">{t("chat.image_gen.no_image_data")}</div>
             )}
           </div>
 
@@ -85,7 +87,7 @@ export function ImageDetailDialog({
                   <p className="text-sm text-muted-foreground whitespace-pre-wrap">{task.prompt}</p>
                   {image.revised_prompt && (
                     <div className="mt-4 p-3 bg-muted rounded text-xs">
-                      <div className="font-semibold mb-1 opacity-70">Revised Prompt</div>
+                      <div className="font-semibold mb-1 opacity-70">{t("chat.image_gen.revised_prompt")}</div>
                       {image.revised_prompt}
                     </div>
                   )}

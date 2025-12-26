@@ -70,7 +70,7 @@ export function ImageGenerationItem({ task }: ImageGenerationItemProps) {
                  {/* eslint-disable-next-line @next/next/no-img-element */}
                  <img 
                    src={src} 
-                   alt={`Generated ${idx + 1}`} 
+                   alt={t("chat.image_gen.generated_image_alt", { index: idx + 1 })} 
                    className="w-full h-full object-cover" 
                  />
                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />

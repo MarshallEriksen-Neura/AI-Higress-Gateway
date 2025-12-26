@@ -394,6 +394,7 @@ export function ChatLayoutRootClient({
               <ConversationList
                 conversations={conversations}
                 isLoading={isLoadingConversations}
+                assistantId={selectedAssistantId || undefined}
                 selectedConversationId={selectedConversationId || undefined}
                 onSelectConversation={handleSelectConversation}
                 onCreateConversation={handleCreateConversation}

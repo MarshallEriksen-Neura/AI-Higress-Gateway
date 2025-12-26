@@ -1,5 +1,7 @@
 import { renderHook, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createElement } from 'react';
+import { SWRConfig } from 'swr';
 import {
   useClearConversationMessages,
   useMessages,
@@ -8,6 +10,7 @@ import {
   useSendMessageToConversation,
 } from '../use-messages';
 import { messageService } from '@/http/message';
+import { streamSSERequest } from '@/lib/bridge/sse';
 import type { MessagesResponse, RunDetail, SendMessageResponse } from '@/lib/api-types';
 
 // Mock messageService
@@ -20,8 +23,24 @@ vi.mock('@/http/message', () => ({
   },
 }));
 
+vi.mock('@/lib/bridge/sse', () => ({
+  streamSSERequest: vi.fn(),
+}));
+
+vi.mock('@/lib/swr/use-bridge', () => ({
+  useBridgeAgents: () => ({ agents: [] }),
+}));
+
+vi.mock('@/lib/hooks/use-conversation-pending', () => ({
+  useConversationPending: () => ({ setPending: vi.fn() }),
+}));
+
 // Mock SWR provider wrapper
 const wrapper = ({ children }: { children: React.ReactNode }) => children;
+
+const swrWrapper = ({ children }: { children: React.ReactNode }) => (
+  createElement(SWRConfig, { value: { provider: () => new Map(), dedupingInterval: 0 } }, children)
+);
 
 describe('useMessages', () => {
   beforeEach(() => {
@@ -195,6 +214,70 @@ describe('useSendMessage', () => {
     await expect(result.current({ content: 'Hello' })).rejects.toThrow(
       'Failed to send message'
     );
+  });
+
+  it('should handle run.event enveloped streaming events', async () => {
+    vi.mocked(streamSSERequest).mockImplementation(
+      async (_url, _init, onMessage, _signal) => {
+        onMessage({
+          event: 'message.created',
+          data: JSON.stringify({
+            type: 'run.event',
+            run_id: 'run-1',
+            seq: 1,
+            event_type: 'message.created',
+            payload: {
+              type: 'message.created',
+              user_message_id: 'msg-user-1',
+              assistant_message_id: 'msg-assistant-1',
+              baseline_run: {
+                run_id: 'run-1',
+                requested_logical_model: 'gpt-4',
+                status: 'running',
+              },
+            },
+          }),
+        });
+
+        onMessage({
+          event: 'message.delta',
+          data: JSON.stringify({
+            type: 'run.event',
+            run_id: 'run-1',
+            seq: 2,
+            event_type: 'message.delta',
+            payload: { type: 'message.delta', delta: 'hi' },
+          }),
+        });
+
+        onMessage({
+          event: 'message.completed',
+          data: JSON.stringify({
+            type: 'run.event',
+            run_id: 'run-1',
+            seq: 3,
+            event_type: 'message.completed',
+            payload: {
+              type: 'message.completed',
+              output_text: 'hi',
+              baseline_run: {
+                run_id: 'run-1',
+                requested_logical_model: 'gpt-4',
+                status: 'succeeded',
+                output_preview: 'hi',
+              },
+            },
+          }),
+        });
+      }
+    );
+
+    const { result } = renderHook(() => useSendMessage('conv-1'), { wrapper: swrWrapper });
+
+    const response = await result.current({ content: 'Hello' }, { streaming: true });
+
+    expect(response.baseline_run.status).toBe('succeeded');
+    expect(streamSSERequest).toHaveBeenCalled();
   });
 });
 

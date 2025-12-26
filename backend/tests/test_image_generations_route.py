@@ -180,7 +180,7 @@ def test_images_generations_url_format_falls_back_to_data_url_when_oss_not_confi
             200,
             json={
                 "created": 1700000000,
-                "data": [{"b64_json": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB", "revised_prompt": "a cat"}],
+                "data": [{"b64_json": "iVBORw0KGgo=", "revised_prompt": "a cat"}],
             },
         )
 
