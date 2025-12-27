@@ -221,6 +221,13 @@ export interface ProviderModelAlias {
   alias: string | null;
 }
 
+// provider+model 维度的能力配置（覆盖上游 /models 的 capabilities）
+export interface ProviderModelCapabilities {
+  provider_id: string;
+  model_id: string;
+  capabilities: string[];
+}
+
 // provider+model 维度的禁用状态
 export interface ProviderModelDisabled {
   provider_id: string;
@@ -456,6 +463,34 @@ export const providerService = {
   ): Promise<ProviderModelAlias> => {
     const response = await httpClient.put(
       `/providers/${providerId}/models/${encodeURIComponent(modelId)}/mapping`,
+      data
+    );
+    return response.data;
+  },
+
+  /**
+   * 获取指定 provider+model 的能力配置
+   */
+  getProviderModelCapabilities: async (
+    providerId: string,
+    modelId: string
+  ): Promise<ProviderModelCapabilities> => {
+    const response = await httpClient.get(
+      `/providers/${providerId}/models/${encodeURIComponent(modelId)}/capabilities`
+    );
+    return response.data;
+  },
+
+  /**
+   * 更新指定 provider+model 的能力配置（覆盖 capabilities）
+   */
+  updateProviderModelCapabilities: async (
+    providerId: string,
+    modelId: string,
+    data: { capabilities: string[] }
+  ): Promise<ProviderModelCapabilities> => {
+    const response = await httpClient.put(
+      `/providers/${providerId}/models/${encodeURIComponent(modelId)}/capabilities`,
       data
     );
     return response.data;

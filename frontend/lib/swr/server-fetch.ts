@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import { REQUEST_TITLE_HEADER_NAME, REQUEST_TITLE_HEADER_VALUE } from '@/config/headers';
 
 async function refreshServerAccessToken(
   apiUrl: string,
@@ -10,6 +11,7 @@ async function refreshServerAccessToken(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
         // 关键：SSR 请求不会自动携带浏览器 Cookie，需手动透传 refresh_token
         Cookie: `refresh_token=${refreshToken}`,
         'Cache-Control': 'no-store',
@@ -55,7 +57,10 @@ export async function serverFetch<T>(
       process.env.NEXT_PUBLIC_API_URL ||
       'http://localhost:8000';
 
-    const normalizedHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+    const normalizedHeaders: Record<string, string> = {
+      'Content-Type': 'application/json',
+      [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
+    };
     if (options?.headers instanceof Headers) {
       options.headers.forEach((value, key) => {
         normalizedHeaders[key] = value;
@@ -71,6 +76,7 @@ export async function serverFetch<T>(
     }
     // 与 fetch 的 no-store 行为保持一致，避免使用缓存
     normalizedHeaders['Cache-Control'] = 'no-store';
+    normalizedHeaders[REQUEST_TITLE_HEADER_NAME] = REQUEST_TITLE_HEADER_VALUE;
 
     const url = new URL(endpoint, apiUrl);
     const method = options?.method ?? 'GET';

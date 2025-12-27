@@ -4,6 +4,7 @@ import axios, { AxiosInstance, AxiosRequestConfig, AxiosResponse, AxiosError, In
 import { tokenManager } from '@/lib/auth/token-manager';
 import { ErrorHandler } from '@/lib/errors';
 import { HTTP_DEFAULT_TIMEOUT_MS } from '@/config/timeouts';
+import { REQUEST_TITLE_HEADER_NAME, REQUEST_TITLE_HEADER_VALUE } from '@/config/headers';
 
 // 认证状态变更回调
 let authErrorCallback: (() => void) | null = null;
@@ -67,7 +68,10 @@ export const refreshAccessToken = async (): Promise<string> => {
       `${BASE_URL}/auth/refresh`,
       {},
       {
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
+        },
         withCredentials: true, // 确保跨域发送 cookie
         validateStatus: () => true, // 由下方统一处理状态码
       }
@@ -104,12 +108,19 @@ const createHttpClient = (): AxiosInstance => {
     withCredentials: true,
     headers: {
       'Content-Type': 'application/json',
+      [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
     },
   });
 
   // 请求拦截器
   instance.interceptors.request.use(
     async (config: InternalAxiosRequestConfig) => {
+      if (typeof (config.headers as any)?.set === 'function') {
+        (config.headers as any).set(REQUEST_TITLE_HEADER_NAME, REQUEST_TITLE_HEADER_VALUE);
+      } else {
+        (config.headers as any)[REQUEST_TITLE_HEADER_NAME] = REQUEST_TITLE_HEADER_VALUE;
+      }
+
       // 从 tokenManager 获取 token
       let token = tokenManager.getAccessToken();
       const apiKey = typeof window !== 'undefined' 

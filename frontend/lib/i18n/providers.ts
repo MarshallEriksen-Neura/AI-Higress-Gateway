@@ -178,12 +178,35 @@ export const providersTranslations: Record<Language, Record<string, string>> = {
     "providers.model_pricing_not_configured": "Not configured",
     "providers.model_edit_pricing": "Edit Pricing",
     "providers.model_edit_alias": "Edit Alias",
+    "providers.model_settings_button": "Settings",
     "providers.model_disabled_badge": "Disabled",
     "providers.model_disable_toggle_label": "Disable",
     "providers.model_disable_success": "Model disabled",
     "providers.model_disable_error": "Failed to disable model",
     "providers.model_enable_success": "Model enabled",
     "providers.model_enable_error": "Failed to enable model",
+
+    // Provider Detail - Model Settings
+    "providers.model_settings_title": "Model settings",
+    "providers.model_settings_tab_config": "Config",
+    "providers.model_settings_tab_pricing": "Pricing",
+    "providers.model_settings_save_success": "Settings saved",
+    "providers.model_settings_save_error": "Failed to save settings",
+    "providers.model_settings_footer_config": "Edit alias and capabilities",
+    "providers.model_settings_footer_pricing": "Edit pricing configuration",
+    "providers.model_settings_readonly": "Read-only",
+
+    // Provider Detail - Model Capabilities
+    "providers.model_capabilities_title": "Capabilities",
+    "providers.model_capabilities_hint": "Capabilities affect routing and feature availability (e.g. image generation).",
+    "providers.pricing_permission_denied": "You do not have permission to edit pricing for this provider.",
+    "providers.capability_chat": "Chat",
+    "providers.capability_completion": "Completion",
+    "providers.capability_embedding": "Embedding",
+    "providers.capability_vision": "Vision",
+    "providers.capability_audio": "Audio",
+    "providers.capability_function_calling": "Function calling",
+    "providers.capability_image_generation": "Image generation",
 
     // Private sharing
     "providers.sharing_title": "Private sharing",
@@ -498,12 +521,35 @@ export const providersTranslations: Record<Language, Record<string, string>> = {
     "providers.model_pricing_not_configured": "未配置",
     "providers.model_edit_pricing": "编辑计费",
     "providers.model_edit_alias": "编辑别名",
+    "providers.model_settings_button": "设置",
     "providers.model_disabled_badge": "已禁用",
     "providers.model_disable_toggle_label": "禁用模型",
     "providers.model_disable_success": "模型已禁用",
     "providers.model_disable_error": "禁用模型失败",
     "providers.model_enable_success": "模型已启用",
     "providers.model_enable_error": "启用模型失败",
+
+    // Provider Detail - Model Settings
+    "providers.model_settings_title": "模型设置",
+    "providers.model_settings_tab_config": "配置",
+    "providers.model_settings_tab_pricing": "计费",
+    "providers.model_settings_save_success": "设置已保存",
+    "providers.model_settings_save_error": "保存设置失败",
+    "providers.model_settings_footer_config": "编辑别名与能力",
+    "providers.model_settings_footer_pricing": "编辑计费配置",
+    "providers.model_settings_readonly": "只读",
+
+    // Provider Detail - Model Capabilities
+    "providers.model_capabilities_title": "模型能力",
+    "providers.model_capabilities_hint": "模型能力会影响路由与功能可用性（例如文生图）。",
+    "providers.pricing_permission_denied": "你没有权限编辑该 Provider 的计费配置。",
+    "providers.capability_chat": "对话（Chat）",
+    "providers.capability_completion": "补全（Completion）",
+    "providers.capability_embedding": "向量（Embedding）",
+    "providers.capability_vision": "视觉（Vision）",
+    "providers.capability_audio": "音频（Audio）",
+    "providers.capability_function_calling": "函数调用（Function Calling）",
+    "providers.capability_image_generation": "文生图（Image Generation）",
 
     // 私有分享
     "providers.sharing_title": "私有分享",

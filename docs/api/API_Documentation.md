@@ -1974,6 +1974,50 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 
 ---
 
+### 3.3 管理单个模型的能力（capabilities）
+
+> 仅限：超级管理员或该私有/受限 Provider 的所有者。
+
+当上游 `/models` 未正确声明模型能力（例如把文生图挂在 chat 接口、或缺少 `image_generation` 标记）时，可在网关侧为单个 provider+model 配置能力覆盖。
+
+**接口（获取）**: `GET /providers/{provider_id}/models/{model_id}/capabilities`  
+**认证**: JWT 令牌  
+
+**响应示例**:
+```json
+{
+  "provider_id": "my-private-provider",
+  "model_id": "nano-banana-pro",
+  "capabilities": ["chat", "image_generation"]
+}
+```
+
+**接口（更新）**: `PUT /providers/{provider_id}/models/{model_id}/capabilities`  
+**认证**: JWT 令牌  
+
+**请求体**:
+```json
+{
+  "capabilities": ["chat", "image_generation"]
+}
+```
+
+支持的能力值：
+- `chat`
+- `completion`
+- `embedding`
+- `vision`
+- `audio`
+- `function_calling`
+- `image_generation`
+
+**错误响应**:
+- 403: 当前用户无权修改该 Provider 的模型配置；
+- 404: Provider 不存在；
+- 422: capabilities 包含未知枚举值或为空。
+
+---
+
 ### 5. 获取提供商路由指标（实时快照）
 
 **接口**: `GET /providers/{provider_id}/metrics`

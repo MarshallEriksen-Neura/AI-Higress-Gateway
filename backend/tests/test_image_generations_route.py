@@ -82,7 +82,7 @@ def test_images_generations_openai_lane_happy_path(client, db_session, monkeypat
             "extra_body": {"openai": {"size": "512x512"}},
         },
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     assert seen["url"] == "https://upstream.example.com/v1/images/generations"
     assert isinstance(seen["json_body"], dict)
     assert "extra_body" not in seen["json_body"]
@@ -123,11 +123,276 @@ def test_images_generations_omits_response_format_when_null(
             "response_format": None,
         },
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 200, resp.text
     assert isinstance(seen.get("json_body"), dict)
     assert "response_format" not in seen["json_body"]
     payload = resp.json()
     assert payload["data"][0]["b64_json"] == "AAAB"
+
+
+def test_images_generations_chat_completions_compat_payload_shape(
+    client, db_session, monkeypatch, api_key_auth_header
+):
+    provider_id = "openai-chat-images"
+    model_id = "chat-image-1"
+    provider = Provider(
+        provider_id=provider_id,
+        name="Chat Images Provider",
+        base_url="https://upstream.example.com",
+        transport="http",
+        chat_completions_path="/v1/chat/completions",
+        # Non-standard: provider expects chat payload for image generation.
+        images_generations_path="/v1/chat/completions",
+        static_models=[
+            {
+                "id": model_id,
+                "display_name": model_id,
+                "family": model_id,
+                "context_length": 8192,
+                "capabilities": ["image_generation"],
+            }
+        ],
+    )
+    db_session.add(provider)
+    db_session.flush()
+    db_session.add(
+        ProviderAPIKey(
+            provider_uuid=provider.id,
+            encrypted_key=encrypt_secret("upstream-key"),
+            weight=1.0,
+            status="active",
+        )
+    )
+    db_session.commit()
+
+    seen: dict[str, object] = {}
+
+    async def _fake_call(**kwargs):
+        seen["url"] = kwargs.get("url")
+        seen["json_body"] = kwargs.get("json_body")
+        return httpx.Response(
+            200,
+            json={
+                "created": 1700000000,
+                "data": [{"b64_json": "AAAB", "revised_prompt": "a cat"}],
+            },
+        )
+
+    monkeypatch.setattr("app.services.image_app_service.call_upstream_http_with_metrics", _fake_call)
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers=api_key_auth_header,
+        json={
+            "prompt": "a cat",
+            "model": model_id,
+            "n": 1,
+            "size": "1024x1024",
+        },
+    )
+    assert resp.status_code == 200
+    assert seen["url"] == "https://upstream.example.com/v1/chat/completions"
+    assert isinstance(seen["json_body"], dict)
+    assert "messages" in seen["json_body"]
+    assert "prompt" not in seen["json_body"]
+    assert seen["json_body"]["messages"][0]["role"] == "user"
+
+
+def test_images_generations_chat_completions_compat_response_shape(
+    client, db_session, monkeypatch, api_key_auth_header
+):
+    provider_id = "openai-chat-images"
+    model_id = "chat-image-1"
+    provider = Provider(
+        provider_id=provider_id,
+        name="Chat Images Provider",
+        base_url="https://upstream.example.com",
+        transport="http",
+        chat_completions_path="/v1/chat/completions",
+        images_generations_path="/v1/chat/completions",
+        static_models=[
+            {
+                "id": model_id,
+                "display_name": model_id,
+                "family": model_id,
+                "context_length": 8192,
+                "capabilities": ["image_generation"],
+            }
+        ],
+    )
+    db_session.add(provider)
+    db_session.flush()
+    db_session.add(
+        ProviderAPIKey(
+            provider_uuid=provider.id,
+            encrypted_key=encrypt_secret("upstream-key"),
+            weight=1.0,
+            status="active",
+        )
+    )
+    db_session.commit()
+
+    image_url = "https://cdn.example.com/generated.png"
+
+    async def _fake_call(**kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-abc",
+                "object": "chat.completion",
+                "created": 1700000000,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"Here: {image_url}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+            },
+        )
+
+    monkeypatch.setattr("app.services.image_app_service.call_upstream_http_with_metrics", _fake_call)
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers=api_key_auth_header,
+        json={"prompt": "a cat", "model": model_id, "n": 1, "response_format": "url"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert isinstance(payload.get("data"), list) and payload["data"]
+    assert payload["data"][0]["url"] == image_url
+
+
+def test_images_generations_chat_completions_compat_response_data_url(
+    client, db_session, monkeypatch, api_key_auth_header
+):
+    provider_id = "openai-chat-images"
+    model_id = "chat-image-1"
+    provider = Provider(
+        provider_id=provider_id,
+        name="Chat Images Provider",
+        base_url="https://upstream.example.com",
+        transport="http",
+        chat_completions_path="/v1/chat/completions",
+        images_generations_path="/v1/chat/completions",
+        static_models=[
+            {
+                "id": model_id,
+                "display_name": model_id,
+                "family": model_id,
+                "context_length": 8192,
+                "capabilities": ["image_generation"],
+            }
+        ],
+    )
+    db_session.add(provider)
+    db_session.flush()
+    db_session.add(
+        ProviderAPIKey(
+            provider_uuid=provider.id,
+            encrypted_key=encrypt_secret("upstream-key"),
+            weight=1.0,
+            status="active",
+        )
+    )
+    db_session.commit()
+
+    data_url = "data:image/png;base64,AAAB"
+
+    async def _fake_call(**kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-abc",
+                "object": "chat.completion",
+                "created": 1700000000,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "content": f"ok {data_url}"},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr("app.services.image_app_service.call_upstream_http_with_metrics", _fake_call)
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers=api_key_auth_header,
+        json={"prompt": "a cat", "model": model_id, "n": 1, "response_format": "b64_json"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["data"][0]["b64_json"] == "AAAB"
+
+
+def test_images_generations_chat_completions_compat_response_message_images_field(
+    client, db_session, monkeypatch, api_key_auth_header
+):
+    provider_id = "openai-chat-images"
+    model_id = "chat-image-1"
+    provider = Provider(
+        provider_id=provider_id,
+        name="Chat Images Provider",
+        base_url="https://upstream.example.com",
+        transport="http",
+        chat_completions_path="/v1/chat/completions",
+        images_generations_path="/v1/chat/completions",
+        static_models=[
+            {
+                "id": model_id,
+                "display_name": model_id,
+                "family": model_id,
+                "context_length": 8192,
+                "capabilities": ["image_generation"],
+            }
+        ],
+    )
+    db_session.add(provider)
+    db_session.flush()
+    db_session.add(
+        ProviderAPIKey(
+            provider_uuid=provider.id,
+            encrypted_key=encrypt_secret("upstream-key"),
+            weight=1.0,
+            status="active",
+        )
+    )
+    db_session.commit()
+
+    image_url = "https://cdn.example.com/generated.png"
+
+    async def _fake_call(**kwargs):
+        return httpx.Response(
+            200,
+            json={
+                "id": "chatcmpl-abc",
+                "object": "chat.completion",
+                "created": 1700000000,
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {"role": "assistant", "images": [{"url": image_url}]},
+                        "finish_reason": "stop",
+                    }
+                ],
+            },
+        )
+
+    monkeypatch.setattr("app.services.image_app_service.call_upstream_http_with_metrics", _fake_call)
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers=api_key_auth_header,
+        json={"prompt": "a cat", "model": model_id, "n": 1, "response_format": "url"},
+    )
+    assert resp.status_code == 200, resp.text
+    payload = resp.json()
+    assert payload["data"][0]["url"] == image_url
 
 
 @pytest.mark.parametrize(

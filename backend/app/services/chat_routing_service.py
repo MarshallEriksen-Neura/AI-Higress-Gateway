@@ -1480,6 +1480,46 @@ def _build_model_alias_map(
     return mapping
 
 
+def _build_model_capabilities_override_map(
+    providers_with_configs: list[tuple[Provider, ProviderConfig]],
+) -> dict[str, dict[str, set[ModelCapability]]]:
+    """
+    读取 provider_models.metadata_json 中 `_gateway.capabilities_override` 并构建覆盖表：
+    {
+        provider_slug: {
+            "upstream-model-id": {ModelCapability.CHAT, ...},
+            ...
+        }
+    }
+    """
+    mapping: dict[str, dict[str, set[ModelCapability]]] = {}
+    for provider_row, cfg in providers_with_configs:
+        per: dict[str, set[ModelCapability]] = {}
+        for model in getattr(provider_row, "models", []) or []:
+            if bool(getattr(model, "disabled", False)):
+                continue
+            meta = getattr(model, "metadata_json", None)
+            if not isinstance(meta, dict):
+                continue
+            gateway = meta.get("_gateway")
+            if not isinstance(gateway, dict):
+                continue
+            override = gateway.get("capabilities_override")
+            if not isinstance(override, list) or not override:
+                continue
+            caps: set[ModelCapability] = set()
+            for item in override:
+                try:
+                    caps.add(ModelCapability(str(item)))
+                except ValueError:
+                    continue
+            if caps:
+                per[str(model.model_id)] = caps
+        if per:
+            mapping[cfg.id] = per
+    return mapping
+
+
 async def _build_dynamic_logical_model_for_group(
     *,
     client: httpx.AsyncClient,
@@ -1513,6 +1553,7 @@ async def _build_dynamic_logical_model_for_group(
     # with their ORM objects so that we can honour per-model alias mappings
     # stored in provider_models.alias.
     alias_map: dict[str, dict[str, str]] = {}
+    capabilities_override_map: dict[str, dict[str, set[ModelCapability]]] = {}
     if db is not None:
         providers_with_configs = load_providers_with_configs(
             session=db,
@@ -1521,6 +1562,9 @@ async def _build_dynamic_logical_model_for_group(
         )
         providers = [cfg for (_provider, cfg) in providers_with_configs]
         alias_map = _build_model_alias_map(providers_with_configs)
+        capabilities_override_map = _build_model_capabilities_override_map(
+            providers_with_configs
+        )
     else:
         providers = load_provider_configs(
             user_id=user_id,
@@ -1604,7 +1648,11 @@ async def _build_dynamic_logical_model_for_group(
                 or (target_base is not None and target_base == base_id)
             ):
                 matched_full_id = mid
-                matched_caps = caps_by_model_id.get(mid)
+                override_caps = (
+                    capabilities_override_map.get(cfg.id, {}).get(mid)
+                    or capabilities_override_map.get(cfg.id, {}).get(base_id)
+                )
+                matched_caps = override_caps or caps_by_model_id.get(mid)
                 break
 
         # Fallback: try to resolve via per-provider alias mapping when the
@@ -1630,7 +1678,8 @@ async def _build_dynamic_logical_model_for_group(
 
                 if alias_target in advertised_ids:
                     matched_full_id = alias_target
-                    matched_caps = caps_by_model_id.get(alias_target)
+                    override_caps = capabilities_override_map.get(cfg.id, {}).get(alias_target)
+                    matched_caps = override_caps or caps_by_model_id.get(alias_target)
                 else:
                     logger.warning(
                         "Alias '%s' for provider %s maps to '%s' which is not present "

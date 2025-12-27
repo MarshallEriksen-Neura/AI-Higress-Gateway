@@ -6,6 +6,7 @@ vi.mock("next/headers", () => ({
 }));
 
 import { serverFetch } from "../server-fetch";
+import { REQUEST_TITLE_HEADER_NAME, REQUEST_TITLE_HEADER_VALUE } from "@/config/headers";
 
 describe("serverFetch (SSR) refresh retry", () => {
   const originalApiBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL;
@@ -56,15 +57,22 @@ describe("serverFetch (SSR) refresh retry", () => {
     expect(String(fetchMock.mock.calls[1][0])).toBe("http://api.test/auth/refresh");
     expect(String(fetchMock.mock.calls[2][0])).toBe("http://api.test/v1/anything");
 
+    const firstInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(firstInit.headers).toMatchObject({
+      [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
+    });
+
     const refreshInit = fetchMock.mock.calls[1][1] as RequestInit;
     expect(refreshInit.method).toBe("POST");
     expect(refreshInit.headers).toMatchObject({
+      [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
       Cookie: "refresh_token=RT",
     });
 
     const retryInit = fetchMock.mock.calls[2][1] as RequestInit;
     expect(retryInit.headers).toMatchObject({
       Authorization: "Bearer NEW",
+      [REQUEST_TITLE_HEADER_NAME]: REQUEST_TITLE_HEADER_VALUE,
     });
   });
 
@@ -84,4 +92,3 @@ describe("serverFetch (SSR) refresh retry", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
-
