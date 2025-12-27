@@ -16,12 +16,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/lib/i18n-context";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { useResponsiveDrawerDirection } from "@/lib/hooks/use-responsive-drawer-direction";
 import type { ImageGenParams } from "@/components/chat/chat-input/image-gen-params-bar";
 
-const AVAILABLE_SIZES = ["256x256", "512x512", "1024x1024"];
+const AVAILABLE_SIZES = ["1024x1024", "1536x1024", "1024x1536"];
 const AVAILABLE_COUNTS = [1, 2, 3, 4];
 
 export function ImageGenSettingsDrawer({
@@ -135,6 +136,38 @@ export function ImageGenSettingsDrawer({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-muted-foreground">{t("chat.image_gen.quality")}</Label>
+            <Select
+              value={params.quality || "auto"}
+              onValueChange={(val) => onChange({ ...params, quality: val as ImageGenParams["quality"] })}
+              disabled={disabled}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {["auto", "low", "medium", "high"].map((q) => (
+                  <SelectItem key={q} value={q}>
+                    {q}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between border rounded-md px-3 py-2">
+            <div className="space-y-0.5">
+              <div className="text-sm font-medium">{t("chat.image_gen.google_search")}</div>
+              <div className="text-xs text-muted-foreground">{t("chat.image_gen.google_search_desc")}</div>
+            </div>
+            <Switch
+              checked={!!params.enableGoogleSearch}
+              onCheckedChange={(val) => onChange({ ...params, enableGoogleSearch: val })}
+              disabled={disabled}
+            />
           </div>
         </div>
       </DrawerContent>

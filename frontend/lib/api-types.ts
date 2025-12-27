@@ -408,8 +408,15 @@ export interface ImageGenerationRequest {
   n?: number;
   size?: string;
   response_format?: "url" | "b64_json";
-  quality?: "standard" | "hd";
+  quality?: "standard" | "hd" | "low" | "medium" | "high" | "auto";
   style?: "vivid" | "natural";
+  background?: "transparent" | "opaque" | "auto";
+  moderation?: "low" | "auto";
+  output_format?: "png" | "jpeg" | "webp";
+  output_compression?: number;
+  stream?: boolean;
+  partial_images?: number;
+  extra_body?: Record<string, any>;
   user?: string;
 }
 
@@ -936,6 +943,20 @@ export interface Message {
   conversation_id: string;
   role: 'user' | 'assistant';
   content: string;
+  image_generation?: {
+    type: "image_generation";
+    status: "pending" | "succeeded" | "failed";
+    prompt: string;
+    params: ImageGenerationRequest;
+    images: Array<{
+      url?: string;
+      object_key?: string | null;
+      b64_json?: string;
+      revised_prompt?: string | null;
+    }>;
+    error?: string;
+    created?: number;
+  };
   run_id?: string; // assistant 消息关联的 run_id
   created_at: string;
 }

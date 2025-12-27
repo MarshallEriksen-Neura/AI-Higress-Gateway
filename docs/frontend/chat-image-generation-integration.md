@@ -24,7 +24,7 @@
 请求/响应 schema（后端源）：`backend/app/schemas/image.py`
 
 补充：当调用方请求 `response_format="url"` 时：
-- 若配置了阿里 OSS（`IMAGE_OSS_*`），网关会返回 `/media/images/...` 形式的签名短链 URL（无需登录/无需 API Key）；
+- 若配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`，默认阿里 OSS，也可 S3/R2 兼容），网关会返回 `/media/images/...` 形式的签名短链 URL（无需登录/无需 API Key）；
 - 若未配置 OSS，网关会退化为 `data:image/...;base64,...` 的 Data URL（前端可直接渲染）。
 
 ### 2) 模型能力（capabilities）

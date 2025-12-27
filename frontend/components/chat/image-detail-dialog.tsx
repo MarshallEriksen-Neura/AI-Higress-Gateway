@@ -12,6 +12,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useI18n } from "@/lib/i18n-context";
 import type { ImageGenerationTask } from "@/lib/chat/composer-tasks";
+import { API_BASE_URL } from "@/http/client";
+import { resolveApiUrl } from "@/lib/http/resolve-api-url";
 
 interface ImageDetailDialogProps {
   open: boolean;
@@ -33,7 +35,9 @@ export function ImageDetailDialog({
   const image = task.result.data[selectedImageIndex];
   if (!image) return null;
 
-  const imageUrl = image.url || (image.b64_json ? `data:image/png;base64,${image.b64_json}` : "");
+  const imageUrl = image.url
+    ? resolveApiUrl(image.url, API_BASE_URL)
+    : (image.b64_json ? `data:image/png;base64,${image.b64_json}` : "");
 
   const handleDownload = () => {
     if (!imageUrl) return;

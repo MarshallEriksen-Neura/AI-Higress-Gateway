@@ -52,6 +52,15 @@ class ImageGenerationRequest(BaseModel):
         description="Number of partial images to generate for streaming responses (GPT image models).",
     )
 
+    extra_body: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "网关保留扩展字段：用于透传特定上游厂商的高级参数。"
+            "约定结构：{ \"openai\": {...}, \"google\": {...} }。"
+            "网关会在选中对应 lane 时将其合并到上游请求体中。"
+        ),
+    )
+
 
 class ImageObject(BaseModel):
     url: Optional[str] = None

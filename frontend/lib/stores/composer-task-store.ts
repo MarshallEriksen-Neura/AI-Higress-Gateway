@@ -42,8 +42,8 @@ export const useComposerTaskStore = create<ComposerTaskState>()(
     }),
     {
       name: "composer-task-store",
-      version: 1,
+      version: 2,
+      migrate: () => ({ tasks: [] }),
     }
   )
 );
-

@@ -43,6 +43,8 @@ export function ChatHomeClient({ assistantId }: { assistantId?: string | null } 
     model: "",
     size: "1024x1024",
     n: 1,
+    quality: "auto",
+    enableGoogleSearch: false,
   });
 
   const defaultVerticalLayout = useMemo(() => {

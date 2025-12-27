@@ -1,17 +1,16 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { v4 as uuidv4 } from "uuid";
 import { toast } from "sonner";
 
-import { buildBridgeRequestFields } from "@/lib/chat/build-bridge-request";
+import { buildChatPayload } from "@/lib/chat/payload-builder";
 import { composerModeCapabilities } from "@/lib/chat/composer-modes";
 import type { ComposerSubmitPayload, ChatComposerSubmitPayload, ImageComposerSubmitPayload } from "@/lib/chat/composer-submit";
 import { useI18n } from "@/lib/i18n-context";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useSendMessage } from "@/lib/swr/use-messages";
-import { useImageGenerations } from "@/lib/swr/use-image-generations";
-import { useComposerTaskStore } from "@/lib/stores/composer-task-store";
+import { useSendConversationImageGeneration } from "@/lib/swr/use-conversation-image-generations";
+import { useBridgeAgents } from "@/lib/swr/use-bridge";
 
 export function useConversationComposerSubmit({
   conversationId,
@@ -32,39 +31,49 @@ export function useConversationComposerSubmit({
     useChatStore((s) => s.conversationBridgeAgentIds[conversationId]) ?? [];
   const chatStreamingEnabled = useChatStore((s) => s.chatStreamingEnabled);
   const setConversationModelPreset = useChatStore((s) => s.setConversationModelPreset);
+  const { agents: bridgeAgents } = useBridgeAgents();
+
+  const availableBridgeAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const agent of bridgeAgents || []) {
+      const id = typeof agent.agent_id === "string" ? agent.agent_id.trim() : "";
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [bridgeAgents]);
 
   const sendMessage = useSendMessage(conversationId, assistantId, overrideLogicalModel);
-  const { generateImage } = useImageGenerations();
-  const addTask = useComposerTaskStore((s) => s.addTask);
-  const updateTask = useComposerTaskStore((s) => s.updateTask);
+  const sendImageGeneration = useSendConversationImageGeneration(conversationId);
 
   const sendChat = useCallback(
     async (payload: ChatComposerSubmitPayload) => {
       setConversationModelPreset(conversationId, payload.model_preset ?? null);
-      const bridgeFields = buildBridgeRequestFields({
-        conversationBridgeAgentIds: bridgeAgentIds,
-        conversationBridgeToolSelections: bridgeToolSelections,
-        defaultBridgeToolSelections,
+      const request = buildChatPayload({
+        content: payload.content,
+        modelPreset: payload.model_preset ?? null,
+        overrideLogicalModel: overrideLogicalModel ?? null,
+        bridgeState: {
+          conversationBridgeAgentIds: bridgeAgentIds,
+          conversationBridgeToolSelections: bridgeToolSelections,
+          defaultBridgeToolSelections,
+        },
+        availableBridgeAgentIds,
+        streaming: composerModeCapabilities.chat.supportsStreaming && chatStreamingEnabled,
       });
 
-      await sendMessage(
-        {
-          content: payload.content,
-          model_preset: payload.model_preset,
-          ...bridgeFields,
-        },
-        {
-          streaming:
-            composerModeCapabilities.chat.supportsStreaming && chatStreamingEnabled,
-        }
-      );
+      await sendMessage(request, {
+        streaming:
+          composerModeCapabilities.chat.supportsStreaming && chatStreamingEnabled,
+      });
     },
     [
       bridgeAgentIds,
       bridgeToolSelections,
+      availableBridgeAgentIds,
       chatStreamingEnabled,
       conversationId,
       defaultBridgeToolSelections,
+      overrideLogicalModel,
       sendMessage,
       setConversationModelPreset,
     ]
@@ -79,45 +88,22 @@ export function useConversationComposerSubmit({
         return;
       }
 
-      const taskId = uuidv4();
-      const createdAt = Date.now();
-
-      addTask({
-        id: taskId,
-        conversationId,
-        kind: "image_generation",
-        status: "pending",
-        prompt: trimmedPrompt,
-        params: {
-          model: payload.params.model,
-          prompt: trimmedPrompt,
-          n: payload.params.n,
-          size: payload.params.size,
-          response_format: "url",
-        },
-        createdAt,
-      });
-
       try {
-        const result = await generateImage({
+        await sendImageGeneration({
           model: payload.params.model,
           prompt: trimmedPrompt,
           n: payload.params.n,
           size: payload.params.size,
-          response_format: "url",
+          quality: payload.params.quality,
+          enableGoogleSearch: payload.params.enableGoogleSearch,
         });
-        updateTask(taskId, { status: "success", result });
         toast.success(t("chat.image_gen.success"));
       } catch (error: any) {
         console.error("Image generation failed", error);
-        updateTask(taskId, {
-          status: "failed",
-          error: error?.message || t("chat.image_gen.failed"),
-        });
         toast.error(t("chat.image_gen.failed"));
       }
     },
-    [addTask, conversationId, generateImage, t, updateTask]
+    [conversationId, sendImageGeneration, t]
   );
 
   const senders = useMemo(
@@ -145,4 +131,3 @@ export function useConversationComposerSubmit({
     submit,
   };
 }
-

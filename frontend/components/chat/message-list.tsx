@@ -22,6 +22,7 @@ import { ErrorAlert } from "./error-alert";
 import { AddComparisonDialog } from "./add-comparison-dialog";
 import { ConversationPendingIndicator } from "./conversation-pending-indicator";
 import { ChatWelcomeContent } from "./chat-welcome-content";
+import { AssistantImageGenerationMessageItem } from "@/components/chat/assistant-image-generation-message-item";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors/error-display";
 import { useMessages } from "@/lib/swr/use-messages";
@@ -32,7 +33,7 @@ import { conversationService } from "@/http/conversation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useAssistant } from "@/lib/swr/use-assistants";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
-import { buildBridgeRequestFields } from "@/lib/chat/build-bridge-request";
+import { buildComparisonPayload, buildRegeneratePayload } from "@/lib/chat/payload-builder";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useConversationPending } from "@/lib/hooks/use-conversation-pending";
 import { useComposerTaskStore } from "@/lib/stores/composer-task-store";
@@ -43,6 +44,10 @@ import {
   type ComparisonVariant,
 } from "@/lib/stores/chat-comparison-store";
 import type { Message, RunSummary } from "@/lib/api-types";
+import { useBridgeAgents } from "@/lib/swr/use-bridge";
+
+const isValidUuid = (value: string) =>
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 
 export interface MessageListProps {
   assistantId: string;
@@ -84,6 +89,16 @@ export const MessageList = memo(function MessageList({
   const bridgeToolSelections = useChatStore((s) => s.conversationBridgeToolSelections[conversationId]) ?? {};
   const defaultBridgeToolSelections = useChatStore((s) => s.defaultBridgeToolSelections) ?? {};
   const lastModelPreset = useChatStore((s) => s.conversationModelPresets[conversationId]);
+
+  const { agents: bridgeAgents } = useBridgeAgents();
+  const availableBridgeAgentIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const agent of bridgeAgents || []) {
+      const id = typeof agent.agent_id === "string" ? agent.agent_id.trim() : "";
+      if (id) ids.add(id);
+    }
+    return ids;
+  }, [bridgeAgents]);
 
   const deleteConversation = useDeleteConversation();
 
@@ -202,7 +217,6 @@ export const MessageList = memo(function MessageList({
 
   const availableModels = useMemo(() => {
     const modelSet = new Set<string>();
-    modelSet.add("auto");
 
     for (const model of models) {
       if (!model.enabled) continue;
@@ -210,7 +224,7 @@ export const MessageList = memo(function MessageList({
       modelSet.add(model.logical_id);
     }
 
-    return ["auto", ...Array.from(modelSet).filter((m) => m !== "auto").sort()];
+    return Array.from(modelSet).sort();
   }, [models]);
 
   const displayRows = useMemo(() => {
@@ -302,6 +316,13 @@ export const MessageList = memo(function MessageList({
 
   const handleRegenerate = useCallback(
     async (assistantMessageId: string, _sourceUserMessageId?: string) => {
+      if (!isValidUuid(assistantMessageId)) {
+        const message = t("chat.message.retry_failed");
+        toast.error(message);
+        setRegenErrorById((prev) => ({ ...prev, [assistantMessageId]: message }));
+        return;
+      }
+
       setRegeneratingId(assistantMessageId);
       setRegenErrorById((prev) => {
         const next = { ...prev };
@@ -322,16 +343,17 @@ export const MessageList = memo(function MessageList({
         await runWithPending(
           conversationId,
           async () => {
-            const bridgeFields = buildBridgeRequestFields({
-              conversationBridgeAgentIds: bridgeAgentIds,
-              conversationBridgeToolSelections: bridgeToolSelections,
-              defaultBridgeToolSelections,
+            const regeneratePayload = buildRegeneratePayload({
+              modelPreset: lastModelPreset ?? null,
+              overrideLogicalModel: _overrideLogicalModel ?? null,
+              bridgeState: {
+                conversationBridgeAgentIds: bridgeAgentIds,
+                conversationBridgeToolSelections: bridgeToolSelections,
+                defaultBridgeToolSelections,
+              },
+              availableBridgeAgentIds,
             });
-            await messageService.regenerateMessage(assistantMessageId, {
-              override_logical_model: _overrideLogicalModel ?? undefined,
-              model_preset: lastModelPreset ?? undefined,
-              ...bridgeFields,
-            });
+            await messageService.regenerateMessage(assistantMessageId, regeneratePayload);
             await mutateMessages();
           },
           { minDurationMs: 250 }
@@ -357,15 +379,22 @@ export const MessageList = memo(function MessageList({
       bridgeToolSelections,
       defaultBridgeToolSelections,
       lastModelPreset,
+      availableBridgeAgentIds,
     ]
   );
 
   const openRegenerateDialog = useCallback(
     (assistantMessageId: string, sourceUserMessageId?: string) => {
+      if (!isValidUuid(assistantMessageId)) {
+        const message = t("chat.message.retry_failed");
+        toast.error(message);
+        setRegenErrorById((prev) => ({ ...prev, [assistantMessageId]: message }));
+        return;
+      }
       setRegenerateTarget({ assistantMessageId, sourceUserMessageId });
       setRegenerateMessageDialogOpen(true);
     },
-    []
+    [t]
   );
 
   const handleDeleteMessage = useCallback(
@@ -523,15 +552,17 @@ export const MessageList = memo(function MessageList({
 
       try {
         await messageService.sendMessage(tempConversation.conversation_id, {
-          content: prompt,
-          override_logical_model: compareSelectedModel,
-          model_preset: lastModelPreset ?? undefined,
-          ...buildBridgeRequestFields({
-            conversationBridgeAgentIds: bridgeAgentIds,
-            conversationBridgeToolSelections: bridgeToolSelections,
-            defaultBridgeToolSelections,
+          ...buildComparisonPayload({
+            content: prompt,
+            overrideLogicalModel: compareSelectedModel,
+            modelPreset: lastModelPreset ?? null,
+            bridgeState: {
+              conversationBridgeAgentIds: bridgeAgentIds,
+              conversationBridgeToolSelections: bridgeToolSelections,
+              defaultBridgeToolSelections,
+            },
+            availableBridgeAgentIds,
           }),
-          streaming: false,
         });
 
         const tempMessages = await messageService.getMessages(
@@ -581,6 +612,7 @@ export const MessageList = memo(function MessageList({
     bridgeToolSelections,
     defaultBridgeToolSelections,
     lastModelPreset,
+    availableBridgeAgentIds,
     showError,
     t,
     updateVariant,
@@ -686,6 +718,8 @@ export const MessageList = memo(function MessageList({
               if (!item) return null;
 
               if (item.type === 'message') {
+                const isAssistantImageGen =
+                  item.message.role === "assistant" && !!item.message.image_generation;
                 return (
                   <div
                     key={virtualItem.key}
@@ -700,42 +734,48 @@ export const MessageList = memo(function MessageList({
                     }}
                   >
                     <div className="pb-6">
-                      <MessageItem
-                        message={item.message}
-                        runs={item.runs}
-                        runSourceMessageId={item.runSourceMessageId}
-                        userAvatarUrl={user?.avatar ?? null}
-                        userDisplayName={user?.display_name ?? user?.username ?? null}
-                        onViewDetails={onViewDetails}
-                        onTriggerEval={onTriggerEval}
-                        showEvalButton={showEvalButton}
-                        comparisonVariants={
-                          variantsByKey[`${conversationId}:${item.message.message_id}`] ?? []
-                        }
-                        onAddComparison={(_, sourceUserMessageId) =>
-                          openCompareDialog(
-                            item.message.message_id,
-                            sourceUserMessageId,
-                            item.runs?.[0]?.requested_logical_model
-                          )
-                        }
-                        isLatestAssistant={item.message.message_id === latestAssistantMessageId}
-                        onRegenerate={openRegenerateDialog}
-                        isRegenerating={regeneratingId === item.message.message_id}
-                        onDeleteMessage={
-                          item.message.message_id === latestAssistantMessageId
-                            ? () => {
-                                setDeleteMessageTarget(item.message.message_id);
-                                setDeleteMessageDialogOpen(true);
-                              }
-                            : undefined
-                        }
-                        isDeletingMessage={deletingMessageId === item.message.message_id}
-                        disableActions={disabledActions || isLoading}
-                        errorMessage={regenErrorById[item.message.message_id] ?? null}
-                        enableTypewriter
-                        typewriterKey={`${item.message.conversation_id}:${item.message.created_at}`}
-                      />
+                      {isAssistantImageGen ? (
+                        <AssistantImageGenerationMessageItem message={item.message} />
+                      ) : (
+                        <MessageItem
+                          message={item.message}
+                          runs={item.runs}
+                          runSourceMessageId={item.runSourceMessageId}
+                          userAvatarUrl={user?.avatar ?? null}
+                          userDisplayName={user?.display_name ?? user?.username ?? null}
+                          onViewDetails={onViewDetails}
+                          onTriggerEval={onTriggerEval}
+                          showEvalButton={showEvalButton}
+                          comparisonVariants={
+                            variantsByKey[`${conversationId}:${item.message.message_id}`] ?? []
+                          }
+                          onAddComparison={(_, sourceUserMessageId) =>
+                            openCompareDialog(
+                              item.message.message_id,
+                              sourceUserMessageId,
+                              item.runs?.[0]?.requested_logical_model
+                            )
+                          }
+                          isLatestAssistant={item.message.message_id === latestAssistantMessageId}
+                          onRegenerate={
+                            isValidUuid(item.message.message_id) ? openRegenerateDialog : undefined
+                          }
+                          isRegenerating={regeneratingId === item.message.message_id}
+                          onDeleteMessage={
+                            item.message.message_id === latestAssistantMessageId
+                              ? () => {
+                                  setDeleteMessageTarget(item.message.message_id);
+                                  setDeleteMessageDialogOpen(true);
+                                }
+                              : undefined
+                          }
+                          isDeletingMessage={deletingMessageId === item.message.message_id}
+                          disableActions={disabledActions || isLoading}
+                          errorMessage={regenErrorById[item.message.message_id] ?? null}
+                          enableTypewriter
+                          typewriterKey={`${item.message.conversation_id}:${item.message.created_at}`}
+                        />
+                      )}
                     </div>
                   </div>
                 );

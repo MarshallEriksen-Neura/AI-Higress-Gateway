@@ -2,6 +2,7 @@
 
 import { tokenManager } from "@/lib/auth/token-manager";
 import { API_BASE_URL, refreshAccessToken } from "@/http/client";
+import { resolveApiUrl } from "@/lib/http/resolve-api-url";
 
 export type SSEMessage = {
   event: string;
@@ -134,18 +135,6 @@ async function streamSSEFetch(
   }
 
   return resp;
-}
-
-function resolveApiUrl(url: string, baseUrl: string): string {
-  const trimmed = (url || "").trim();
-  if (!trimmed) return trimmed;
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
-
-  const base = (baseUrl || "").trim().replace(/\/+$/, "");
-  if (!base) return trimmed;
-
-  if (trimmed.startsWith("/")) return `${base}${trimmed}`;
-  return `${base}/${trimmed}`;
 }
 
 function parseSSEFrame(frame: string): SSEMessage | null {

@@ -7,6 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useI18n } from "@/lib/i18n-context";
 import { ImageDetailDialog } from "./image-detail-dialog";
 import type { ImageGenerationTask } from "@/lib/chat/composer-tasks";
+import { API_BASE_URL } from "@/http/client";
+import { resolveApiUrl } from "@/lib/http/resolve-api-url";
 
 interface ImageGenerationItemProps {
   task: ImageGenerationTask;
@@ -54,7 +56,9 @@ export function ImageGenerationItem({ task }: ImageGenerationItemProps) {
       <div className="flex flex-col gap-2 w-full max-w-2xl">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {images.map((img, idx) => {
-             const src = img.url || (img.b64_json ? `data:image/png;base64,${img.b64_json}` : "");
+             const src = img.url
+               ? resolveApiUrl(img.url, API_BASE_URL)
+               : (img.b64_json ? `data:image/png;base64,${img.b64_json}` : "");
              if (!src) return null;
 
              return (

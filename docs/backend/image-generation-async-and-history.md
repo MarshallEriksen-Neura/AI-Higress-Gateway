@@ -27,7 +27,7 @@
 
 当请求 `response_format="url"` 时：
 
-- 若配置了 OSS（`IMAGE_OSS_*`）：后端将图片写入 OSS 私有桶，并返回网关域名下短链：`/media/images/{object_key}?expires=...&sig=...`
+- 若配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`）：后端将图片写入对应存储（默认阿里 OSS；可选 S3/R2），并返回网关域名下短链：`/media/images/{object_key}?expires=...&sig=...`
 - 若未配置 OSS：后端会退化为 `data:image/...;base64,...` 的 Data URL（仍可直接渲染）
 
 实现位置：
@@ -155,4 +155,3 @@ celery -A app.celery_app.celery_app worker -l info
 - Celery 基础：`backend/app/celery_app.py`、`backend/app/tasks/chat_run.py`
 - 会话历史写入：`backend/app/services/chat_history_service.py`
 - SSE 与 RunEvent：`backend/app/api/v1/assistant_routes.py`、`backend/app/models/run_event.py`、`backend/app/services/run_event_bus.py`
-

@@ -1174,15 +1174,27 @@
 
 **描述**: OpenAI 兼容的文生图接口（固定对外为 OpenAI Images API 格式），根据 `model` 自动选择上游链路：
 - OpenAI 系模型（如 `gpt-image-*` / `dall-e-*`）：走 OpenAI-compatible Provider 的 `/v1/images/generations`；
-- Google 系模型（如 `gemini-*-*-image` / `*-flash-image` / `imagen*`）：走 Gemini Developer API `generateContent`（`v1beta/models/{model}:generateContent`）并将结果转换为 OpenAI Images 响应结构。
+- Google 系模型：
+  - Gemini 原生出图（如 `gemini-*-*-image` / `*-flash-image` / `nano-banana`）：走 Gemini API `generateContent`（`v1beta/models/{model}:generateContent`）并将结果转换为 OpenAI Images 响应结构（从 `candidates[].content.parts[].inlineData.data` 提取 base64）。
+  - Imagen 专用模型（如 `imagen-3.*` / `imagen-4.*`）：走 Gemini API 的 `predict`（`v1beta/models/{model}:predict`），并将 `predictions[].bytesBase64Encoded` 转换为 OpenAI Images 响应结构。
+
+> 配置提示：当 Provider 的 `base_url` 配置为 `https://generativelanguage.googleapis.com` 时，网关会按 Gemini/Imagen 原生 API 调用；
+> 其他 `base_url` 会被视为 OpenAI-compatible Provider（走 `/v1/images/generations`）。
 
 **认证**: API Key（`Authorization: Bearer <token>`）
 
 **返回字段说明**:
 - 当 `response_format="b64_json"`：`data[*].b64_json` 返回 base64 图片；
 - 当 `response_format="url"`：
-  - 若配置了阿里 OSS（`IMAGE_OSS_*`），网关会把图片写入 OSS 私有桶，并返回网关域名下的签名短链 URL（`/media/images/...`）；
+  - 若配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`），网关会把图片写入对应存储（默认阿里 OSS，也可 S3/R2 兼容），并返回网关域名下的签名短链 URL（`/media/images/...`）；
   - 若未配置 OSS，网关会退化为 `data:image/...;base64,...` 的 Data URL（兼容前端直接渲染）。
+- `extra_body`（可选）：网关保留扩展字段，用于透传上游厂商高级参数（避免网关 schema 落后导致能力缺失）。
+  - `extra_body.openai`：在 OpenAI lane 下合并到上游请求体（覆盖同名字段）。
+  - `extra_body.google`：在 Google lane 下合并到上游请求体（覆盖同名字段）。
+    - Gemini `generateContent`：通常透传 `generationConfig` / `contents` 等字段。
+    - Imagen `predict`：通常透传 `parameters`（如 `sampleCount`/`aspectRatio`/`imageSize`/`personGeneration` 等）或高级能力开关。
+
+> 兼容性提示：网关当前不会把上游 `stream=true` 的 SSE 直接透传给调用方（会导致 JSON 解析失败），请使用 Chat 的 SSE 方案（`/v1/conversations/{conversation_id}/image-generations`）获得更好的等待体验。
 
 **请求体（示例）**:
 ```json
@@ -1192,6 +1204,43 @@
   "n": 1,
   "size": "1024x1024",
   "response_format": "b64_json"
+}
+```
+
+**请求体（示例：Google lane 透传高级参数）**:
+```json
+{
+  "prompt": "A futuristic city in cyberpunk style",
+  "model": "gemini-3-pro-image-preview",
+  "n": 1,
+  "size": "1792x1024",
+  "response_format": "url",
+  "extra_body": {
+    "google": {
+      "generationConfig": {
+        "imageConfig": {"aspectRatio": "16:9"}
+      }
+    }
+  }
+}
+```
+
+**请求体（示例：Imagen predict 透传 parameters）**:
+```json
+{
+  "prompt": "Robot holding a red skateboard",
+  "model": "imagen-4.0-generate-001",
+  "n": 4,
+  "response_format": "b64_json",
+  "extra_body": {
+    "google": {
+      "parameters": {
+        "sampleCount": 4,
+        "aspectRatio": "16:9",
+        "imageSize": "2K"
+      }
+    }
+  }
 }
 ```
 
@@ -1217,7 +1266,7 @@
 
 **接口**: `GET /media/images/{object_key}`
 
-**描述**: 通过签名短链读取 OSS 私有桶中的图片对象。
+**描述**: 通过签名短链获取 OSS 私有桶图片对象的预签名下载地址（网关返回 302 跳转，直下）。
 
 **认证**: 无（通过签名参数校验）
 
@@ -1225,7 +1274,7 @@
 - `expires` (int, 必填): 过期时间戳（Unix seconds）
 - `sig` (string, 必填): HMAC 签名
 
-**成功响应**: `200 OK`，返回图片二进制内容（`Content-Type` 为 `image/png`/`image/jpeg`/`image/webp` 等）
+**成功响应**: `302 Found`，响应头 `Location` 为 OSS 预签名 GET URL；客户端跟随跳转后由 OSS 返回图片二进制内容（`Content-Type` 为 `image/png`/`image/jpeg`/`image/webp` 等）
 
 ### 计费规则
 

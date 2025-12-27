@@ -32,25 +32,39 @@ export function ChatSettingsPageClient() {
 
   const [savingProject, setSavingProject] = useState(false);
 
-  const projectDefaultModel = settings?.default_logical_model ?? "auto";
-  const projectTitleModelValue = settings?.title_logical_model ?? null;
+  const rawProjectDefaultModel = settings?.default_logical_model ?? null;
+  const projectDefaultModel =
+    rawProjectDefaultModel && rawProjectDefaultModel !== "auto"
+      ? rawProjectDefaultModel
+      : null;
+  const projectTitleModelValue =
+    settings?.title_logical_model && settings.title_logical_model !== "auto"
+      ? settings.title_logical_model
+      : null;
 
-  const { filterOptions } = useSelectableChatModels(
+  const { options: selectableModels, filterOptions } = useSelectableChatModels(
     selectedProjectId,
     {
-      extraModels: [projectDefaultModel, projectTitleModelValue ?? undefined],
+      includeAuto: false,
+      extraModels: [projectDefaultModel ?? undefined, projectTitleModelValue ?? undefined],
     }
   );
   const [projectDefaultSearch, setProjectDefaultSearch] = useState("");
   const [projectTitleSearch, setProjectTitleSearch] = useState("");
 
-  const projectDefaultModels = useMemo(
-    () => filterOptions(projectDefaultSearch),
-    [filterOptions, projectDefaultSearch]
+  const resolvedProjectDefaultModel = useMemo(
+    () => projectDefaultModel ?? selectableModels[0]?.value ?? "",
+    [projectDefaultModel, selectableModels]
   );
+
+  const projectDefaultModels = useMemo(() => {
+    const models = filterOptions(projectDefaultSearch);
+    if (!resolvedProjectDefaultModel) return models;
+    if (models.some((model) => model.value === resolvedProjectDefaultModel)) return models;
+    return [{ value: resolvedProjectDefaultModel, label: resolvedProjectDefaultModel }, ...models];
+  }, [filterOptions, projectDefaultSearch, resolvedProjectDefaultModel]);
   const projectTitleModels = useMemo(
-    () =>
-      filterOptions(projectTitleSearch).filter((model) => model.value !== "auto"),
+    () => filterOptions(projectTitleSearch),
     [filterOptions, projectTitleSearch]
   );
 
@@ -126,7 +140,7 @@ export function ChatSettingsPageClient() {
                 <div className="grid gap-2">
                   <div className="text-sm font-medium">{t("chat.settings.project.default_model")}</div>
                   <Select
-                    value={projectDefaultModel}
+                    value={resolvedProjectDefaultModel}
                     onValueChange={(value) => void updateProjectDefaultModel(value)}
                     onOpenChange={(open) => {
                       if (!open) setProjectDefaultSearch("");

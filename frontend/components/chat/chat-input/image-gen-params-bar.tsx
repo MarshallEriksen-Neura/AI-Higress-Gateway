@@ -10,12 +10,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { useI18n } from "@/lib/i18n-context";
 
 export interface ImageGenParams {
   model: string;
   size: string;
   n: number;
+  quality?: "auto" | "low" | "medium" | "high";
+  enableGoogleSearch?: boolean;
 }
 
 interface ImageGenParamsBarProps {
@@ -25,7 +28,7 @@ interface ImageGenParamsBarProps {
   disabled?: boolean;
 }
 
-const AVAILABLE_SIZES = ["256x256", "512x512", "1024x1024"];
+const AVAILABLE_SIZES = ["1024x1024", "1536x1024", "1024x1536"];
 const AVAILABLE_COUNTS = [1, 2, 3, 4];
 
 export function ImageGenParamsBar({
@@ -118,6 +121,37 @@ export function ImageGenParamsBar({
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      {/* Quality Selector */}
+      <div className="flex items-center gap-2">
+        <Label className="text-muted-foreground whitespace-nowrap">{t("chat.image_gen.quality")}</Label>
+        <Select
+          value={params.quality || "auto"}
+          onValueChange={(val) => onChange({ ...params, quality: val as ImageGenParams["quality"] })}
+          disabled={disabled}
+        >
+          <SelectTrigger className="h-7 w-[100px] text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["auto", "low", "medium", "high"].map((q) => (
+              <SelectItem key={q} value={q} className="text-xs">
+                {q}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {/* Google Search toggle (Gemini lane grounding) */}
+      <div className="flex items-center gap-2">
+        <Label className="text-muted-foreground whitespace-nowrap">{t("chat.image_gen.google_search")}</Label>
+        <Switch
+          checked={!!params.enableGoogleSearch}
+          onCheckedChange={(val) => onChange({ ...params, enableGoogleSearch: val })}
+          disabled={disabled}
+        />
       </div>
     </div>
   );

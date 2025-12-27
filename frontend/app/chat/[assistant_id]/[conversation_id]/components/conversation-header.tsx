@@ -61,23 +61,47 @@ export function ConversationHeader({
 
   const currentOverride = conversationModelOverrides[conversationId] ?? null;
 
-  const effectiveAssistantDefaultModel =
+  const rawAssistantDefaultModel =
     assistant?.default_logical_model === PROJECT_INHERIT_SENTINEL
-      ? projectSettings?.default_logical_model || "auto"
-      : assistant?.default_logical_model || "auto";
+      ? projectSettings?.default_logical_model ?? null
+      : assistant?.default_logical_model ?? null;
+  const assistantDefaultModel =
+    rawAssistantDefaultModel && rawAssistantDefaultModel !== "auto"
+      ? rawAssistantDefaultModel
+      : null;
 
-  const effectiveSelectedModel = currentOverride ?? effectiveAssistantDefaultModel;
-
-  const { filterOptions } = useSelectableChatModels(
+  const { options: selectableModels, filterOptions } = useSelectableChatModels(
     selectedProjectId,
     {
-      extraModels: [currentOverride, effectiveAssistantDefaultModel],
+      includeAuto: false,
+      extraModels: [currentOverride, assistantDefaultModel ?? undefined],
     }
   );
+
+  const resolvedDefaultModel = useMemo(() => {
+    if (assistantDefaultModel) return assistantDefaultModel;
+    return selectableModels[0]?.value ?? "";
+  }, [assistantDefaultModel, selectableModels]);
+
+  const effectiveSelectedModel = currentOverride ?? resolvedDefaultModel;
   const [modelSearch, setModelSearch] = useState("");
+
+  useEffect(() => {
+    if (currentOverride) return;
+    if (assistantDefaultModel) return;
+    if (!resolvedDefaultModel) return;
+    setConversationModelOverride(conversationId, resolvedDefaultModel);
+  }, [
+    assistantDefaultModel,
+    conversationId,
+    currentOverride,
+    resolvedDefaultModel,
+    setConversationModelOverride,
+  ]);
 
   const filteredModels = useMemo(() => {
     const models = filterOptions(modelSearch);
+    if (!effectiveSelectedModel) return models;
     if (models.some((model) => model.value === effectiveSelectedModel)) return models;
     return [{ value: effectiveSelectedModel, label: effectiveSelectedModel }, ...models];
   }, [effectiveSelectedModel, filterOptions, modelSearch]);
@@ -231,11 +255,11 @@ export function ConversationHeader({
             </Select>
           ) : (
             <Select
-              value={effectiveSelectedModel}
+              value={effectiveSelectedModel ?? ""}
               onValueChange={(value) => {
                 setConversationModelOverride(
                   conversationId,
-                  value === effectiveAssistantDefaultModel ? null : value
+                  value === resolvedDefaultModel ? null : value
                 );
               }}
               onOpenChange={(open) => {

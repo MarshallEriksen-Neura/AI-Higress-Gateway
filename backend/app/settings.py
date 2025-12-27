@@ -1,6 +1,6 @@
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import Field
 
@@ -796,25 +796,35 @@ class Settings(BaseSettings):
     )
 
     # Generated images (text-to-image) OSS storage configuration
+    image_storage_provider: Literal["aliyun_oss", "s3"] = Field(
+        default="aliyun_oss",
+        alias="IMAGE_STORAGE_PROVIDER",
+        description="对象存储提供商，支持 aliyun_oss（默认）或 s3（AWS/MinIO/Cloudflare R2 等兼容接口）",
+    )
     image_oss_endpoint: str | None = Field(
         default=None,
         alias="IMAGE_OSS_ENDPOINT",
-        description="阿里 OSS Endpoint，例如 https://oss-cn-hangzhou.aliyuncs.com",
+        description="对象存储 Endpoint；阿里 OSS 形如 https://oss-cn-hangzhou.aliyuncs.com；S3/R2 可填兼容 Endpoint",
+    )
+    image_oss_region: str | None = Field(
+        default=None,
+        alias="IMAGE_OSS_REGION",
+        description="S3/R2 兼容接口的 region（阿里 OSS 可留空）",
     )
     image_oss_bucket: str | None = Field(
         default=None,
         alias="IMAGE_OSS_BUCKET",
-        description="阿里 OSS Bucket 名称（建议私有读）",
+        description="对象存储 Bucket 名称（建议私有读）",
     )
     image_oss_access_key_id: str | None = Field(
         default=None,
         alias="IMAGE_OSS_ACCESS_KEY_ID",
-        description="阿里 OSS AccessKeyId（用于后端上传与读取对象）",
+        description="对象存储 AccessKeyId（用于后端上传与读取对象）",
     )
     image_oss_access_key_secret: str | None = Field(
         default=None,
         alias="IMAGE_OSS_ACCESS_KEY_SECRET",
-        description="阿里 OSS AccessKeySecret（用于后端上传与读取对象）",
+        description="对象存储 AccessKeySecret（用于后端上传与读取对象）",
     )
     image_oss_prefix: str = Field(
         default="generated-images",

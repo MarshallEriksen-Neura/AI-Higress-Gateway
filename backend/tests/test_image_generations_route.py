@@ -7,11 +7,13 @@ from app.models import Provider, ProviderAPIKey
 from app.services.encryption import encrypt_secret
 
 
-def _seed_provider_with_image_model(db_session, *, provider_id: str, model_id: str) -> None:
+def _seed_provider_with_image_model(
+    db_session, *, provider_id: str, model_id: str, base_url: str = "https://upstream.example.com"
+) -> None:
     provider = Provider(
         provider_id=provider_id,
         name="Image Provider",
-        base_url="https://upstream.example.com",
+        base_url=base_url,
         transport="http",
         chat_completions_path="/v1/chat/completions",
         images_generations_path="/v1/images/generations",
@@ -50,10 +52,11 @@ def test_images_generations_requires_api_key(client):
 def test_images_generations_openai_lane_happy_path(client, db_session, monkeypatch, api_key_auth_header):
     _seed_provider_with_image_model(db_session, provider_id="openai-like", model_id="gpt-image-1")
 
-    seen: dict[str, str] = {}
+    seen: dict[str, object] = {}
 
     async def _fake_call(**kwargs):
         seen["url"] = kwargs.get("url")
+        seen["json_body"] = kwargs.get("json_body")
         return httpx.Response(
             200,
             json={
@@ -70,10 +73,20 @@ def test_images_generations_openai_lane_happy_path(client, db_session, monkeypat
     resp = client.post(
         "/v1/images/generations",
         headers=api_key_auth_header,
-        json={"prompt": "a cat", "model": "gpt-image-1", "n": 1, "response_format": "b64_json"},
+        json={
+            "prompt": "a cat",
+            "model": "gpt-image-1",
+            "n": 1,
+            "response_format": "b64_json",
+            "size": "1024x1024",
+            "extra_body": {"openai": {"size": "512x512"}},
+        },
     )
     assert resp.status_code == 200
     assert seen["url"] == "https://upstream.example.com/v1/images/generations"
+    assert isinstance(seen["json_body"], dict)
+    assert "extra_body" not in seen["json_body"]
+    assert seen["json_body"]["size"] == "512x512"
     payload = resp.json()
     assert payload["created"] == 1700000000
     assert payload["data"][0]["b64_json"] == "AAAB"
@@ -81,12 +94,21 @@ def test_images_generations_openai_lane_happy_path(client, db_session, monkeypat
 
 @pytest.mark.parametrize(
     "model_id",
-    ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"],
+    ["gemini-2.5-flash-image", "gemini-3-pro-image-preview", "nano-banana"],
 )
 def test_images_generations_google_lane_happy_path(client, db_session, monkeypatch, api_key_auth_header, model_id: str):
-    _seed_provider_with_image_model(db_session, provider_id="google-like", model_id=model_id)
+    _seed_provider_with_image_model(
+        db_session,
+        provider_id="google-like",
+        model_id=model_id,
+        base_url="https://generativelanguage.googleapis.com",
+    )
+
+    seen: dict[str, object] = {}
 
     async def _fake_call(**kwargs):
+        seen["url"] = kwargs.get("url")
+        seen["json_body"] = kwargs.get("json_body")
         return httpx.Response(
             200,
             json={
@@ -114,17 +136,84 @@ def test_images_generations_google_lane_happy_path(client, db_session, monkeypat
     resp = client.post(
         "/v1/images/generations",
         headers=api_key_auth_header,
-        json={"prompt": "a cat", "model": model_id, "n": 1, "response_format": "b64_json"},
+        json={
+            "prompt": "a cat",
+            "model": model_id,
+            "n": 1,
+            "response_format": "b64_json",
+            "extra_body": {"google": {"generationConfig": {"imageConfig": {"aspectRatio": "16:9"}}}},
+        },
     )
     assert resp.status_code == 200
+    assert isinstance(seen.get("url"), str) and "/v1beta/models/" in seen["url"]
+    assert str(seen["url"]).endswith(":generateContent")
+    assert isinstance(seen.get("json_body"), dict)
+    assert seen["json_body"]["generationConfig"]["imageConfig"]["aspectRatio"] == "16:9"
     payload = resp.json()
     assert payload["data"][0]["b64_json"] == "AAAC"
+
+
+def test_images_generations_google_imagen_predict_happy_path(client, db_session, monkeypatch, api_key_auth_header):
+    _seed_provider_with_image_model(
+        db_session,
+        provider_id="google-like",
+        model_id="imagen-4.0-generate-001",
+        base_url="https://generativelanguage.googleapis.com",
+    )
+
+    seen: dict[str, object] = {}
+
+    async def _fake_call(**kwargs):
+        seen["url"] = kwargs.get("url")
+        seen["json_body"] = kwargs.get("json_body")
+        return httpx.Response(
+            200,
+            json={
+                "predictions": [
+                    {
+                        "mimeType": "image/png",
+                        "bytesBase64Encoded": "AAAD",
+                        "prompt": "enhanced prompt",
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        "app.services.image_app_service.call_upstream_http_with_metrics", _fake_call
+    )
+
+    resp = client.post(
+        "/v1/images/generations",
+        headers=api_key_auth_header,
+        json={
+            "prompt": "a cat",
+            "model": "imagen-4.0-generate-001",
+            "n": 1,
+            "size": "1792x1024",
+            "response_format": "b64_json",
+        },
+    )
+    assert resp.status_code == 200
+    assert isinstance(seen.get("url"), str) and str(seen["url"]).endswith(":predict")
+    assert isinstance(seen.get("json_body"), dict)
+    assert seen["json_body"]["parameters"]["sampleCount"] == 1
+    assert seen["json_body"]["parameters"]["aspectRatio"] == "16:9"
+    assert seen["json_body"]["parameters"]["imageSize"] == "2K"
+    payload = resp.json()
+    assert payload["data"][0]["b64_json"] == "AAAD"
+    assert payload["data"][0]["revised_prompt"] == "enhanced prompt"
 
 
 def test_images_generations_url_format_returns_signed_media_url_when_oss_available(
     client, db_session, monkeypatch, api_key_auth_header
 ):
-    _seed_provider_with_image_model(db_session, provider_id="google-like", model_id="gemini-2.5-flash-image")
+    _seed_provider_with_image_model(
+        db_session,
+        provider_id="google-like",
+        model_id="gemini-2.5-flash-image",
+        base_url="https://generativelanguage.googleapis.com",
+    )
 
     async def _fake_call(**kwargs):
         return httpx.Response(

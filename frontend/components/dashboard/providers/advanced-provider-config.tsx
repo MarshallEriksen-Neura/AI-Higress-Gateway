@@ -349,6 +349,7 @@ export function AdvancedProviderConfig({
                                         <li><code className="bg-background px-1 rounded">display_name</code>{t("providers.form_field_static_models_schema_display_name")}</li>
                                         <li><code className="bg-background px-1 rounded">context_length</code>{t("providers.form_field_static_models_schema_context_length")}</li>
                                         <li><code className="bg-background px-1 rounded">family</code>{t("providers.form_field_static_models_schema_family")}</li>
+                                        <li><code className="bg-background px-1 rounded">capabilities</code>{t("providers.form_field_static_models_schema_capabilities")}</li>
                                         <li><code className="bg-background px-1 rounded">pricing</code>{t("providers.form_field_static_models_schema_pricing")}{`{"input": 0.03, "output": 0.06}`}</li>
                                     </ul>
                                     <div className="pt-1 border-t border-border/50">
@@ -359,12 +360,14 @@ export function AdvancedProviderConfig({
     "display_name": "GPT-4",
     "family": "gpt-4",
     "context_length": 8192,
+    "capabilities": ["chat"],
     "pricing": {"input": 0.03, "output": 0.06}
   },
   {
     "id": "claude-3-opus-20240229",
     "display_name": "Claude 3 Opus",
-    "context_length": 200000
+    "context_length": 200000,
+    "capabilities": ["image_generation"]
   }
 ]`}</pre>
                                     </div>

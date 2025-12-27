@@ -13,6 +13,21 @@ import { messageService } from '@/http/message';
 import { streamSSERequest } from '@/lib/bridge/sse';
 import type { MessagesResponse, RunDetail, SendMessageResponse } from '@/lib/api-types';
 
+const mockUseBridgeAgents = vi.fn(() => ({
+  agents: [],
+  error: null,
+  loading: false,
+  refresh: vi.fn(),
+}));
+
+const resetBridgeAgentsMock = () =>
+  mockUseBridgeAgents.mockReturnValue({
+    agents: [],
+    error: null,
+    loading: false,
+    refresh: vi.fn(),
+  });
+
 // Mock messageService
 vi.mock('@/http/message', () => ({
   messageService: {
@@ -28,7 +43,7 @@ vi.mock('@/lib/bridge/sse', () => ({
 }));
 
 vi.mock('@/lib/swr/use-bridge', () => ({
-  useBridgeAgents: () => ({ agents: [] }),
+  useBridgeAgents: () => mockUseBridgeAgents(),
 }));
 
 vi.mock('@/lib/hooks/use-conversation-pending', () => ({
@@ -45,6 +60,7 @@ const swrWrapper = ({ children }: { children: React.ReactNode }) => (
 describe('useMessages', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBridgeAgentsMock();
   });
 
   it('should fetch messages with pagination support', async () => {
@@ -103,6 +119,7 @@ describe('useMessages', () => {
 describe('useRun', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBridgeAgentsMock();
   });
 
   it('should fetch run details lazily', async () => {
@@ -144,6 +161,7 @@ describe('useRun', () => {
 describe('useSendMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBridgeAgentsMock();
   });
 
   it('should send message and return response', async () => {
@@ -284,6 +302,7 @@ describe('useSendMessage', () => {
 describe('useSendMessageToConversation', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBridgeAgentsMock();
   });
 
   it('should send message with provided conversationId', async () => {
@@ -336,11 +355,78 @@ describe('useSendMessageToConversation', () => {
       override_logical_model: 'test-model',
     });
   });
+
+  it('should drop bridge payload when no bridge agents are available', async () => {
+    const mockResponse: SendMessageResponse = {
+      message_id: 'msg-3',
+      baseline_run: {
+        run_id: 'run-3',
+        requested_logical_model: 'gpt-4',
+        status: 'succeeded',
+        output_preview: 'Hi there!',
+        latency: 900,
+      },
+    };
+
+    mockUseBridgeAgents.mockReturnValue({
+      agents: [],
+      error: null,
+      loading: false,
+      refresh: vi.fn(),
+    });
+    vi.mocked(messageService.sendMessage).mockResolvedValue(mockResponse);
+
+    const { result } = renderHook(() => useSendMessageToConversation(), { wrapper });
+
+    await result.current('conv-1', {
+      content: 'Hello',
+      bridge_agent_ids: ['agent-1'],
+      bridge_tool_selections: [{ agent_id: 'agent-1', tool_names: ['search'] }],
+    });
+
+    expect(messageService.sendMessage).toHaveBeenCalledWith('conv-1', {
+      content: 'Hello',
+    });
+  });
+
+  it('should keep bridge payload when bridge agents are available', async () => {
+    const mockResponse: SendMessageResponse = {
+      message_id: 'msg-4',
+      baseline_run: {
+        run_id: 'run-4',
+        requested_logical_model: 'gpt-4',
+        status: 'succeeded',
+        output_preview: 'Hi there!',
+        latency: 800,
+      },
+    };
+
+    mockUseBridgeAgents.mockReturnValue({
+      agents: [{ agent_id: 'agent-1' }],
+      error: null,
+      loading: false,
+      refresh: vi.fn(),
+    });
+    vi.mocked(messageService.sendMessage).mockResolvedValue(mockResponse);
+
+    const { result } = renderHook(() => useSendMessageToConversation(), { wrapper });
+
+    const payload = {
+      content: 'Hello',
+      bridge_agent_ids: ['agent-1'],
+      bridge_tool_selections: [{ agent_id: 'agent-1', tool_names: ['search'] }],
+    };
+
+    await result.current('conv-1', payload);
+
+    expect(messageService.sendMessage).toHaveBeenCalledWith('conv-1', payload);
+  });
 });
 
 describe('useClearConversationMessages', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    resetBridgeAgentsMock();
   });
 
   it('should clear messages and keep conversation id', async () => {
