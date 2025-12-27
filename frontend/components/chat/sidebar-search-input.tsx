@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useThrottleFn } from "ahooks";
 import { Search, X } from "lucide-react";
 

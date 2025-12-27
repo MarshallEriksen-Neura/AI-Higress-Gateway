@@ -307,8 +307,8 @@ export function useSendConversationImageGeneration(conversationId: string | null
                             ...it.message,
                             content: "[图片生成失败]",
                             image_generation: {
-                              type: "image_generation",
-                              status: "failed",
+                              type: "image_generation" as const,
+                              status: "failed" as const,
                               prompt: trimmedPrompt,
                               params: (it.message.image_generation?.params ??
                                 {
