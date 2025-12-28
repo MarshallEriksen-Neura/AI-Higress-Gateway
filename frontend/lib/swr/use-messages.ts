@@ -249,7 +249,7 @@ export function useSendMessageToConversation(
           return 35;
         };
 
-        const flushBuffer = (force?: boolean) => {
+        const flushBuffer = () => {
           if (!assistantBuffer) {
             flushTimer = null;
             return;
@@ -487,7 +487,7 @@ export function useSendMessageToConversation(
               }
 
               if (type === 'message.completed' || type === 'message.failed') {
-                flushBuffer(true);
+                flushBuffer();
                 clearPending();
                 const finalRun = parseRunSummary(rec['baseline_run'] ?? outerRec['baseline_run']);
                 if (finalRun) baselineRun = finalRun;

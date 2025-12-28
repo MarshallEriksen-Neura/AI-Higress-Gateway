@@ -2,18 +2,7 @@
 
 import { memo, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import {
-  User,
-  Bot,
-  Eye,
-  Sparkles,
-  Plus,
-  Layers,
-  RotateCw,
-  Trash2,
-  Loader2,
-  ArrowDown,
-} from "lucide-react";
+import { Loader2, ArrowDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
 import { toast } from "sonner";
