@@ -258,16 +258,6 @@ export function useSendMessageToConversation(
           assistantBuffer = '';
           updateAssistantContent(assistantText);
           flushTimer = null;
-
-          // 在完成阶段可以微调节奏，让收尾更平滑
-          if (!force && assistantBuffer.length === 0) {
-            flushTimer = setTimeout(() => {
-              flushTimer = null;
-              if (assistantBuffer) {
-                flushBuffer();
-              }
-            }, 24);
-          }
         };
 
         const scheduleFlush = () => {

@@ -1297,6 +1297,9 @@ async def stream_message_and_run_baseline(
                 emit_delta = delta
                 if stream_filter is not None:
                     emit_delta = stream_filter.feed(delta)
+                # Strip thinking blocks from streaming deltas
+                if emit_delta:
+                    emit_delta = _strip_think_blocks(emit_delta)
                 if not first_chunk_received:
                     first_chunk_received = True
                     _log_timing("10_first_chunk_received", t_stream_start, request_id)
@@ -1329,6 +1332,9 @@ async def stream_message_and_run_baseline(
 
     if stream_filter is not None:
         tail = stream_filter.flush()
+        if tail:
+            # Strip thinking blocks from flushed tail
+            tail = _strip_think_blocks(tail)
         if tail:
             parts.append(tail)
             yield _encode_sse_event(

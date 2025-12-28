@@ -25,7 +25,7 @@ export function ConversationPendingIndicator({
             <Bot className="size-6" aria-hidden="true" />
           </div>
         </div>
-        <div className="max-w-[80%]">
+        <div className="max-w-[min(800px,85%)] md:max-w-[min(800px,75%)]">
           <MessageBubble role="assistant">
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-1.5">
@@ -51,4 +51,3 @@ export function ConversationPendingIndicator({
     </div>
   );
 }
-

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Layers } from "lucide-react";
 import type { ModelsResponse, Model } from "@/http/provider";
@@ -9,6 +9,7 @@ import { ModelCard } from "./model-card";
 interface ProviderModelsTabProps {
   providerId: string;
   models?: ModelsResponse;
+  selectedModelId?: string | null;
   canEdit: boolean;
   onOpenSettings: (model: Model) => void;
   onRefresh: () => Promise<void>;
@@ -16,25 +17,40 @@ interface ProviderModelsTabProps {
     title: string;
     description: string;
     noModels: string;
+    countUnit?: string;
+    countUnitSingular?: string;
+    countUnitPlural?: string;
   };
 }
 
 export const ProviderModelsTab = ({
   providerId,
   models,
+  selectedModelId,
   canEdit,
   onOpenSettings,
   onRefresh,
   translations
 }: ProviderModelsTabProps) => {
   const modelCount = models?.models?.length || 0;
+  const [localSelectedModelId, setLocalSelectedModelId] = useState<string | null>(null);
+  const effectiveSelectedModelId = selectedModelId ?? localSelectedModelId;
+
+  const countLabel =
+    modelCount === 0
+      ? ""
+      : translations.countUnit ||
+        (modelCount === 1
+          ? translations.countUnitSingular || "model"
+          : translations.countUnitPlural || "models");
+  const modelItems = models?.models;
   
   // 按模型 ID 的前缀（以 "/" 分隔）分组
   const groupedModels = useMemo(() => {
-    if (!models?.models || models.models.length === 0) return {};
+    if (!modelItems || modelItems.length === 0) return {};
     
     const groups: Record<string, Model[]> = {};
-    models.models.forEach((model) => {
+    modelItems.forEach((model) => {
       const modelId = model.model_id || "";
       const groupKey: string = modelId.includes("/") 
         ? (modelId.split("/")[0] || "other")
@@ -52,7 +68,7 @@ export const ProviderModelsTab = ({
         acc[key] = groups[key]!;
         return acc;
       }, {} as Record<string, Model[]>);
-  }, [models?.models]);
+  }, [modelItems]);
   
   return (
     <div className="space-y-6">
@@ -69,7 +85,7 @@ export const ProviderModelsTab = ({
             {translations.description}
             {modelCount > 0 && (
               <span className="ml-2 text-primary font-medium">
-                • {modelCount} {modelCount === 1 ? 'model' : 'models'}
+                • {modelCount} {countLabel}
               </span>
             )}
           </p>
@@ -105,14 +121,18 @@ export const ProviderModelsTab = ({
               </div>
               
               {/* 该分组下的模型卡片 */}
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {groupModels.map((model) => (
                   <ModelCard
                     key={model.model_id}
                     providerId={providerId}
                     model={model}
+                    selected={Boolean(effectiveSelectedModelId && effectiveSelectedModelId === model.model_id)}
                     canEdit={canEdit}
-                    onOpenSettings={() => onOpenSettings(model)}
+                    onOpenSettings={() => {
+                      setLocalSelectedModelId(model.model_id);
+                      onOpenSettings(model);
+                    }}
                     onRefresh={onRefresh}
                   />
                 ))}

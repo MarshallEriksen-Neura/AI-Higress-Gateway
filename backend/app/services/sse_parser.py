@@ -24,12 +24,28 @@ async def iter_sse_events(byte_iter: AsyncIterator[bytes]) -> AsyncIterator[SSEE
         buffer += chunk.decode("utf-8", errors="ignore")
 
         while True:
-            idx = buffer.find("\n\n")
-            if idx == -1:
+            lf_idx = buffer.find("\n\n")
+            crlf_idx = buffer.find("\r\n\r\n")
+
+            if lf_idx == -1 and crlf_idx == -1:
                 break
 
+            if lf_idx == -1:
+                idx = crlf_idx
+                sep_len = 4
+            elif crlf_idx == -1:
+                idx = lf_idx
+                sep_len = 2
+            else:
+                if lf_idx < crlf_idx:
+                    idx = lf_idx
+                    sep_len = 2
+                else:
+                    idx = crlf_idx
+                    sep_len = 4
+
             frame = buffer[:idx]
-            buffer = buffer[idx + 2 :]
+            buffer = buffer[idx + sep_len :]
 
             event = "message"
             data_lines: list[str] = []
@@ -47,4 +63,3 @@ async def iter_sse_events(byte_iter: AsyncIterator[bytes]) -> AsyncIterator[SSEE
             if not data_lines:
                 continue
             yield SSEEvent(event=event, data="\n".join(data_lines))
-

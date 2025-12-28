@@ -6,6 +6,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Loader2, Copy, ThumbsUp, ThumbsDown, RotateCw, Trash2 } from "lucide-react";
+import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
+import { cn } from "@/lib/utils";
 
 const formatTime = (timestamp: string) => {
   const date = new Date(timestamp);
@@ -40,6 +42,7 @@ export function MessageListVirtual({
   onDeleteAssistantMessage,
 }: MessageListVirtualProps) {
   const parentRef = useRef<HTMLDivElement>(null);
+  const isImmersive = useChatLayoutStore((s) => s.isImmersive);
 
   // 虚拟化配置
   const virtualizer = useVirtualizer({
@@ -119,11 +122,16 @@ export function MessageListVirtual({
                 transform: `translateY(${virtualItem.start}px)`,
               }}
             >
-              <div className="px-4 py-3 max-w-4xl mx-auto">
+              <div
+                className={cn(
+                  "w-full py-3",
+                  isImmersive ? "mx-auto max-w-4xl px-4" : "px-3 md:px-6"
+                )}
+              >
                 {/* 用户消息 */}
                 {isUser ? (
                   <div className="flex gap-3 justify-end items-start group">
-                    <div className="flex flex-col items-end gap-2 max-w-[70%]">
+                    <div className="flex flex-col items-end gap-2 max-w-[min(800px,85%)] md:max-w-[min(800px,70%)]">
                       <div className="relative bg-gradient-to-br from-[#7c3aed] via-[#6d28d9] to-[#5b21b6] text-white rounded-[22px] rounded-tr-[6px] rounded-br-[22px] rounded-bl-[22px] px-5 py-3.5 shadow-[0_8px_24px_rgba(124,58,237,0.25)]">
                         <p className="text-[15px] leading-[1.65] tracking-[0.01em] whitespace-pre-wrap break-words">
                           {message.content}
@@ -154,7 +162,7 @@ export function MessageListVirtual({
                         🤖
                       </AvatarFallback>
                     </Avatar>
-                    <div className="flex-1 max-w-[85%]">
+                    <div className="flex-1 max-w-[min(800px,90%)] md:max-w-[min(800px,75%)]">
                       <div className="group/bubble relative bg-background rounded-[22px] rounded-tl-[6px] px-6 py-4 shadow-[0_2px_12px_rgba(0,0,0,0.04),0_8px_32px_rgba(0,0,0,0.06)]">
                         {/* Markdown 内容区域 - 优化行高和间距 */}
                         <div className="prose prose-sm max-w-none">

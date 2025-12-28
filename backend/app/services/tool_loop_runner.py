@@ -28,6 +28,9 @@ class ToolLoopLimits:
     max_invocations: int = 12
     max_total_duration_ms: int = 5 * 60 * 1000
     model_call_timeout_ms: int = 120 * 1000
+    # 防御性超时：避免下游工具调用（如 bridge SSE 等待）由于网络/解析问题永久挂起。
+    # 默认略大于 invoke_bridge_tool_and_wait 的 120s 等待窗口。
+    tool_invoke_timeout_ms: int = 130 * 1000
 
 
 @dataclass(frozen=True)
@@ -164,7 +167,40 @@ class ToolLoopRunner:
                 )
 
                 t_tool = time.perf_counter()
-                tool_result = await self._invoke_tool(req_id, target_agent_id, target_tool_name, args)
+                elapsed_ms = int(max(0, (time.perf_counter() - started_at) * 1000))
+                remaining_ms = int(max(0, self._limits.max_total_duration_ms - elapsed_ms))
+                tool_timeout_ms = int(min(remaining_ms, int(self._limits.tool_invoke_timeout_ms or 0)))
+                if tool_timeout_ms <= 0:
+                    return ToolLoopResult(
+                        first_response_payload=first_response_payload,
+                        final_response_payload=current_response,
+                        tool_invocations=invocation_records,
+                        output_text=None,
+                        error_code="TOOL_LOOP_TIMEOUT",
+                        error_message="tool loop exceeded max_total_duration_ms",
+                        did_run=bool(invocation_records),
+                    )
+
+                try:
+                    tool_result = await asyncio.wait_for(
+                        self._invoke_tool(req_id, target_agent_id, target_tool_name, args),
+                        timeout=float(tool_timeout_ms) / 1000.0,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "tool_loop: tool invoke timeout run_id=%s agent_id=%s tool=%s timeout_ms=%d",
+                        run_id,
+                        target_agent_id,
+                        target_tool_name,
+                        tool_timeout_ms,
+                    )
+                    tool_result = BridgeToolResult(
+                        ok=False,
+                        exit_code=0,
+                        canceled=False,
+                        result_json=None,
+                        error={"code": "invoke_timeout", "message": "tool invoke timed out"},
+                    )
                 duration_ms = int(max(0, (time.perf_counter() - t_tool) * 1000))
 
                 error_code = None

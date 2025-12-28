@@ -55,6 +55,30 @@ describe('MessageItem', () => {
     expect(screen.getByText('chat.run.status_succeeded')).toBeInTheDocument();
   });
 
+  it('does not show running indicator after run succeeded (even if recent/typewriter enabled)', () => {
+    render(
+      <MessageItem
+        message={mockAssistantMessage}
+        runs={[mockRun]}
+        enableTypewriter
+        isLatestAssistant
+      />
+    );
+    expect(screen.queryByText('chat.run.status_running')).not.toBeInTheDocument();
+  });
+
+  it('shows running indicator for recent assistant placeholder without run status and empty content', () => {
+    const placeholderAssistant: Message = {
+      message_id: 'msg-5',
+      conversation_id: 'conv-1',
+      role: 'assistant',
+      content: '',
+      created_at: new Date().toISOString(),
+    };
+    render(<MessageItem message={placeholderAssistant} runs={[]} enableTypewriter isLatestAssistant />);
+    expect(screen.getByText('chat.run.status_running')).toBeInTheDocument();
+  });
+
   it('collapses <think> content by default and toggles on click', () => {
     const messageWithThink: Message = {
       message_id: 'msg-3',

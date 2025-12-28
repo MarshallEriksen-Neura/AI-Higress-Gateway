@@ -2,7 +2,18 @@
 
 import { memo, useEffect, useRef, useState, useMemo, useCallback } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Loader2 } from "lucide-react";
+import {
+  User,
+  Bot,
+  Eye,
+  Sparkles,
+  Plus,
+  Layers,
+  RotateCw,
+  Trash2,
+  Loader2,
+  ArrowDown,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useSWRConfig } from "swr";
 import { toast } from "sonner";
@@ -25,6 +36,7 @@ import { ChatWelcomeContent } from "./chat-welcome-content";
 import { AssistantImageGenerationMessageItem } from "@/components/chat/assistant-image-generation-message-item";
 import { useI18n } from "@/lib/i18n-context";
 import { useErrorDisplay } from "@/lib/errors/error-display";
+import { cn } from "@/lib/utils";
 import { useMessages } from "@/lib/swr/use-messages";
 import { useDeleteConversation } from "@/lib/swr/use-conversations";
 import { useCachePreloader } from "@/lib/swr/cache";
@@ -35,6 +47,7 @@ import { useAssistant } from "@/lib/swr/use-assistants";
 import { useLogicalModels } from "@/lib/swr/use-logical-models";
 import { buildComparisonPayload, buildRegeneratePayload } from "@/lib/chat/payload-builder";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useConversationPending } from "@/lib/hooks/use-conversation-pending";
 import { useComposerTaskStore } from "@/lib/stores/composer-task-store";
 import type { ComposerTask } from "@/lib/chat/composer-tasks";
@@ -76,6 +89,7 @@ export const MessageList = memo(function MessageList({
   const router = useRouter();
   const { mutate: globalMutate } = useSWRConfig();
   const { user } = useAuth();
+  const isImmersive = useChatLayoutStore((s) => s.isImmersive);
   const { assistant } = useAssistant(assistantId);
   const projectId = assistant?.project_id ?? null;
   const { models } = useLogicalModels(projectId);
@@ -129,11 +143,12 @@ export const MessageList = memo(function MessageList({
   const [compareSelectedModel, setCompareSelectedModel] = useState<string | null>(
     null
   );
-  const [compareTarget, setCompareTarget] = useState<{ 
+  const [compareTarget, setCompareTarget] = useState<{
     assistantMessageId: string;
     sourceUserMessageId: string;
     baselineModel?: string;
   } | null>(null);
+  const [showScrollButton, setShowScrollButton] = useState(false);
 
   const composerTasks = useComposerTaskStore((s) => s.tasks);
   const tasksForConversation = useMemo(
@@ -637,6 +652,25 @@ export const MessageList = memo(function MessageList({
     }
   };
 
+  const handleScroll = useCallback(() => {
+    if (!parentRef.current) return;
+    const { scrollTop, scrollHeight, clientHeight } = parentRef.current;
+    const isNearBottom = scrollHeight - scrollTop - clientHeight < 200;
+    setShowScrollButton(!isNearBottom);
+  }, []);
+
+  useEffect(() => {
+    const scrollElement = parentRef.current;
+    if (!scrollElement) return;
+
+    scrollElement.addEventListener("scroll", handleScroll);
+    handleScroll();
+
+    return () => {
+      scrollElement.removeEventListener("scroll", handleScroll);
+    };
+  }, [handleScroll]);
+
   useEffect(() => {
     if (!isLoading && finalRenderItems.length > 0 && !cursor) {
       setTimeout(scrollToBottom, 100);
@@ -705,7 +739,12 @@ export const MessageList = memo(function MessageList({
           contain: "strict",
         }}
       >
-        <div className="mx-auto w-full max-w-3xl px-4">
+        <div
+          className={cn(
+            "w-full",
+            isImmersive ? "mx-auto max-w-3xl px-4" : "px-3 md:px-6"
+          )}
+        >
           <div
             style={{
               height: `${rowVirtualizer.getTotalSize()}px`,
@@ -822,6 +861,20 @@ export const MessageList = memo(function MessageList({
       )}
 
       <ConversationPendingIndicator conversationId={conversationId} />
+
+      {/* Scroll to bottom button */}
+      {showScrollButton && (
+        <Button
+          onClick={scrollToBottom}
+          size="icon"
+          variant="secondary"
+          className="fixed bottom-24 right-8 size-11 rounded-full shadow-lg z-10 hover:scale-110 transition-transform"
+          aria-label={t("chat.action.scroll_to_bottom")}
+          title={t("chat.action.scroll_to_bottom")}
+        >
+          <ArrowDown className="size-5" />
+        </Button>
+      )}
 
       <AddComparisonDialog
         open={compareDialogOpen}

@@ -9,7 +9,6 @@ import {
   Clock,
   Copy,
   Loader2,
-  PlugZap,
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -19,8 +18,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useI18n } from "@/lib/i18n-context";
 import { useRunToolInvocations } from "@/lib/hooks/use-run-tool-events";
-import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
-import { useChatStore } from "@/lib/stores/chat-store";
 import { cn } from "@/lib/utils";
 import type { RunSummary } from "@/lib/api-types";
 
@@ -111,13 +108,11 @@ export function ToolInvocationBubbles({
   runId,
   runStatus,
   seedInvocations,
-  conversationId,
   className,
 }: {
   runId: string | null | undefined;
   runStatus?: RunSummary["status"];
   seedInvocations?: ToolInvocation[] | null;
-  conversationId: string;
   className?: string;
 }) {
   const { t } = useI18n();
@@ -136,9 +131,6 @@ export function ToolInvocationBubbles({
   }, [liveInvocations, seedInvocations]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const setIsBridgePanelOpen = useChatLayoutStore((s) => s.setIsBridgePanelOpen);
-  const setConversationBridgeAgentIds = useChatStore((s) => s.setConversationBridgeAgentIds);
-  const setConversationBridgeActiveReqId = useChatStore((s) => s.setConversationBridgeActiveReqId);
 
   if (!invocations.length) return null;
 
@@ -192,22 +184,6 @@ export function ToolInvocationBubbles({
                     <StatusIcon className={cn("size-3.5", display.iconClass)} />
                     <span>{display.label}</span>
                   </Badge>
-
-                  {agentId && (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setConversationBridgeAgentIds(conversationId, [agentId]);
-                        setConversationBridgeActiveReqId(conversationId, reqId);
-                        setIsBridgePanelOpen(true);
-                      }}
-                      title={t("chat.tool_invocation.open_bridge")}
-                      aria-label={t("chat.tool_invocation.open_bridge")}
-                    >
-                      <PlugZap className="size-3.5" />
-                    </Button>
-                  )}
 
                   <Button
                     variant="ghost"

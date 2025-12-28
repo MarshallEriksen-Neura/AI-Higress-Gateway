@@ -1,24 +1,26 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow, format } from "date-fns";
 import { zhCN, enUS } from "date-fns/locale";
 import {
   User,
   Bot,
   Eye,
-  PlugZap,
   Sparkles,
   Plus,
   Layers,
   RotateCw,
   Trash2,
   Loader2,
+  AlertCircle,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n-context";
 import type { Message, RunSummary } from "@/lib/api-types";
 import type { ComparisonVariant } from "@/lib/stores/chat-comparison-store";
@@ -26,8 +28,6 @@ import { cn } from "@/lib/utils";
 import { MessageContent } from "./message-content";
 import { MessageBubble } from "./message-bubble";
 import { ToolInvocationBubbles } from "./tool-invocation-bubbles";
-import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
-import { useChatStore } from "@/lib/stores/chat-store";
 
 export interface MessageItemProps {
   message: Message;
@@ -75,13 +75,9 @@ export function MessageItem({
   const { t, language } = useI18n();
   const isUser = message.role === "user";
   const isAssistant = message.role === "assistant";
-  const setIsBridgePanelOpen = useChatLayoutStore((s) => s.setIsBridgePanelOpen);
-  const setConversationBridgeAgentIds = useChatStore((s) => s.setConversationBridgeAgentIds);
-  const setConversationBridgeActiveReqId = useChatStore((s) => s.setConversationBridgeActiveReqId);
   
   // 获取第一个 run（通常是 baseline run）
   const primaryRun = runs.length > 0 ? runs[0] : undefined;
-  const firstInvocation = primaryRun?.tool_invocations?.[0];
   const [activeTab, setActiveTab] = useState<string>("baseline");
   const effectiveTypewriterKey =
     typewriterKey ?? `${message.conversation_id}:${message.created_at}`;
@@ -100,11 +96,13 @@ export function MessageItem({
     isAssistant &&
     isLatestAssistant &&
     (primaryStatus === "running" || primaryStatus === "queued" || isRecent);
+  // 仅在明确的 run 状态为 queued/running 时展示“运行中”标记；
+  // 对于“最近消息”的 typewriter 兜底，不应误导为仍在运行。
   const isActivelyGenerating =
     isAssistant &&
     (primaryStatus === "running" ||
       primaryStatus === "queued" ||
-      (shouldTypewriter && isRecent));
+      (!primaryStatus && isRecent && (message.content ?? "").trim().length === 0));
 
   const tabItems = useMemo(() => {
     if (!isAssistant) return [];
@@ -167,28 +165,32 @@ export function MessageItem({
       )}
 
       {/* 消息内容 */}
-      <div className={cn("flex flex-col gap-2 max-w-[80%]", isUser && "items-end")}>
+      <div
+        className={cn(
+          "flex flex-col gap-2 max-w-[min(800px,85%)] md:max-w-[min(800px,75%)]",
+          isUser && "items-end"
+        )}
+      >
         {/* 消息卡片 */}
         <MessageBubble role={message.role}>
           <div className="flex-1 min-w-0">
             {isAssistantPendingResponse ? (
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  {[0, 1, 2, 3, 4].map((i) => (
+              <div className="flex items-center gap-2.5">
+                <div className="flex items-center gap-1">
+                  {[0, 1, 2].map((i) => (
                     <div
                       key={i}
-                      className="size-2.5 rounded-full animate-pulse"
+                      className="size-2 rounded-full bg-primary/60 animate-bounce"
                       style={{
-                        background: `hsl(${200 + i * 30}, 70%, 60%)`,
-                        animationDelay: `${i * 0.15}s`,
-                        animationDuration: '1.2s',
+                        animationDelay: `${i * 150}ms`,
+                        animationDuration: '600ms',
                       }}
                     />
                   ))}
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  Typing...
-                </div>
+                <span className="text-sm font-medium text-muted-foreground">
+                  {t("chat.message.ai_typing")}
+                </span>
               </div>
             ) : isAssistant && comparisonVariants.length > 0 ? (
               <Tabs value={activeTab} onValueChange={setActiveTab} className="gap-3">
@@ -249,14 +251,30 @@ export function MessageItem({
                 </>
               )}
               {isAssistant && errorMessage ? (
-                <div className="mt-2 text-xs text-destructive">{errorMessage}</div>
+                <Alert variant="destructive" className="mt-3">
+                  <AlertCircle className="size-4" />
+                  <AlertDescription className="flex items-center justify-between gap-2">
+                    <span className="text-xs flex-1">{errorMessage}</span>
+                    {onRegenerate && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onRegenerate(message.message_id, runSourceMessageId)}
+                        className="h-7 px-2 text-xs"
+                        disabled={disableActions || isRegenerating}
+                      >
+                        <RotateCw className="size-3 mr-1" />
+                        {t("chat.action.retry")}
+                      </Button>
+                    )}
+                  </AlertDescription>
+                </Alert>
               ) : null}
               {isAssistant && primaryRun ? (
                 <ToolInvocationBubbles
                   runId={primaryRun.run_id}
                   runStatus={primaryRun.status}
                   seedInvocations={toolInvocations}
-                  conversationId={message.conversation_id}
                 />
               ) : null}
           </div>
@@ -264,9 +282,20 @@ export function MessageItem({
 
         {/* 时间和操作按钮 */}
         <div className="flex items-center gap-2 px-1">
-          <span className="text-xs text-muted-foreground">
-            {formattedTime}
-          </span>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="text-xs text-muted-foreground cursor-help">
+                  {formattedTime}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">
+                  {format(new Date(message.created_at), "yyyy-MM-dd HH:mm:ss")}
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
           {isActivelyGenerating ? (
             <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
               <Loader2 className="size-3 animate-spin" />
@@ -276,7 +305,7 @@ export function MessageItem({
 
           {/* 助手消息的操作按钮 */}
           {isAssistant && (
-            <div className="flex items-center gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+            <div className="flex items-center gap-1 opacity-60 md:group-hover:opacity-100 transition-opacity duration-200">
               {/* 重新生成 */}
               {onRegenerate && (
                 <Button
@@ -316,20 +345,6 @@ export function MessageItem({
               {/* 以下操作依赖基线 run */}
               {primaryRun && (
                 <>
-                  {firstInvocation?.req_id && firstInvocation?.agent_id && (
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => {
-                        setConversationBridgeAgentIds(message.conversation_id, [firstInvocation.agent_id]);
-                        setConversationBridgeActiveReqId(message.conversation_id, firstInvocation.req_id);
-                        setIsBridgePanelOpen(true);
-                      }}
-                      title={t("chat.bridge.toggle")}
-                    >
-                      <PlugZap className="size-3.5" />
-                    </Button>
-                  )}
                   {/* 查看详情按钮 */}
                   {onViewDetails && (
                     <Button

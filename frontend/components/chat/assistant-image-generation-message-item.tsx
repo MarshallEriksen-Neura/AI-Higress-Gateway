@@ -72,7 +72,7 @@ export function AssistantImageGenerationMessageItem({
         </Avatar>
       </div>
 
-      <div className={cn("flex flex-col gap-2 max-w-[80%]")}>
+      <div className={cn("flex flex-col gap-2 max-w-[min(800px,85%)] md:max-w-[min(800px,75%)]")}>
         <div className="min-w-0">
           <ImageGenerationItem task={task} />
         </div>

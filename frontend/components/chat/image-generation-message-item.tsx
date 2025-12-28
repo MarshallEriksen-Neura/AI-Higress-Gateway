@@ -52,7 +52,12 @@ export function ImageGenerationMessageItem({ role, task, user }: ImageGeneration
       )}
 
       {/* Content */}
-      <div className={cn("flex flex-col gap-2 max-w-[80%]", isUser && "items-end")}>
+      <div
+        className={cn(
+          "flex flex-col gap-2 max-w-[min(800px,85%)] md:max-w-[min(800px,75%)]",
+          isUser && "items-end"
+        )}
+      >
         {isUser ? (
           <MessageBubble role="user">
             <div className="whitespace-pre-wrap break-words">{task.prompt}</div>

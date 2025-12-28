@@ -10,17 +10,12 @@ import { useSWRConfig } from "swr";
 import { useAuth } from "@/components/providers/auth-provider";
 import { ConversationChatInput } from "@/components/chat/conversation-chat-input";
 import { MessageList } from "@/components/chat/message-list";
+import { cn } from "@/lib/utils";
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from "@/components/ui/resizable";
-import {
-  Dialog,
-  DialogContent,
-  DialogTitle,
-  VisuallyHidden,
-} from "@/components/ui/dialog";
 import { useI18n } from "@/lib/i18n-context";
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 import { useChatStore } from "@/lib/stores/chat-store";
@@ -79,6 +74,17 @@ export function ConversationPageClient({
     setSelectedAssistant(assistantId);
     setSelectedConversation(conversationId);
   }, [assistantId, conversationId, setSelectedAssistant, setSelectedConversation]);
+
+  useEffect(() => {
+    if (!isImmersive) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (event.key !== "Escape") return;
+      setIsImmersive(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isImmersive, setIsImmersive]);
 
   const evalStreamControllerRef = useRef<AbortController | null>(null);
   useEffect(() => {
@@ -446,131 +452,79 @@ export function ConversationPageClient({
   const isArchived = conversation.archived;
 
   return (
-    <>
-      <div className="flex flex-col h-full">
-        <ConversationHeader
-          assistantId={assistantId}
-          conversationId={conversationId}
-          title={conversation.title}
-        />
+    <div
+      className={cn(
+        "relative flex h-full min-h-0 flex-col overflow-hidden bg-background",
+        isImmersive ? "fixed inset-0 z-[100] h-screen w-screen" : "h-full"
+      )}
+    >
+      <ConversationHeader
+        assistantId={assistantId}
+        conversationId={conversationId}
+        title={conversation.title}
+      />
 
-        {isArchived && (
-          <div className="bg-muted/50 border-b px-4 py-2 text-sm text-muted-foreground text-center">
-            {t("chat.conversation.archived_notice")}
-          </div>
-        )}
-
-        <div className="flex-1 overflow-hidden">
-          <ResizablePanelGroup
-            id="chat-vertical-layout"
-            direction="vertical"
-            defaultLayout={defaultVerticalLayout}
-            onLayoutChange={handleVerticalLayoutChange}
-          >
-            <ResizablePanel
-              id="message-list"
-              defaultSize="70%"
-              minSize="0%"
-              maxSize="100%"
-            >
-              <div className="h-full overflow-hidden">
-                <MessageList
-                  assistantId={assistantId}
-                  conversationId={conversationId}
-                  overrideLogicalModel={overrideLogicalModel}
-                  disabledActions={isArchived}
-                  onTriggerEval={handleTriggerEval}
-                />
-              </div>
-            </ResizablePanel>
-
-            <ResizableHandle withHandle aria-orientation="horizontal" />
-
-            <ResizablePanel
-              id="message-input"
-              defaultSize="30%"
-              minSize="0%"
-              maxSize="100%"
-            >
-              <div className="h-full bg-background">
-                <ConversationChatInput
-                  conversationId={conversationId}
-                  assistantId={assistantId}
-                  overrideLogicalModel={overrideLogicalModel}
-                  disabled={isArchived}
-                  className="h-full border-t-0"
-                />
-              </div>
-            </ResizablePanel>
-          </ResizablePanelGroup>
+      {isArchived && (
+        <div className="bg-muted/50 border-b px-4 py-2 text-sm text-muted-foreground text-center">
+          {t("chat.conversation.archived_notice")}
         </div>
+      )}
+
+      <div className="min-h-0 flex-1 overflow-hidden">
+        <ResizablePanelGroup
+          id={isImmersive ? "chat-vertical-layout-immersive" : "chat-vertical-layout"}
+          direction="vertical"
+          defaultLayout={defaultVerticalLayout}
+          onLayoutChange={handleVerticalLayoutChange}
+        >
+          <ResizablePanel
+            id="message-list"
+            defaultSize="70%"
+            minSize="0%"
+            maxSize="100%"
+          >
+            <div className="h-full overflow-hidden">
+              <MessageList
+                assistantId={assistantId}
+                conversationId={conversationId}
+                overrideLogicalModel={overrideLogicalModel}
+                disabledActions={isArchived}
+                onTriggerEval={handleTriggerEval}
+              />
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle aria-orientation="horizontal" />
+
+          <ResizablePanel
+            id="message-input"
+            defaultSize="30%"
+            minSize="0%"
+            maxSize="100%"
+          >
+            <div className="h-full bg-background">
+              <ConversationChatInput
+                conversationId={conversationId}
+                assistantId={assistantId}
+                overrideLogicalModel={overrideLogicalModel}
+                disabled={isArchived}
+                className="h-full border-t-0"
+              />
+            </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
 
-      <Dialog open={isImmersive} onOpenChange={setIsImmersive}>
-        <DialogContent className="max-w-[100vw] w-screen h-screen p-0 border-0 rounded-none bg-background flex flex-col z-[100] [&>button]:hidden">
-          <VisuallyHidden>
-            <DialogTitle>{t("chat.header.immersive_title")}</DialogTitle>
-          </VisuallyHidden>
-          <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-            <ConversationHeader
-              assistantId={assistantId}
-              conversationId={conversationId}
-              title={conversation.title}
-            />
-
-            {isArchived && (
-              <div className="bg-muted/50 border-b px-4 py-2 text-sm text-muted-foreground text-center">
-                {t("chat.conversation.archived_notice")}
-              </div>
-            )}
-
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <ResizablePanelGroup
-                id="chat-vertical-layout-immersive"
-                direction="vertical"
-              >
-                <ResizablePanel defaultSize="70%" minSize="0%" maxSize="100%">
-                  <div className="h-full overflow-hidden">
-                    <MessageList
-                      assistantId={assistantId}
-                      conversationId={conversationId}
-                      overrideLogicalModel={overrideLogicalModel}
-                      disabledActions={isArchived}
-                      onTriggerEval={handleTriggerEval}
-                    />
-                  </div>
-                </ResizablePanel>
-
-                <ResizableHandle withHandle aria-orientation="horizontal" />
-
-                <ResizablePanel defaultSize="30%" minSize="0%" maxSize="100%">
-                  <div className="h-full bg-background">
-                    <ConversationChatInput
-                      conversationId={conversationId}
-                      assistantId={assistantId}
-                      overrideLogicalModel={overrideLogicalModel}
-                      disabled={isArchived}
-                      className="h-full border-t-0"
-                    />
-                  </div>
-                </ResizablePanel>
-              </ResizablePanelGroup>
-            </div>
-
-            {activeEvalId && (
-              <div className="absolute inset-y-0 right-0 w-full md:w-96 border-l bg-background shadow-lg z-[110] overflow-y-auto">
-                <EvalPanel evalId={activeEvalId} onClose={handleCloseEval} />
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {activeEvalId && !isImmersive && (
-        <div className="fixed inset-y-0 right-0 w-full md:w-96 border-l bg-background shadow-lg z-50 overflow-y-auto">
+      {activeEvalId && (
+        <div
+          className={cn(
+            "inset-y-0 right-0 w-full md:w-96 border-l bg-background shadow-lg overflow-y-auto",
+            isImmersive ? "absolute z-[110]" : "fixed z-50"
+          )}
+        >
           <EvalPanel evalId={activeEvalId} onClose={handleCloseEval} />
         </div>
       )}
-    </>
+    </div>
   );
 }

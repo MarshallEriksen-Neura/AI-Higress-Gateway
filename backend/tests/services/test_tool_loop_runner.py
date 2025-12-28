@@ -215,6 +215,66 @@ async def test_tool_loop_runner_timeout_calls_cancel():
 
 
 @pytest.mark.asyncio
+async def test_tool_loop_runner_invoke_hang_is_guarded_by_timeout_and_emits_timeout_state():
+    canceled: list[tuple[str, str, str]] = []
+    hang = asyncio.Event()
+
+    async def invoke_tool(req_id: str, agent_id: str, tool_name: str, arguments: dict):
+        await hang.wait()
+        return BridgeToolResult(
+            ok=True,
+            exit_code=0,
+            canceled=False,
+            result_json={"ok": True},
+            error=None,
+        )
+
+    async def cancel_tool(req_id: str, agent_id: str, reason: str) -> None:
+        canceled.append((req_id, agent_id, reason))
+
+    async def call_model(payload: dict, idempotency_key: str):
+        return {"choices": [{"message": {"content": "final answer"}}]}
+
+    runner = ToolLoopRunner(
+        invoke_tool=invoke_tool,
+        call_model=call_model,
+        cancel_tool=cancel_tool,
+        limits=ToolLoopLimits(tool_invoke_timeout_ms=50, max_total_duration_ms=60_000),
+    )
+    result = await runner.run(
+        conversation_id="c1",
+        run_id="r1",
+        base_payload={"messages": [{"role": "user", "content": "hi"}], "tools": [], "tool_choice": "auto"},
+        first_response_payload={
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "search", "arguments": "{}"},
+                            }
+                        ],
+                    }
+                }
+            ]
+        },
+        effective_bridge_agent_ids=["agent-1"],
+        tool_name_map={},
+    )
+
+    assert result.did_run is True
+    assert result.output_text == "final answer"
+    assert len(result.tool_invocations) == 1
+    assert result.tool_invocations[0]["state"] == "timeout"
+    assert len(canceled) == 1
+    assert canceled[0][1] == "agent-1"
+    assert canceled[0][2] == "invoke_timeout"
+
+
+@pytest.mark.asyncio
 async def test_tool_loop_runner_model_followup_timeout():
     async def invoke_tool(req_id: str, agent_id: str, tool_name: str, arguments: dict):
         return BridgeToolResult(

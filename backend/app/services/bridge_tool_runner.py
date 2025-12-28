@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import html
 import json
@@ -348,30 +349,31 @@ async def wait_for_bridge_result(
     req_id: str,
     timeout_seconds: float,
 ) -> BridgeToolResult:
-    start = time.time()
-    async for msg in iter_sse_events(gateway.stream_events()):
-        if time.time() - start > timeout_seconds:
-            break
-        if msg.event != "bridge":
-            continue
-        try:
-            env = json.loads(msg.data)
-        except Exception:
-            continue
-        if not isinstance(env, dict):
-            continue
-        if str(env.get("type") or "").strip() != "RESULT":
-            continue
-        if str(env.get("req_id") or "").strip() != req_id:
-            continue
-        payload = env.get("payload") if isinstance(env.get("payload"), dict) else {}
-        return BridgeToolResult(
-            ok=bool(payload.get("ok", False)),
-            exit_code=int(payload.get("exit_code") or 0),
-            canceled=bool(payload.get("canceled", False)),
-            result_json=payload.get("result_json"),
-            error=payload.get("error") if isinstance(payload.get("error"), dict) else None,
-        )
+    try:
+        async with asyncio.timeout(float(timeout_seconds or 0)):
+            async for msg in iter_sse_events(gateway.stream_events()):
+                if msg.event != "bridge":
+                    continue
+                try:
+                    env = json.loads(msg.data)
+                except Exception:
+                    continue
+                if not isinstance(env, dict):
+                    continue
+                if str(env.get("type") or "").strip() != "RESULT":
+                    continue
+                if str(env.get("req_id") or "").strip() != req_id:
+                    continue
+                payload = env.get("payload") if isinstance(env.get("payload"), dict) else {}
+                return BridgeToolResult(
+                    ok=bool(payload.get("ok", False)),
+                    exit_code=int(payload.get("exit_code") or 0),
+                    canceled=bool(payload.get("canceled", False)),
+                    result_json=payload.get("result_json"),
+                    error=payload.get("error") if isinstance(payload.get("error"), dict) else None,
+                )
+    except TimeoutError:
+        pass
     return BridgeToolResult(
         ok=False,
         exit_code=0,
