@@ -27,4 +27,9 @@ SLA 与治理：为每个 provider/用户/API Key 提供并发与 QPS 限额、�
 
 
 --2025. 12月25
-添加文生图功能
+添加文生图功能 打通oss 和 平台展示功能
+
+--2025. 12. 29
+添加agent 打造个人工作台对标autoGPT, 运行在个人主机端的MANUS
+添加openSearch 集成ai chat 和agent 中
+agent 添加skills 功能

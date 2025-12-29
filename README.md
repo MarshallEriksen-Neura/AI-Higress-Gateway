@@ -1,320 +1,292 @@
-<p align="center">
-  <img src="docs/images/logo.svg" alt="AI-Higress logo" width="600" />
-</p>
-
 <div align="center">
+  <a href="https://ai.ethereals.space">
+    <img src="docs/images/logo.svg" alt="Logo" width="600" height="600">
+  </a>
+  <h3 align="center">AI-HIGRESS-GATEWAY</h3>
 
-[![Release](https://img.shields.io/github/v/release/MarshallEriksen-Neura/AI-Higress-Gateway?label=release&style=flat-square)](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/releases)
-[![Build](https://img.shields.io/github/actions/workflow/status/MarshallEriksen-Neura/AI-Higress-Gateway/backend.yml?branch=main&style=flat-square)](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/actions)
-[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/blob/main/LICENSE)
-[![Stars](https://img.shields.io/github/stars/MarshallEriksen-Neura/AI-Higress-Gateway?style=flat-square)](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/stargazers)
+  <p align="center">
+    Enterprise-grade Intelligent AI Gateway for Companies, Teams, and Individuals
+    <br />
+    <a href="https://ai.ethereals.space">View Demo</a>
+    ·
+    <a href="https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues">Report Bug</a>
+    ·
+    <a href="https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/pulls">Request Feature</a>
+  </p>
 
+  <p align="center">
+    <img src="https://img.shields.io/pypi/pyversions/fastapi?style=flat-square&logo=python" alt="python">
+    <img src="https://img.shields.io/badge/Next.js-14.0-black?style=flat-square&logo=next.js" alt="Next.js">
+    <img src="https://img.shields.io/badge/License-MIT-green?style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/stars/MarshallEriksen-Neura/AI-Higress-Gateway?style=social" alt="Stars">
+  </p>
+
+  <p align="center">
+    <a href="README.md">English</a> · <a href="README.zh.md">中文</a>
+  </p>
 </div>
 
-<h1 align="center">AI-Higress-Gateway</h1>
+## 📖 Table of Contents
 
-<p align="center"><em>Production-grade AI gateway: OpenAI-compatible API, multi-provider routing, front/back dashboards, caching, and failover.</em></p>
-
-[English](#english-overview) · [中文](#中文概览)
-
----
-
-## English Overview
-
-### 🌟 Highlights
-- 🔀 Multi-provider routing with weighted scheduling, health checks, and failover.
-- 🧭 OpenAI-compatible surface (`/v1/chat/completions`, `/v1/responses`, `/models`) with request adapters.
-- 🧠 Stateless chat proxy: clients/upstreams manage conversation context.
-- 💳 Credits & billing hooks: per-user/provider request accounting, quotas, and history.
-- 📊 Metrics and dashboards: provider ranking, success rate trends, request history, user-scoped overview.
-- 🛡️ AuthN/Z + API key issuance, roles/permissions, security middleware, rate-limit, input validation.
-- 🧰 Dev UX: FastAPI backend + Next.js (App Router) admin UI, docker-compose one-click stack.
-
-<p align="center">
-  <img src="docs/images/architecture.svg" alt="Architecture diagram" width="100%" />
-</p>
-
-### 📸 Screenshots
-
-<p align="center">
-  <img src="docs/images/overview.png" alt="Dashboard overview" width="100%" />
-</p>
-
-<p align="center">
-  <img src="docs/images/provider-overview.png" alt="Provider overview" width="100%" />
-</p>
-
-### 🧩 Feature Matrix
-- Gateway & API: OpenAI-compatible chat/responses/models; SSE & non-streaming; request adapters.
-- Providers: public & private provider registration, provider presets, logical models, weighted routing, submission & approval flow.
-- Routing & control: routing rules, failover/backoff, health metrics, cache invalidation.
-- Identity & access: JWT login, API keys, role/permission management, user profile & avatar.
-- Credits & billing: credit balance and transaction history, per-user/provider metrics.
-- Observability: user/provider metrics, success-rate trends, request history, audit logs.
-- Admin & ops: system config, notifications, provider review, gateway status checks.
-
-### 🚀 Quickstart (Backend)
-1) Clone & enter:
-```bash
-git clone https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway.git
-cd AI-Higress-Gateway
-```
-2) Python 3.12 env:
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e backend/
-```
-3) Start Postgres + Redis (Docker):
-```bash
-cp .env.example .env
-docker compose -f docker-compose.develop.yml --env-file .env up -d postgres redis
-```
-4) Run API gateway (dev):
-```bash
-cd backend
-apiproxy  # or: uvicorn main:app --reload
-```
-
-### 🖥️ Quickstart (Frontend)
-```bash
-cd frontend
-bun install   # or pnpm / npm
-bun dev       # starts Next.js dashboard
-```
-Env (frontend) is in `frontend/.env.example` (`NEXT_PUBLIC_API_BASE_URL` → backend URL).
-
-### ⚙️ Configuration
-- Main settings in `backend/app/settings.py`; prefer env vars.
-- Generate `SECRET_KEY` via system API `POST /system/secret-key/generate` and put into `.env`.
-- JWT RSA keys (access/refresh signing) default to `security/private.pem` + `security/public.pem` (override with `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH`). Generate once:
-  ```bash
-  openssl genrsa -out security/private.pem 2048
-  openssl rsa -in security/private.pem -pubout -out security/public.pem
-  ```
-  If using Docker, mount `./security:/app/security:ro` (already configured in compose files).
-- Redis/PostgreSQL URLs are read from `.env`; see sample values in the repo.
-- Optional: Celery broker/result can reuse Redis; see `.env` sample keys.
-- Example env keys:
-  - `REDIS_URL`, `REDIS_PASSWORD`
-  - `DATABASE_URL` (postgresql+psycopg)
-  - `SECRET_KEY`
-  - `LOG_LEVEL` (default INFO)
-  - `AUTO_APPLY_DB_MIGRATIONS` (default true) + `ENABLE_AUTO_MIGRATION=true` (explicit opt-in to actually run migrations)
-
-### 🧪 Testing (backend)
-We use `pytest` and `pytest-asyncio`. Run locally (AI agent will not run tests for you):
-```bash
-cd backend
-pytest
-```
-
-### 🐳 Docker Compose (dev vs deploy)
-- Dev/local tryout (images):  
-  `IMAGE_TAG=latest docker compose -f docker-compose.develop.yml --env-file .env up -d`
-- Deploy (images): use `docker-compose-deploy.yml` + your `.env`/`.env.deploy`, with prebuilt image `marshalleriksen/apiproxy-api:<tag>` (see GitHub Actions workflow `Publish Backend Image`). Run:
-```bash
-IMAGE_TAG=latest docker compose -f docker-compose-deploy.yml --env-file .env up -d
-```
-Alembic migrations auto-run when `AUTO_APPLY_DB_MIGRATIONS=true` and `ENABLE_AUTO_MIGRATION=true` (see `.env.example`); existing DBs should already have `alembic_version.version_num` widened to 128.
-
-### 🗺️ API Surface (high-level)
-- OpenAI-compatible gateway: `/v1/chat/completions`, `/v1/responses`, `/models`.
-- Management & ops: providers, logical models, routing rules, sessions, metrics, credits, auth, notifications, users & roles, API keys, private provider submissions, gateway/system config.
-
-### 📂 Project Layout
-- `backend/`: FastAPI gateway (`main.py` entrypoint, core logic in `app/`).
-- `frontend/`: Next.js dashboard (App Router + Tailwind + shadcn/ui).
-- `docs/`: Design/API notes; keep API behavior in sync (`docs/api/`).
-- `scripts/`: Helper scripts (model listing, key ops, etc.).
-- `tests/`: Pytest suite (sync + async).
-- `docker-compose.develop.yml`: Dev/local stack (prebuilt backend image + Postgres/Redis + optional frontend).
-- `docker-compose-deploy.yml`: Deploy stack (prebuilt backend image + Postgres/Redis).
-- `docker-compose.images.yml`: Image-only backend stack (no frontend).
-
-### 📚 Documentation
-- API docs: `docs/api/`
-- Backend design: `docs/backend/`
-- Frontend design: `docs/fronted/`
-- Screenshots/assets: `docs/images/`
-
-### 🧱 Tech Stack & Deps
-- Python 3.12, FastAPI, SQLAlchemy, PostgreSQL, Redis (context/cache), Celery (optional async tasks).
-- Frontend: Next.js (App Router), Tailwind CSS, shadcn/ui, SWR data layer.
-***
-
-### 🤝 Contributing
-- Follow PEP 8, type hints, snake_case; keep commits focused.
-- Add/update tests with new endpoints, caching rules, or context behaviors.
-- Update `docs/api/` when changing API surface, auth, or error codes.
-- Example commit style: `添加模型缓存错误处理`.
-
-### 📜 License
-MIT
+- [✨ Features](#-features)
+- [🏗️ Architecture](#️-architecture)
+- [🖥️ Demo](#️-demo)
+- [🛠️ Tech Stack](#️-tech-stack)
+- [🚀 Quick Start](#-quick-start)
+- [🚧 Project Status](#-project-status)
+- [📚 Documentation](#-documentation)
+- [🤝 Contributing](#-contributing)
+- [📄 License](#-license)
 
 ---
 
-## 中文概览
+## ✨ Features
 
-### 📖 项目简介
+We are committed to building a high-performance, highly available AI gateway service that supports multiple provider configurations, intelligent degradation, and load balancing across multiple API keys.
 
-**AI 终网关 (AI Ethereals Gateway)** 是一个企业级的 AI API 网关和管理平台，为开发者提供统一、可靠、高效的 AI 模型访问服务。
+### 🎯 Core Features
 
-#### 核心价值
+- 🔀 **Intelligent Routing & Load Balancing**
+  - Multi-dimensional routing strategies (latency-first/cost-first/reliability-first/balanced mode)
+  - Real-time Provider health monitoring with automatic failover
+  - Failure cooldown mechanism to avoid repeated calls to problematic nodes
+  - Multiple API Key polling with QPS rate limiting
+  - Dynamic routing by model with physical-to-logical model mapping
 
-- **统一接入** - 集成 OpenAI、Anthropic、Google Gemini、Azure OpenAI 等主流 AI 服务提供商
-- **智能路由** - 基于成本、性能、可用性自动选择最优模型，支持加权负载均衡
-- **成本优化** - 实时追踪 API 使用成本，灵活的积分和配额系统
-- **高可用性** - 多 API Key 轮询、自动故障转移、健康检查机制
-- **企业级管理** - 完整的用户权限体系、团队协作、使用监控和审计
-- **开发友好** - OpenAI 兼容接口，无缝迁移现有应用
+- 🏢 **Private Provider Support**
+  - Users can create private AI providers with custom API endpoints
+  - Support for HTTP, official SDKs (OpenAI/Claude/Google/VertexAI), and Claude CLI modes
+  - Private sharing mechanism with authorized user access
+  - Real-time probe monitoring to detect upstream availability
+  - Submit shared Providers to public pool (requires admin approval)
 
-#### 适用场景
+- 💬 **Enterprise-grade Session Management**
+  - JWT Token + Redis session storage
+  - Multi-device login management with remote logout support
+  - Token rotation mechanism to prevent replay attacks
+  - Device fingerprinting and anomaly detection
+  - Complete session audit logs
 
-✅ **AI 应用开发** - 快速集成多个 AI 模型，无需关心底层提供商差异  
-✅ **成本控制** - 智能选择性价比最优的模型，降低 AI 服务成本  
-✅ **企业部署** - 统一管理团队的 AI API 使用，支持私有模型接入  
-✅ **服务稳定性** - 多 Key 轮询和故障转移，保障业务连续性  
-✅ **合规审计** - 完整的请求日志和会话追踪，满足企业合规要求
+- 🧩 **Cloud MCP & Agent Workflow**
+  - Support for Model Context Protocol to easily extend Agent capabilities
+  - Agent workflow orchestration (🚧 In Development)
+  - Cloud tool library management
+  - Multi-modal dialogue support (text/image/audio)
 
-### 🌟 核心亮点
-- 🔀 多提供商路由与权重调度，健康探测 + 故障切换。
-- 🧭 OpenAI 兼容接口（`/v1/chat/completions`, `/v1/responses`, `/models`），内置请求适配器。
-- 🧠 无状态代理：对话上下文由客户端/上游维护。
-- 💳 积分与计费：用户/Provider 维度的请求计量、额度与交易历史。
-- 📊 指标与看板：Provider 排行、成功率趋势、请求历史、用户维度概览。
-- 🛡️ 一站式安全：鉴权、API Key 发行、角色/权限、中间件安全校验、限流。
-- 🧰 研发友好：FastAPI 后端 + Next.js 管理台（App Router + Tailwind + shadcn/ui），docker-compose 一键本地栈。
+- 🔍 **Intelligent Model Management**
+  - Automatic discovery of Provider-supported model lists
+  - Model alias mapping to unify logical model names
+  - Fine-grained model enable/disable per Provider
+  - Capability tag override (chat/vision/function_calling/image_generation, etc.)
+  - Static model configuration for scenarios without `/models` endpoint
+
+### 🚀 Additional Highlights
+
+- 🤖 **Multi-model Support**: Seamlessly integrate OpenAI, DeepSeek, Claude, Google Gemini, Vertex AI, and other mainstream models
+- ⚡ **High-performance Architecture**: Built on FastAPI + Celery async tasks, supporting high-concurrency request forwarding
+- 💳 **Credit Management System**: Flexible quota control, auto top-up, consumption statistics, and reports
+- 📊 **Real-time Monitoring**: Provider-level metrics, time series data, request log tracking
+- 🔐 **Enterprise Security**: RBAC permission system, API key management, encrypted storage
+- 🎨 **Modern UI**: Immersive management interface built with Next.js 14 + shadcn/ui
+- 🖼️ **Image Generation**: Support for OpenAI, Gemini, Imagen, and other text-to-image models
+- 🌐 **Proxy Pool Management**: Upstream proxy health checks, failure cooldown, dynamic switching
+
+## 🏗️ Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        User/Application Layer                │
+│    Web UI (Next.js)  │  API Clients  │  CLI Tools          │
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+                          ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      API Gateway (FastAPI)                   │
+│  ┌──────────────┬──────────────┬──────────────┬───────────┐│
+│  │ Auth/AuthZ   │ Routing      │ Rate Limit   │ Monitoring││
+│  └──────────────┴──────────────┴──────────────┴───────────┘│
+└─────────────────────────┬───────────────────────────────────┘
+                          │
+            ┌─────────────┼─────────────┐
+            ▼             ▼             ▼
+      ┌──────────┐  ┌──────────┐  ┌──────────┐
+      │ OpenAI   │  │ Claude   │  │ Gemini   │
+      │ Provider │  │ Provider │  │ Provider │
+      └──────────┘  └──────────┘  └──────────┘
+            │             │             │
+            └─────────────┴─────────────┘
+                          │
+            ┌─────────────┼─────────────┐
+            ▼             ▼             ▼
+      ┌──────────┐  ┌──────────┐  ┌──────────┐
+      │ Redis    │  │PostgreSQL│  │ Celery   │
+      │ (Cache)  │  │ (Storage)│  │ (Tasks)  │
+      └──────────┘  └──────────┘  └──────────┘
+```
+
+### Core Components
+
+- **API Gateway**: Unified entry point for authentication, routing, rate limiting, etc.
+- **Smart Router**: Intelligent routing engine selecting optimal Provider based on multi-dimensional metrics
+- **Provider Manager**: Manages multiple AI provider configurations and health status
+- **Credit System**: Credit management to control user quota consumption
+- **Monitoring**: Real-time monitoring of Provider performance metrics
+- **Session Manager**: JWT session management with multi-device login control
+
+## 🖥️ Demo
+
+### Dashboard
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/dashboard.png" alt="Default Theme Dashboard" />
+<p align="center"><em>Default Theme</em></p>
+</td>
+<td width="50%">
+<img src="docs/images/dark_dashboard.png" alt="Dark Theme Dashboard" />
+<p align="center"><em>Dark Theme</em></p>
+</td>
+</tr>
+</table>
 
 <p align="center">
-  <img src="docs/images/overview.png" alt="仪表盘截图" width="820" />
+<img src="docs/images/christmas_dashboard.png" alt="Christmas Theme Dashboard" width="80%" />
+<br/><em>Christmas Theme</em>
 </p>
+
+### Provider Management
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/provider-list.png" alt="Provider List" />
+<p align="center"><em>Default Theme</em></p>
+</td>
+<td width="50%">
+<img src="docs/images/dark_provider_list.png" alt="Dark Theme Provider List" />
+<p align="center"><em>Dark Theme</em></p>
+</td>
+</tr>
+</table>
 
 <p align="center">
-  <img src="docs/images/provider-overview.png" alt="Provider 管理截图" width="820" />
+<img src="docs/images/christmas_provider_list.png" alt="Christmas Theme Provider List" width="80%" />
+<br/><em>Christmas Theme</em>
 </p>
 
-### 🧩 功能矩阵
-- 网关与 API：OpenAI 兼容（Chat/Responses/Models）、SSE/非流、请求/响应适配。
-- Provider：公共/私有 Provider 注册，预设模板，逻辑模型映射，权重路由，提交与审核流程。
-- 路由与控制：路由规则、故障切换/回退、健康探测、缓存失效。
-- 身份与访问：JWT 登录、API Key、角色/权限、用户资料与头像。
-- 积分与计费：余额/消耗/交易历史，用户 & Provider 维度指标。
-- 可观测性：用户/Provider 指标、成功率趋势、请求历史、审计日志。
-- 运维与管理：系统配置、通知、Provider 审核、网关健康检查。
+### Chat Interface
 
-### 🚀 快速开始（Docker 镜像，推荐新手）
-1) 准备环境变量：
-```bash
-cp .env.example .env
-# 按需修改 .env（尤其是数据库/Redis 密码、SECRET_KEY、OAuth 回调等）
-```
-2) 启动开发栈（后端镜像 + PostgreSQL + Redis，可选前端容器）：
-```bash
-IMAGE_TAG=latest docker compose -f docker-compose.develop.yml --env-file .env up -d
-```
-3) 访问：
-- 后端 API: http://127.0.0.1:8000
-- 前端管理台（启用 frontend 服务时）: http://127.0.0.1:3000
+<p align="center">
+<img src="docs/images/chat.png" alt="Chat Interface" width="80%" />
+<br/><em>AI Conversation Interface</em>
+</p>
 
-### 🚀 快速开始（后端源码开发）
-1) 克隆并进入目录：
-```bash
-git clone https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway.git
-cd AI-Higress-Gateway
-```
-2) 创建 Python 3.12 虚拟环境并安装：
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e backend/
-```
-3) 启动 PostgreSQL + Redis（Docker）：
-```bash
-docker compose -f docker-compose.develop.yml --env-file .env up -d postgres redis
-```
-4) 开发模式运行网关：
-```bash
-cd backend
-uv run main.py  # 或 uvicorn main:app --reload
-```
+## 🛠️ Tech Stack
 
-### 🖥️ 快速开始（前端）
-```bash
-# 1. 同步环境变量（从根目录 .env 自动生成前端配置）
-bash scripts/sync-frontend-env.sh
+### Backend
+* **Framework**: FastAPI (Python 3.10+)
+* **Async Tasks**: Celery + Redis
+* **Database**: PostgreSQL + SQLAlchemy
+* **Cache/Session**: Redis
+* **Authentication**: JWT + Passlib
+* **API Clients**: HTTPX, OpenAI SDK, Anthropic SDK, Google SDK
 
-# 2. 安装依赖并启动
-cd frontend
-bun install   # 或 pnpm / npm
-bun dev       # 启动 Next.js 管理台
-```
+### Frontend
+* **Framework**: Next.js 14 (App Router)
+* **UI Components**: shadcn/ui + Radix UI
+* **Styling**: TailwindCSS
+* **State Management**: React Hooks
+* **HTTP Client**: Axios
 
-**环境变量说明**:
-- 前后端共享根目录 `.env` 文件
-- 运行 `scripts/sync-frontend-env.sh` 自动生成 `frontend/.env.local`
-- 脚本会从 `CORS_ALLOW_ORIGINS` 推断 API 地址
-- 详见 [环境配置文档](docs/development/environment-setup.md)
+### Infrastructure
+* **Containerization**: Docker + Docker Compose
+* **Reverse Proxy**: Nginx (optional)
+* **Object Storage**: Aliyun OSS / S3-compatible storage (optional)
+* **Monitoring**: Built-in metrics collection + time series data
 
-### ⚙️ 配置要点
-- 核心配置在 `backend/app/settings.py`，推荐使用环境变量。
-- 通过系统 API `POST /system/secret-key/generate` 生成 `SECRET_KEY` 写入 `.env`，避免提交真实密钥。
-- JWT RSA 密钥对默认路径 `security/private.pem`、`security/public.pem`（可用 `JWT_PRIVATE_KEY_PATH` / `JWT_PUBLIC_KEY_PATH` 覆盖）。生成示例：
-  ```bash
-  openssl genrsa -out security/private.pem 2048
-  openssl rsa -in security/private.pem -pubout -out security/public.pem
-  ```
-  使用 Docker 时确保挂载 `./security:/app/security:ro`（compose 已包含）。
-- Redis/PostgreSQL 连接信息从 `.env` 读取，可按需调整。
-- Celery 可复用 Redis 作为 broker/result（参考 `.env` 示例）。
-- 常用环境变量：
-  - `REDIS_URL`, `REDIS_PASSWORD`
-  - `DATABASE_URL`（postgresql+psycopg）
-  - `SECRET_KEY`
-  - `LOG_LEVEL`（默认 INFO）
-  - `AUTO_APPLY_DB_MIGRATIONS`（默认 true）+ `ENABLE_AUTO_MIGRATION=true`（显式开启实际迁移）
-  - `ENABLE_CREDIT_CHECK`（启用网关层积分不足拦截）
-  - `ENABLE_STREAMING_PRECHARGE`, `STREAMING_MIN_TOKENS`（流式请求预扣开关与估算参数）
+## 🚀 Quick Start
 
-### 🧪 测试（后端）
-使用 `pytest` / `pytest-asyncio`：
-```bash
-cd backend
-pytest
-```
-AI Agent 不会代跑测试，请本地执行并关注结果。
+### Prerequisites
 
-### 🐳 容器化
-- 开发/本地试用（镜像模式）：  
-  `IMAGE_TAG=latest docker compose -f docker-compose.develop.yml --env-file .env up -d`
-- 生产部署（镜像模式）：  
-  `IMAGE_TAG=latest docker compose -f docker-compose-deploy.yml --env-file .env up -d`
+* Python 3.10+
+* Node.js 18+
+* Docker (optional)
 
-生产发布建议在 CI 先执行 `alembic upgrade head`，并结合外部 Redis、监控与日志。
+### Installation Steps
 
-### 📂 仓库结构
-- `backend/`：FastAPI 后端（入口 `main.py`，业务在 `app/`）。
-- `frontend/`：Next.js 管理与监控 UI（App Router + Tailwind + shadcn/ui）。
-- `docs/`：设计与 API 文档（修改接口时同步更新 `docs/api/`）。
-- `scripts/`：脚本工具（模型检查、批量任务、密钥生成示例等）。
-- `tests/`：pytest 测试套件（含异步用例）。
-- `docker-compose.develop.yml`：开发/本地试用编排（后端镜像 + PostgreSQL/Redis + 可选前端）。
-- `docker-compose-deploy.yml`：生产部署编排（仅后端镜像 + PostgreSQL/Redis）。
-- `docker-compose.images.yml`：纯镜像后端编排（不含前端，可用于快速试跑）。
+1. Clone the repository
+   ```bash
+   git clone https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway.git
+   cd AI-Higress-Gateway
+   cp .env.example .env
+   docker compose -f docker-compose.images.yml up -d
+   ```
 
-### 📚 文档与规范
-- API 文档：`docs/api/`
-- 后端设计：`docs/backend/`
-- 前端设计：`docs/fronted/`
-- UI 视觉规范：`ui-prompt.md`
-- 前端文案与 i18n：`frontend/lib/i18n/`
-- 设计/截图资源：`docs/images/`
+2. Frontend Setup
+   ```bash
+   cd frontend
+   cp .env.example .env
+   bun install
+   bun dev
+   ```
 
-### 🤝 贡献指南
-- 遵循 PEP 8 与类型注解；函数/变量 snake_case，类 PascalCase。
-- 每次新增接口/缓存/上下文逻辑都应补测试。
-- 涉及 API 行为、鉴权或错误码的改动需同步更新 `docs/api/`。
-- 提交信息保持简洁，如 `添加模型缓存错误处理`。
+3. Cloud MCP Configuration
+   ```bash
+   git clone https://github.com/MarshallEriksen-Neura/mcp-higress-gateway.git
+   cd mcp-higress-gateway
+   cp .env.example .env
+   docker compose up -d
+   ```
 
-### 📜 许可证
-MIT
+## 🚧 Project Status
+
+> **⚡ This project is under active development!** We are continuously adding new features, optimizing performance, and fixing issues. Stay tuned for the latest updates!
+
+**Recent Updates**:
+- ✅ Completed intelligent routing and load balancing system
+- ✅ Implemented private Provider support with probe monitoring
+- ✅ Enhanced session management and security mechanisms
+- ✅ Implemented automatic model discovery and disable functionality
+- 🚧 Agent workflow orchestration in development
+- 🚧 Cloud MCP tool library in development
+
+## 📚 Documentation
+
+This README provides a quick overview. For more detailed feature descriptions, API documentation, and configuration guides, please refer to:
+
+- 📖 [Complete Documentation](./docs/README.zh.md)
+- 🌐 [API Documentation](./docs/api/API_Documentation.md)
+- 🏗️ [Architecture Design](./docs/backend/)
+- 🎨 [Frontend Documentation](./docs/fronted/)
+
+## 🤝 Contributing
+
+Contributions are welcome! We welcome all forms of contributions:
+
+- 🐛 [Report Bugs](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues)
+- 💡 [Feature Requests](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues)
+- 📝 Improve documentation
+- 🔧 Submit code fixes or new features
+
+## 💬 Community & Support
+
+- 📖 [Documentation](./docs)
+- 🐛 [Issue Tracker](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues)
+- 🌟 [Star the Project](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway)
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MarshallEriksen-Neura/AI-Higress-Gateway&type=Date)](https://star-history.com/#MarshallEriksen-Neura/AI-Higress-Gateway&Date)
+
+## 📄 License
+
+MIT License - See [LICENSE](LICENSE) file for details
+
+---
+
+<div align="center">
+  <strong>Made with ❤️ by MarshallEriksen-Neura Team</strong>
+  <br/>
+  <sub>If this project helps you, please give us a ⭐️</sub>
+</div>

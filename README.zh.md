@@ -1,12 +1,11 @@
 <div align="center">
   <a href="https://ai.ethereals.space">
-    <img src="https:github.com/MarshallEriksen-Neura/AI-Higress-Gateway/raw/master/docs/images/logo.svg" alt="Logo" width="80" height="80">
+    <img src="docs/images/logo.svg" alt="Logo" width="600" height="600">
   </a>
-
   <h3 align="center">AI-HIGRESS-GATEWAY</h3>
 
   <p align="center">
-    为公司，团体，个人打造的企业级只能AI网关
+    为公司，团体，个人打造的企业级智能AI网关
     <br />
     <a href="https://ai.ethereals.space">查看 Demo</a>
     ·
@@ -134,7 +133,52 @@
 
 ## 🖥️ 演示 (Demo)
 
-![App Screenshot](https://via.placeholder.com/800x400?text=Place+Your+Screenshot+Here)
+### 仪表盘 (Dashboard)
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/dashboard.png" alt="默认主题仪表盘" />
+<p align="center"><em>默认主题</em></p>
+</td>
+<td width="50%">
+<img src="docs/images/dark_dashboard.png" alt="暗色主题仪表盘" />
+<p align="center"><em>暗色主题</em></p>
+</td>
+</tr>
+</table>
+
+<p align="center">
+<img src="docs/images/christmas_dashboard.png" alt="圣诞主题仪表盘" width="80%" />
+<br/><em>圣诞主题</em>
+</p>
+
+### Provider管理 (Provider Management)
+
+<table>
+<tr>
+<td width="50%">
+<img src="docs/images/provider-list.png" alt="Provider列表" />
+<p align="center"><em>默认主题</em></p>
+</td>
+<td width="50%">
+<img src="docs/images/dark_provider_list.png" alt="暗色主题Provider列表" />
+<p align="center"><em>暗色主题</em></p>
+</td>
+</tr>
+</table>
+
+<p align="center">
+<img src="docs/images/christmas_provider_list.png" alt="圣诞主题Provider列表" width="80%" />
+<br/><em>圣诞主题</em>
+</p>
+
+### 聊天界面 (Chat Interface)
+
+<p align="center">
+<img src="docs/images/chat.png" alt="聊天界面" width="80%" />
+<br/><em>AI对话界面</em>
+</p>
 
 ## 🛠️ 技术栈 (Tech Stack)
 
@@ -186,3 +230,54 @@
    cp .env env
    docker compose up -d
    ```
+## 🚧 项目状态 (Project Status)
+
+> **⚡ 本项目正处于积极开发中！** 我们持续添加新功能、优化性能并修复问题。欢迎关注项目获取最新进展！
+
+**最近更新**:
+- ✅ 完成智能路由与负载均衡系统
+- ✅ 实现私有Provider支持与探针监控
+- ✅ 完善会话管理与安全机制
+- ✅ 实现模型自动发现与禁用功能
+- 🚧 Agent工作流编排开发中
+- 🚧 云端MCP工具库开发中
+
+## 📚 完整文档
+
+本 README 提供快速概览。更详细的功能说明、API 文档和配置指南，请查看：
+
+- 📖 [完整中文文档](./docs/README.zh.md)
+- 🌐 [API 文档](./docs/api/API_Documentation.md)
+- 🏗️ [架构设计](./docs/backend/)
+- 🎨 [前端文档](./docs/fronted/)
+
+## 🤝 贡献 (Contributing)
+
+欢迎贡献！我们欢迎任何形式的贡献：
+
+- 🐛 [报告Bug](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues)
+- 💡 [功能建议](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues)
+- 📝 改进文档
+- 🔧 提交代码修复或新功能
+
+## 💬 社区与支持
+
+- 📖 [完整文档](./docs)
+- 🐛 [问题跟踪](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway/issues)
+- 🌟 [Star项目](https://github.com/MarshallEriksen-Neura/AI-Higress-Gateway)
+
+## ⭐ Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MarshallEriksen-Neura/AI-Higress-Gateway&type=Date)](https://star-history.com/#MarshallEriksen-Neura/AI-Higress-Gateway&Date)
+
+## 📄 许可证 (License)
+
+MIT License - 详见 [LICENSE](LICENSE) 文件
+
+---
+
+<div align="center">
+  <strong>Made with ❤️ by MarshallEriksen-Neura Team</strong>
+  <br/>
+  <sub>如果这个项目对您有帮助，请给我们一个 ⭐️</sub>
+</div>
