@@ -54,6 +54,38 @@ class CreditTopupRequest(BaseModel):
     )
 
 
+class CreditGrantRequest(BaseModel):
+    amount: int = Field(..., gt=0, description="要增加的积分数量（必须为正数）")
+    reason: str = Field(
+        ...,
+        min_length=1,
+        max_length=32,
+        description="入账来源标识（建议：sign_in / redeem_code / promo 等，最长 32 字符）",
+    )
+    description: str | None = Field(
+        default=None,
+        max_length=255,
+        description="备注说明（最长 255 字符）",
+    )
+    idempotency_key: str | None = Field(
+        default=None,
+        max_length=80,
+        description="幂等键：同一个 key 只会入账一次（建议包含活动/用户/日期等信息）",
+    )
+
+
+class CreditGrantResponse(BaseModel):
+    applied: bool = Field(
+        ...,
+        description="本次是否实际入账；当 idempotency_key 重复时为 false",
+    )
+    account: CreditAccountResponse
+    transaction: CreditTransactionResponse | None = Field(
+        default=None,
+        description="本次入账对应的流水（幂等重复时返回已存在的流水）",
+    )
+
+
 class CreditAutoTopupConfig(BaseModel):
     """
     管理员配置的自动充值规则。
@@ -178,6 +210,8 @@ __all__ = [
     "CreditAutoTopupConfig",
     "CreditAutoTopupConfigResponse",
     "CreditConsumptionSummary",
+    "CreditGrantRequest",
+    "CreditGrantResponse",
     "CreditProviderUsageItem",
     "CreditProviderUsageResponse",
     "CreditTopupRequest",

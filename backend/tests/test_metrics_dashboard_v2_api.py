@@ -157,6 +157,7 @@ def test_user_dashboard_v2_providers_metrics(client: TestClient, db_session: Ses
 
     now = dt.datetime.now(dt.UTC)
     window_start = (now - dt.timedelta(minutes=10)).replace(second=0, microsecond=0)
+    recent_window_start = (now - dt.timedelta(minutes=1)).replace(second=0, microsecond=0)
 
     db_session.add_all(
         [
@@ -185,6 +186,35 @@ def test_user_dashboard_v2_providers_metrics(client: TestClient, db_session: Ses
                 token_estimated_requests=0,
                 error_4xx_requests=0,
                 error_5xx_requests=3,
+                error_429_requests=0,
+                error_timeout_requests=0,
+            ),
+            # 近 5 分钟内的样本，用于断言卡片“当前 QPS”不会长期显示为 0。
+            ProviderRoutingMetricsHistory(
+                provider_id="openai",
+                logical_model="gpt-4o",
+                transport="http",
+                is_stream=False,
+                user_id=user.id,
+                api_key_id=None,
+                window_start=recent_window_start,
+                window_duration=60,
+                total_requests_1m=60,
+                success_requests=60,
+                error_requests=0,
+                latency_avg_ms=110.0,
+                latency_p50_ms=95.0,
+                latency_p95_ms=220.0,
+                latency_p99_ms=260.0,
+                error_rate=0.0,
+                success_qps_1m=1.0,
+                status="healthy",
+                input_tokens_sum=0,
+                output_tokens_sum=0,
+                total_tokens_sum=0,
+                token_estimated_requests=0,
+                error_4xx_requests=0,
+                error_5xx_requests=0,
                 error_429_requests=0,
                 error_timeout_requests=0,
             ),
@@ -232,5 +262,5 @@ def test_user_dashboard_v2_providers_metrics(client: TestClient, db_session: Ses
     assert payload["items"][0]["total_requests"] >= 60
     assert payload["items"][0]["error_rate"] > 0
     assert payload["items"][0]["latency_p95_ms"] > 0
-    assert payload["items"][0]["qps"] >= 0
+    assert payload["items"][0]["qps"] > 0
     assert payload["items"][0]["points"]

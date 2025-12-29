@@ -1164,6 +1164,96 @@
 > 说明：当 `stream=true` 或请求头 `Accept: text/event-stream` 触发流式响应时，若在开始推流前发生可预判错误
 > （例如模型不可用、或仅支持 `/responses` 入口），网关仍会返回常规的 `4xx` JSON 错误体（而不是 SSE）。
 
+#### 上游路由与错误透出（避免黑盒）
+
+网关可能会在多个 Provider 之间进行重试/切换（例如上游限流、网络波动、能力不匹配导致的 fallback、失败冷却跳过等）。
+当最终仍失败时：
+
+- **非流式请求**：返回 `502 Bad Gateway`，错误体仍为 FastAPI 默认 `{"detail": "<text>"}`，其中 `detail` 会包含：
+  - `provider`：本次失败发生在哪个 provider（最后一次不可重试的 provider）
+  - `upstream_status`：上游 HTTP 状态码（若可获得）
+  - `category`：可选分类（例如能力不匹配）
+  - `request_id`：网关生成的请求标识（用于与服务端日志关联排障）
+  - 当所有 provider 都失败（或被失败冷却跳过）时，`detail` 中还会包含 `last_provider/last_status/last_error`（若可获得）
+
+示例：
+
+```json
+{
+  "detail": "Upstream error provider=openai upstream_status=429 request_id=3f2a9b9d8c1e4f6aa12b34cd56ef7890: insufficient_quota"
+}
+```
+
+- **流式请求（推流阶段失败）**：网关会发送一条 SSE `data:` 错误帧（OpenAI 风格），包含 `provider_id/status/request_id`：
+
+```text
+data: {"error":{"type":"upstream_error","status":429,"message":"insufficient_quota","provider_id":"openai","request_id":"3f2a9b9d8c1e4f6aa12b34cd56ef7890"}}
+```
+
+#### 请求日志（Request Logs）
+
+为避免“网关是黑盒”，系统会为**通过 API Key 访问**的网关入口（如 `/v1/chat/completions`）记录最近的请求日志，
+并把“候选 provider 尝试链路（重试/切换/冷却跳过）”保存到 Redis（定长，自动裁剪）。
+
+前端控制台可通过以下接口拉取当前用户的最近请求记录（按时间倒序）：
+
+**接口**: `GET /v1/request-logs`
+
+**认证**: JWT 令牌
+
+**查询参数**:
+- `limit` (int, 可选，默认 50，范围 1~200)
+- `offset` (int, 可选，默认 0)
+
+**响应（示例）**:
+
+```json
+{
+  "items": [
+    {
+      "request_id": "3f2a9b9d8c1e4f6aa12b34cd56ef7890",
+      "ts": "2025-01-01T00:00:00+00:00",
+      "method": "POST",
+      "path": "/v1/chat/completions",
+      "logical_model": "gpt-4o-mini",
+      "requested_model": "gpt-4o-mini",
+      "api_style": "openai",
+      "is_stream": false,
+      "status_code": 502,
+      "latency_ms": 2310,
+      "selected_provider_id": "azure",
+      "selected_provider_model": "gpt-4o-mini",
+      "upstream_status": 429,
+      "error_message": "insufficient_quota",
+      "attempts": [
+        {
+          "idx": 0,
+          "provider_id": "openai",
+          "model_id": "gpt-4o-mini",
+          "transport": "http",
+          "success": false,
+          "retryable": true,
+          "status_code": 504,
+          "error_message": "timeout",
+          "duration_ms": 5000
+        },
+        {
+          "idx": 1,
+          "provider_id": "azure",
+          "model_id": "gpt-4o-mini",
+          "transport": "http",
+          "success": false,
+          "retryable": false,
+          "status_code": 429,
+          "error_message": "insufficient_quota",
+          "duration_ms": 210
+        }
+      ]
+    }
+  ]
+}
+```
+
 ---
 
 ## 图像生成（文生图）
@@ -1467,6 +1557,37 @@ cost_credits = ceil(raw_cost * ModelBillingConfig.multiplier * Provider.billing_
 ```
 
 **成功响应**: 返回更新后的用户积分账户结构，字段与 `GET /v1/credits/me` 相同。
+
+### 3.1 管理员为用户入账积分（可幂等）
+
+**接口**: `POST /v1/credits/admin/users/{user_id}/grant`  
+**认证**: JWT 令牌（仅限超级管理员）
+
+**请求体**:
+```json
+{
+  "amount": 50,
+  "reason": "sign_in",
+  "description": "每日签到奖励",
+  "idempotency_key": "sign_in:2025-01-01:USER_ID"
+}
+```
+
+字段说明：
+- `reason`：入账来源标识（最长 32 字符），便于后续按活动类型统计/审计；
+- `idempotency_key`：可选幂等键（最长 80 字符）；相同 key 重复调用不会重复入账。
+
+**响应示例**:
+```json
+{
+  "applied": true,
+  "account": { "id": "uuid", "user_id": "uuid", "balance": 1250, "daily_limit": null, "status": "active", "created_at": "2025-01-01T00:00:00Z", "updated_at": "2025-01-02T12:34:56Z" },
+  "transaction": { "id": "uuid", "account_id": "uuid", "user_id": "uuid", "api_key_id": null, "amount": 50, "reason": "sign_in", "description": "每日签到奖励", "model_name": null, "provider_id": null, "provider_model_id": null, "input_tokens": null, "output_tokens": null, "total_tokens": null, "created_at": "2025-01-02T12:34:56Z" }
+}
+```
+
+字段说明：
+- `applied`：`true` 表示本次实际入账；若 `idempotency_key` 重复则为 `false`，同时仍返回已存在的 `transaction`。
 
 ### 4. 管理员配置每日自动充值
 

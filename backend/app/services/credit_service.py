@@ -451,6 +451,75 @@ def _create_transaction(
     return tx
 
 
+def apply_credit_delta(
+    db: Session,
+    *,
+    user_id: UUID,
+    api_key_id: UUID | None = None,
+    amount: int,
+    reason: str,
+    description: str | None = None,
+    idempotency_key: str | None = None,
+) -> tuple[CreditAccount, CreditTransaction | None, bool]:
+    """
+    统一的积分变动入口（入账/扣减都可），支持可选幂等键。
+
+    - amount 为正数表示入账（赠送/充值等），负数表示扣减；
+    - 当提供 idempotency_key 时，若该 key 已存在则不会重复入账/扣减，
+      返回 (account, existing_tx, False)。
+    """
+    if amount == 0:
+        raise ValueError("amount 不能为 0")
+
+    account = get_or_create_account_for_user(db, user_id)
+    account.balance = int(account.balance) + int(amount)
+    tx = _create_transaction(
+        db,
+        account=account,
+        user_id=user_id,
+        api_key_id=api_key_id,
+        provider_id=None,
+        provider_model_id=None,
+        amount=amount,
+        reason=reason,
+        description=description,
+        model_name=None,
+        input_tokens=None,
+        output_tokens=None,
+        total_tokens=None,
+        idempotency_key=idempotency_key,
+    )
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if not idempotency_key:
+            raise
+
+        existing_tx = (
+            db.execute(
+                select(CreditTransaction).where(
+                    CreditTransaction.idempotency_key == idempotency_key
+                )
+            )
+            .scalars()
+            .first()
+        )
+        if existing_tx is None:
+            # 理论上不应发生：出现唯一冲突但查不到记录，保持显式失败便于排查。
+            raise
+        if existing_tx.user_id != user_id:
+            raise ValueError("idempotency_key 已被其他用户使用，无法复用")
+
+        db.refresh(account)
+        return account, existing_tx, False
+
+    db.refresh(account)
+    db.refresh(tx)
+    return account, tx, True
+
+
 def apply_manual_delta(
     db: Session,
     *,
@@ -465,28 +534,15 @@ def apply_manual_delta(
 
     amount 为正数时表示充值，负数表示扣减。
     """
-    if amount == 0:
-        raise ValueError("amount 不能为 0")
-
-    account = get_or_create_account_for_user(db, user_id)
-    account.balance = int(account.balance) + int(amount)
-    _create_transaction(
+    account, _tx, _applied = apply_credit_delta(
         db,
-        account=account,
         user_id=user_id,
         api_key_id=api_key_id,
-        provider_id=None,
-        provider_model_id=None,
         amount=amount,
         reason=reason,
         description=description,
-        model_name=None,
-        input_tokens=None,
-        output_tokens=None,
-        total_tokens=None,
+        idempotency_key=None,
     )
-    db.commit()
-    db.refresh(account)
     logger.info(
         "Applied manual credit delta for user=%s: amount=%s reason=%r description=%r balance_after=%s",
         user_id,
@@ -942,6 +998,7 @@ def record_streaming_request(
 
 __all__ = [
     "InsufficientCreditsError",
+    "apply_credit_delta",
     "apply_manual_delta",
     "compute_chat_completion_cost_credits",
     "disable_auto_topup_for_user",

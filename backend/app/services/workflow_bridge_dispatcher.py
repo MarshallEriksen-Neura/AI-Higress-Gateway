@@ -69,7 +69,7 @@ class BridgeStreamDispatcher:
         task.cancel()
         try:
             await task
-        except Exception:
+        except (asyncio.CancelledError, Exception):
             pass
 
     async def register(self, meta: WorkflowInvocationMeta) -> asyncio.Future[dict[str, Any]]:

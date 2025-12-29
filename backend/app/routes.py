@@ -50,6 +50,7 @@ from .api.v1.workflow_routes import router as workflow_router
 from .api.v1.session_routes import router as user_session_router
 from .api.v1.user_provider_routes import router as user_provider_router
 from .api.v1.user_routes import router as user_router
+from .api.v1.request_logs_routes import router as request_logs_router
 from .db import SessionLocal
 from .log_sanitizer import sanitize_headers_for_log
 from .logging_config import logger
@@ -264,6 +265,7 @@ def create_app() -> FastAPI:
     app.include_router(provider_key_router)
     app.include_router(user_session_router)
     app.include_router(credit_router)
+    app.include_router(request_logs_router)
 
     # Chat 应用能力：助手 / 会话 / 评测闭环（JWT）
     app.include_router(assistant_router)

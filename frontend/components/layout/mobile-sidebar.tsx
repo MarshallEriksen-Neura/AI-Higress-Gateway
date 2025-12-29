@@ -25,6 +25,7 @@ import {
     Globe,
     Plug,
     FlaskConical,
+    ScrollText,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -82,6 +83,11 @@ const navItems: NavItem[] = [
         titleKey: "nav.my_submissions",
         href: "/dashboard/my-submissions",
         icon: Send,
+    },
+    {
+        titleKey: "nav.request_logs",
+        href: "/dashboard/request-logs",
+        icon: ScrollText,
     },
 ];
 

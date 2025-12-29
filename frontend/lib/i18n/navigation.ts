@@ -27,6 +27,7 @@ export const navigationTranslations: Record<Language, Record<string, string>> = 
     "nav.my_submissions": "My Submissions",
     "nav.provider_submissions": "Provider Submissions",
     "nav.upstream_proxy": "Upstream Proxy",
+    "nav.request_logs": "Request Logs",
     // Dashboard
     "dashboard.title": "AI Higress",
     "dashboard.subtitle": "Ink Wash Control Center",
@@ -66,6 +67,7 @@ export const navigationTranslations: Record<Language, Record<string, string>> = 
     "nav.my_submissions": "我的投稿",
     "nav.provider_submissions": "投稿管理",
     "nav.upstream_proxy": "上游代理池",
+    "nav.request_logs": "请求日志",
     // Dashboard
     "dashboard.title": "AI Higress",
     "dashboard.subtitle": "水墨控制中心",

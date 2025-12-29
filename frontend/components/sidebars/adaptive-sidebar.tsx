@@ -27,6 +27,7 @@ import {
   MessageSquare,
   Plug,
   FlaskConical,
+  ScrollText,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -82,6 +83,11 @@ const navItems: NavItem[] = [
     titleKey: "nav.my_submissions",
     href: "/dashboard/my-submissions",
     icon: Send,
+  },
+  {
+    titleKey: "nav.request_logs",
+    href: "/dashboard/request-logs",
+    icon: ScrollText,
   },
 ];
 

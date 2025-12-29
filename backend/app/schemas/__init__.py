@@ -41,6 +41,8 @@ from .credit import (
     CreditAutoTopupConfig,
     CreditAutoTopupConfigResponse,
     CreditConsumptionSummary,
+    CreditGrantRequest,
+    CreditGrantResponse,
     CreditProviderUsageItem,
     CreditProviderUsageResponse,
     CreditTopupRequest,

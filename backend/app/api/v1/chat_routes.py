@@ -73,8 +73,10 @@ async def chat_completions(
     raw_body: dict[str, Any] = Body(...),
     current_key: AuthenticatedAPIKey = Depends(require_api_key),
 ):
+    request_id = uuid.uuid4().hex
     logger.info(
-        "chat: incoming model=%r stream=%r user=%s session=%s",
+        "chat: incoming request_id=%s model=%r stream=%r user=%s session=%s",
+        request_id,
         raw_body.get("model"),
         raw_body.get("stream"),
         current_key.user_id,
@@ -110,9 +112,8 @@ async def chat_completions(
     if stream and payload_stream_raw is None:
         payload["stream"] = True
 
-    billing_request_id = uuid.uuid4().hex
-    billing_final_key = f"chat:{billing_request_id}:final"
-    billing_precharge_key = f"chat:{billing_request_id}:precharge"
+    billing_final_key = f"chat:{request_id}:final"
+    billing_precharge_key = f"chat:{request_id}:precharge"
 
     api_style = api_style_override or detect_request_format(payload)
     requested_model = payload.get("model")
@@ -125,7 +126,8 @@ async def chat_completions(
         )
 
     logger.info(
-        "chat: resolved api_style=%s lookup_model_id=%r stream=%s",
+        "chat: resolved request_id=%s api_style=%s lookup_model_id=%r stream=%s",
+        request_id,
         api_style,
         lookup_model_id,
         stream,
@@ -182,6 +184,10 @@ async def chat_completions(
                 lookup_model_id=lookup_model_id,
                 api_style=api_style,
                 effective_provider_ids=effective_provider_ids,
+                request_id=request_id,
+                log_request=True,
+                request_method=request.method,
+                request_path=request.url.path,
                 session_id=x_session_id,
                 idempotency_key=billing_final_key,
                 messages_path_override=messages_path_override,
@@ -214,6 +220,10 @@ async def chat_completions(
                 api_style=api_style,
                 effective_provider_ids=effective_provider_ids,
                 selection=selection,
+                request_id=request_id,
+                log_request=True,
+                request_method=request.method,
+                request_path=request.url.path,
                 session_id=x_session_id,
                 idempotency_key=billing_precharge_key,
                 messages_path_override=messages_path_override,
@@ -238,7 +248,8 @@ async def chat_completions(
         raise
     except Exception as exc:
         logger.exception(
-            "chat: request failed user=%s model=%s error=%s",
+            "chat: request failed request_id=%s user=%s model=%s error=%s",
+            request_id,
             current_key.user_id,
             lookup_model_id,
             str(exc),

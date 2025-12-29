@@ -2,7 +2,7 @@
 
 ## 概述
 
-提供动态生成 CLI 配置脚本的功能，支持 Claude CLI 和 Codex CLI 在 Windows、macOS、Linux 平台的一键配置。
+提供动态生成 CLI 配置脚本的功能，支持 Claude CLI、Codex CLI、Gemini CLI 在 Windows、macOS、Linux 平台的一键配置。
 
 ## 端点
 
@@ -10,28 +10,30 @@
 
 **端点**: `GET /api/v1/cli/install`
 
-**描述**: 动态生成 CLI 配置脚本，用户可通过 `curl | bash` 或 `irm | iex` 方式直接执行。
+**描述**: 动态生成 CLI 配置脚本，用户可通过 `curl | bash` 或 `irm | iex` 方式直接执行。脚本会在终端提示输入密钥（不回显），避免把密钥拼进 URL。
 
 **查询参数**:
 
 | 参数 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| client | string | 是 | CLI 客户端类型：`claude` 或 `codex` |
+| client | string | 是 | CLI 客户端类型：`claude` / `codex` / `gemini` |
 | platform | string | 是 | 操作系统平台：`windows`、`mac` 或 `linux` |
-| key | string | 是 | 用户的 API Key |
 | url | string | 否 | API 服务器地址（默认使用环境变量 `API_BASE_URL`） |
 
 **使用示例**:
 
 ```bash
 # macOS/Linux - Claude CLI
-curl -fsSL "https://your-domain.com/api/v1/cli/install?client=claude&platform=mac&key=YOUR_API_KEY" | bash
+curl -fsSL "https://your-domain.com/api/v1/cli/install?client=claude&platform=mac" | bash
 
 # macOS/Linux - Codex CLI
-curl -fsSL "https://your-domain.com/api/v1/cli/install?client=codex&platform=linux&key=YOUR_API_KEY" | bash
+curl -fsSL "https://your-domain.com/api/v1/cli/install?client=codex&platform=linux" | bash
+
+# macOS/Linux - Gemini CLI
+curl -fsSL "https://your-domain.com/api/v1/cli/install?client=gemini&platform=linux" | bash
 
 # Windows - Claude CLI (PowerShell)
-irm "https://your-domain.com/api/v1/cli/install?client=claude&platform=windows&key=YOUR_API_KEY" | iex
+irm "https://your-domain.com/api/v1/cli/install?client=claude&platform=windows" | iex
 ```
 
 **响应**: 返回可执行的 Shell 脚本（Bash 或 PowerShell）
@@ -45,6 +47,10 @@ irm "https://your-domain.com/api/v1/cli/install?client=claude&platform=windows&k
 - **Codex CLI** (用户级配置):
   - macOS/Linux: `~/.codex/auth.json` 和 `~/.codex/config.toml`
   - Windows: `C:/Users/你的用户名/.codex/auth.json` 和 `C:/Users/你的用户名/.codex/config.toml`
+
+- **Gemini CLI** (用户级配置):
+  - macOS/Linux: `~/.gemini/.env`
+  - Windows: `C:/Users/你的用户名/.gemini/.env`
 
 **注意**: Windows 下路径使用正斜杠 `/` 而非反斜杠 `\`
 
@@ -80,11 +86,17 @@ wire_api = "responses"
 requires_openai_auth = true
 ```
 
+**Gemini CLI** (`~/.gemini/.env`):
+```bash
+GEMINI_API_KEY="your-gemini-api-key"
+```
+
 **配置合并策略**:
 
 脚本会智能处理现有配置：
 - **Claude Code CLI**: 只更新 `env.ANTHROPIC_AUTH_TOKEN` 和 `env.ANTHROPIC_BASE_URL` 字段
 - **Codex CLI**: 更新 `auth.json`，并在 `config.toml` 中追加新的 provider 配置
+- **Gemini CLI**: 只更新/追加 `.env` 中的 `GEMINI_API_KEY` 行
 - 保留其他已有配置（如主题、快捷键、MCP 服务器等）
 - 如果配置文件不存在，创建新的配置文件
 
@@ -96,7 +108,7 @@ requires_openai_auth = true
 
 **描述**: 返回格式化的安装命令，供前端界面展示。
 
-**查询参数**: 与 `/api/v1/cli/install` 相同
+**查询参数**: 与 `/api/v1/cli/install` 相同（不包含 `key`）
 
 **响应示例**:
 
@@ -104,8 +116,8 @@ requires_openai_auth = true
 {
   "client": "claude",
   "platform": "mac",
-  "command": "curl -fsSL \"https://your-domain.com/api/v1/cli/install?client=claude&platform=mac&key=sk-xxx\" | bash",
-  "script_url": "https://your-domain.com/api/v1/cli/install?client=claude&platform=mac&key=sk-xxx"
+  "command": "curl -fsSL \"https://your-domain.com/api/v1/cli/install?client=claude&platform=mac&url=https%3A%2F%2Fyour-domain.com\" | bash",
+  "script_url": "https://your-domain.com/api/v1/cli/install?client=claude&platform=mac&url=https%3A%2F%2Fyour-domain.com"
 }
 ```
 
@@ -150,28 +162,22 @@ requires_openai_auth = true
 
 ## 安全考虑
 
-1. **API Key 传输**: 
-   - 建议使用 HTTPS 确保 API Key 在传输过程中加密
-   - 脚本 URL 中包含 API Key，注意不要在公共场合分享
+1. **密钥避免出现在 URL/日志**:
+   - 安装命令不再包含密钥参数，脚本会在终端交互式提示输入（不回显）。
+   - 建议使用 HTTPS，避免中间人攻击。
 
 2. **配置文件权限**:
    - Unix 系统上配置文件权限设置为 `600`（仅所有者可读写）
    - Windows 系统存储在用户目录下
 
-3. **API Key 验证**:
-   - 后端对 API Key 进行基本格式验证（长度 >= 10）
-   - 实际使用时 CLI 客户端会验证 Key 的有效性
+3. **密钥有效性**:
+   - 网关不会在 `/api/v1/cli/install` 中接收或校验明文密钥；脚本会进行最小长度检查，实际有效性由 CLI 调用时验证。
 
 ---
 
 ## 错误处理
 
-**400 Bad Request**:
-```json
-{
-  "detail": "无效的 API Key"
-}
-```
+**422 Unprocessable Entity**（缺少必填参数或参数值不合法）:
 
 **401 Unauthorized**（/config 需要登录）:
 ```json
@@ -196,7 +202,7 @@ requires_openai_auth = true
 
 ## 前端集成
 
-前端可使用 `CliConfigDialog` 组件展示配置界面（弹窗会先拉取 `api_url/key_prefix`，并要求用户手动粘贴完整 API Key）：
+前端可使用 `CliConfigDialog` 组件展示配置界面（弹窗会先拉取 `api_url/key_prefix`，并提示用户在终端按脚本提示输入完整 API Key）：
 
 ```tsx
 import { CliConfigDialog } from "@/components/dashboard/cli-config-dialog"

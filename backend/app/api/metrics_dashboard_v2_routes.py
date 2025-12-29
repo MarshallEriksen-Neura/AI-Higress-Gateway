@@ -774,6 +774,8 @@ async def user_dashboard_providers(
             float(latency_p95_ms),
         )
 
+    target_provider_ids = requested_provider_ids or list(summary_by_provider.keys())
+
     pulse_start, pulse_end = _pulse_window()
     step_seconds = 3600
     start_bucket = _floor_to_step(pulse_start, step_seconds)
@@ -783,6 +785,38 @@ async def user_dashboard_providers(
     while cur <= end_bucket:
         bucket_starts.append(cur)
         cur = cur + dt.timedelta(seconds=step_seconds)
+
+    # Provider 卡片的“当前 QPS”更适合用更短窗口的平均值（例如近 5 分钟），
+    # 否则按小时平均会在低频/突发场景下容易显示为 0.000。
+    current_qps_window_seconds = 300
+    current_qps_by_provider: dict[str, float] = {}
+    if target_provider_ids:
+        qps_end = _floor_to_step(pulse_end, 60) + dt.timedelta(seconds=60)
+        qps_start = qps_end - dt.timedelta(seconds=current_qps_window_seconds)
+        current_qps_stmt = (
+            select(
+                ProviderRoutingMetricsHistory.provider_id.label("provider_id"),
+                func.coalesce(func.sum(ProviderRoutingMetricsHistory.total_requests_1m), 0).label("total_requests"),
+            )
+            .where(
+                ProviderRoutingMetricsHistory.window_start >= qps_start,
+                ProviderRoutingMetricsHistory.window_start < qps_end,
+                ProviderRoutingMetricsHistory.provider_id.in_(target_provider_ids),
+            )
+            .group_by(ProviderRoutingMetricsHistory.provider_id)
+            .order_by(ProviderRoutingMetricsHistory.provider_id.asc())
+        )
+        current_qps_stmt = _apply_common_filters(
+            current_qps_stmt,
+            model=ProviderRoutingMetricsHistory,
+            scope_user_id=user_uuid,
+            transport=transport,
+            is_stream=is_stream,
+        )
+        for row in db.execute(current_qps_stmt).all():
+            pid = str(row.provider_id)
+            total_requests = int(row.total_requests or 0)
+            current_qps_by_provider[pid] = float(total_requests / current_qps_window_seconds)
 
     trunc = _bucket_trunc_expr(db, "hour", ProviderRoutingMetricsHistory.window_start).label("bucket_start")
     spark_stmt = (
@@ -813,7 +847,8 @@ async def user_dashboard_providers(
     spark_by_provider: dict[str, dict[dt.datetime, DashboardProviderMetricPoint]] = {}
     for row in spark_rows:
         pid = str(row.provider_id)
-        bucket_start_value = _parse_bucket_start(row.bucket_start)
+        # DB 层 date_trunc 可能受 session time zone 影响；统一落到 UTC 的整点桶，避免 dict key 不对齐导致全 0。
+        bucket_start_value = _floor_to_step(_parse_bucket_start(row.bucket_start), step_seconds)
         total_requests = int(row.total_requests or 0)
         error_requests = int(row.error_requests or 0)
         qps = float(total_requests / step_seconds) if total_requests else 0.0
@@ -824,7 +859,6 @@ async def user_dashboard_providers(
             error_rate=error_rate,
         )
 
-    target_provider_ids = requested_provider_ids or list(summary_by_provider.keys())
     items: list[DashboardProviderMetricsItem] = []
     for pid in target_provider_ids:
         summary = summary_by_provider.get(pid)
@@ -844,7 +878,10 @@ async def user_dashboard_providers(
             )
             for ts in bucket_starts
         ]
-        current_qps = float(points[-1].qps) if points else 0.0
+        if pid in current_qps_by_provider:
+            current_qps = current_qps_by_provider[pid]
+        else:
+            current_qps = float(points[-1].qps) if points else 0.0
 
         items.append(
             DashboardProviderMetricsItem(

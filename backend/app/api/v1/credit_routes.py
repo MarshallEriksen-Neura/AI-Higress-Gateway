@@ -30,6 +30,8 @@ from app.schemas import (
     CreditAutoTopupConfig,
     CreditAutoTopupConfigResponse,
     CreditConsumptionSummary,
+    CreditGrantRequest,
+    CreditGrantResponse,
     CreditProviderUsageItem,
     CreditProviderUsageResponse,
     CreditTopupRequest,
@@ -38,6 +40,7 @@ from app.schemas import (
     CreditUsageTimeseriesResponse,
 )
 from app.services.credit_service import (
+    apply_credit_delta,
     apply_manual_delta,
     disable_auto_topup_for_user,
     get_auto_topup_rule_for_user,
@@ -458,6 +461,45 @@ def admin_topup_user_credits(
         description=payload.description,
     )
     return CreditAccountResponse.model_validate(account)
+
+
+@router.post(
+    "/admin/users/{user_id}/grant",
+    response_model=CreditGrantResponse,
+    status_code=status.HTTP_200_OK,
+)
+def admin_grant_user_credits(
+    user_id: UUID,
+    payload: CreditGrantRequest,
+    db: Session = Depends(get_db),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> CreditGrantResponse:
+    """
+    管理员为指定用户执行“积分入账”（可用于签到/兑换码/活动赠送等场景）。
+
+    - 与 /topup 的区别：支持自定义 reason 与可选 idempotency_key（幂等入账）。
+    - 仅当 current_user.is_superuser 为 True 时允许调用。
+    """
+    if not current_user.is_superuser:
+        raise forbidden("只有超级管理员可以调整用户积分")
+
+    try:
+        account, tx, applied = apply_credit_delta(
+            db,
+            user_id=user_id,
+            amount=payload.amount,
+            reason=payload.reason,
+            description=payload.description,
+            idempotency_key=payload.idempotency_key,
+        )
+    except ValueError as exc:
+        raise bad_request(str(exc))
+
+    return CreditGrantResponse(
+        applied=applied,
+        account=CreditAccountResponse.model_validate(account),
+        transaction=CreditTransactionResponse.model_validate(tx) if tx else None,
+    )
 
 
 @router.get(

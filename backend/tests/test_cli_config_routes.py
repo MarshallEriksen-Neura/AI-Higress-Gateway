@@ -17,13 +17,13 @@ def test_cli_install_endpoint_exists(client: TestClient):
         params={
             "client": "claude",
             "platform": "mac",
-            "key": "test-key-123456"
         }
     )
     # 应该返回 200 和脚本内容
     assert response.status_code == 200
     assert "#!/bin/bash" in response.text
     assert "Claude Code CLI" in response.text
+    assert "请输入 API Key" in response.text
 
 
 def test_cli_install_command_endpoint_exists(client: TestClient):
@@ -33,7 +33,6 @@ def test_cli_install_command_endpoint_exists(client: TestClient):
         params={
             "client": "claude",
             "platform": "mac",
-            "key": "test-key-123456"
         }
     )
     # 应该返回 200 和 JSON 数据
@@ -45,21 +44,6 @@ def test_cli_install_command_endpoint_exists(client: TestClient):
     assert "script_url" in data
 
 
-def test_cli_install_invalid_key(client: TestClient):
-    """测试无效的 API Key"""
-    response = client.get(
-        "/api/v1/cli/install",
-        params={
-            "client": "claude",
-            "platform": "mac",
-            "key": "short"  # 太短的 key
-        }
-    )
-    # 应该返回 400
-    assert response.status_code == 400
-    assert "无效的 API Key" in response.json()["detail"]
-
-
 def test_cli_install_windows_platform(client: TestClient):
     """测试 Windows 平台脚本生成"""
     response = client.get(
@@ -67,12 +51,12 @@ def test_cli_install_windows_platform(client: TestClient):
         params={
             "client": "claude",
             "platform": "windows",
-            "key": "test-key-123456"
         }
     )
     assert response.status_code == 200
     # Windows 使用 PowerShell
     assert "PowerShell" in response.text or "Write-Host" in response.text
+    assert "Read-Host" in response.text
 
 
 def test_cli_install_codex_client(client: TestClient):
@@ -82,13 +66,27 @@ def test_cli_install_codex_client(client: TestClient):
         params={
             "client": "codex",
             "platform": "linux",
-            "key": "test-key-123456"
         }
     )
     assert response.status_code == 200
     assert "Codex CLI" in response.text
     assert "auth.json" in response.text
     assert "config.toml" in response.text
+    assert "请输入 API Key" in response.text
+
+
+def test_cli_install_gemini_client(client: TestClient):
+    """测试 Gemini CLI 脚本生成"""
+    response = client.get(
+        "/api/v1/cli/install",
+        params={
+            "client": "gemini",
+            "platform": "linux",
+        },
+    )
+    assert response.status_code == 200
+    assert "Gemini CLI" in response.text
+    assert "GEMINI_API_KEY" in response.text
 
 
 def test_cli_config_returns_prefix_and_url(

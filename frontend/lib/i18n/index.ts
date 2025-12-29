@@ -27,6 +27,7 @@ import { themeTranslations } from "./theme";
 import { dashboardV2Translations } from "./dashboard";
 import { chatTranslations } from "./chat";
 import { bridgeTranslations } from "./bridge";
+import { requestLogsTranslations } from "./request-logs";
 
 // Function to merge translation objects
 const mergeTranslations = (
@@ -75,7 +76,8 @@ export const allTranslations = mergeTranslations(
   themeTranslations,
   dashboardV2Translations,
   chatTranslations,
-  bridgeTranslations
+  bridgeTranslations,
+  requestLogsTranslations
 );
 
 // Export individual translation modules for dynamic loading
@@ -108,4 +110,5 @@ export {
   dashboardV2Translations,
   chatTranslations,
   bridgeTranslations,
+  requestLogsTranslations,
 };

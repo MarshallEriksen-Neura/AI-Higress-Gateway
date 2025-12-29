@@ -108,6 +108,69 @@ def test_credit_endpoints_basic_flow(monkeypatch):
         assert first["reason"] == "admin_topup"
 
 
+def test_credit_admin_grant_is_idempotent():
+    """
+    验证管理员“积分入账”接口的幂等行为：
+    - 首次调用 applied=true 且余额增加；
+    - 使用相同 idempotency_key 重复调用 applied=false 且余额不再增加；
+    - 幂等重复时仍返回已存在的流水信息。
+    """
+    app = create_app()
+    SessionLocal = install_inmemory_db(app)
+
+    with SessionLocal() as session:
+        user = _get_single_user(session)
+        user_id = user.id
+
+    headers = jwt_auth_headers(str(user_id))
+    idem_key = f"test:grant:{user_id}:once"
+
+    with TestClient(app=app, base_url="http://testserver") as client:
+        resp = client.get("/v1/credits/me", headers=headers)
+        assert resp.status_code == 200
+        initial_balance = resp.json()["balance"]
+
+        payload = {
+            "amount": 50,
+            "reason": "sign_in",
+            "description": "daily sign in reward",
+            "idempotency_key": idem_key,
+        }
+
+        resp = client.post(
+            f"/v1/credits/admin/users/{user_id}/grant",
+            headers=headers,
+            json=payload,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["applied"] is True
+        assert data["account"]["balance"] == initial_balance + 50
+        assert data["transaction"] is not None
+        assert data["transaction"]["amount"] == 50
+        assert data["transaction"]["reason"] == "sign_in"
+
+        resp = client.post(
+            f"/v1/credits/admin/users/{user_id}/grant",
+            headers=headers,
+            json=payload,
+        )
+        assert resp.status_code == 200
+        data2 = resp.json()
+        assert data2["applied"] is False
+        assert data2["account"]["balance"] == initial_balance + 50
+        assert data2["transaction"] is not None
+        assert data2["transaction"]["amount"] == 50
+        assert data2["transaction"]["reason"] == "sign_in"
+
+        resp = client.get("/v1/credits/me/transactions", headers=headers)
+        assert resp.status_code == 200
+        txs = resp.json()
+        assert len(txs) == 1
+        assert txs[0]["amount"] == 50
+        assert txs[0]["reason"] == "sign_in"
+
+
 def test_ensure_account_usable_respects_enable_credit_check(monkeypatch):
     """
     确认 ensure_account_usable 在启用积分校验时会阻止余额不足的用户调用，

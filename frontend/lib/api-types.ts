@@ -997,6 +997,49 @@ export interface RunDetail extends RunSummary {
   cost?: number;
 }
 
+// ============= 请求日志（Request Logs） =============
+export interface RequestLogAttempt {
+  idx: number;
+  provider_id?: string | null;
+  model_id?: string | null;
+  transport?: string | null;
+  endpoint?: string | null;
+  success?: boolean | null;
+  retryable?: boolean | null;
+  skipped?: boolean;
+  skip_reason?: string | null;
+  status_code?: number | null;
+  error_category?: string | null;
+  error_message?: string | null;
+  ttfb_ms?: number | null;
+  duration_ms?: number | null;
+  cooldown?: Record<string, any> | null;
+}
+
+export interface RequestLogEntry {
+  request_id: string;
+  ts: string;
+  user_id: string;
+  api_key_id: string;
+  method?: string | null;
+  path?: string | null;
+  logical_model?: string | null;
+  requested_model?: string | null;
+  api_style?: string | null;
+  is_stream?: boolean;
+  status_code?: number | null;
+  latency_ms?: number | null;
+  selected_provider_id?: string | null;
+  selected_provider_model?: string | null;
+  upstream_status?: number | null;
+  error_message?: string | null;
+  attempts?: RequestLogAttempt[];
+}
+
+export interface RequestLogsResponse {
+  items: RequestLogEntry[];
+}
+
 export interface SendMessageRequest {
   content: string;
   override_logical_model?: string;

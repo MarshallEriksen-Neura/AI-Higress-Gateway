@@ -250,3 +250,46 @@ async def test_try_candidates_accepts_candidate_score_input(mock_scored_candidat
 
             mock_on_success.assert_awaited_once_with("provider-1", "model-1")
 
+
+@pytest.mark.asyncio
+async def test_non_retryable_upstream_error_detail_includes_provider_and_request_id(
+    mock_candidates, mock_routing_state
+):
+    mock_client = AsyncMock()
+    mock_db = MagicMock()
+    mock_api_key = MagicMock()
+    mock_api_key.user_id = "user-123"
+    mock_api_key.id = "key-123"
+    mock_on_success = AsyncMock()
+
+    with patch("app.api.v1.chat.candidate_retry.get_provider_config") as mock_cfg:
+        mock_cfg.return_value = MagicMock(transport="http")
+
+        with patch("app.api.v1.chat.candidate_retry.execute_http_transport") as mock_exec:
+            mock_exec.return_value = TransportResult(
+                success=False,
+                status_code=429,
+                error_text='{"error":{"message":"insufficient_quota"}}',
+                retryable=False,
+            )
+
+            with pytest.raises(HTTPException) as exc_info:
+                await try_candidates_non_stream(
+                    candidates=mock_candidates[:1],
+                    client=mock_client,
+                    redis=AsyncMock(),
+                    db=mock_db,
+                    payload={"model": "test"},
+                    logical_model_id="test-model",
+                    api_key=mock_api_key,
+                    session_id=None,
+                    on_success=mock_on_success,
+                    routing_state=mock_routing_state,
+                    request_id="rid_123",
+                )
+
+            assert exc_info.value.status_code == 502
+            assert "provider=provider-1" in exc_info.value.detail
+            assert "upstream_status=429" in exc_info.value.detail
+            assert "request_id=rid_123" in exc_info.value.detail
+            assert "insufficient_quota" in exc_info.value.detail

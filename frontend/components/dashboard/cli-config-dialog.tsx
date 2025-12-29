@@ -4,7 +4,6 @@ import { useEffect, useState, type ClipboardEvent } from "react"
 import dynamic from "next/dynamic"
 import { Copy, Check, Terminal, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useI18n } from "@/lib/i18n-context"
@@ -23,7 +22,7 @@ interface CliConfigDialogProps {
   apiKeyId: string
 }
 
-type ClientType = "claude" | "codex"
+type ClientType = "claude" | "codex" | "gemini"
 type PlatformType = "windows" | "mac" | "linux"
 
 export function CliConfigDialog({
@@ -35,7 +34,6 @@ export function CliConfigDialog({
   const [client, setClient] = useState<ClientType>("claude")
   const [platform, setPlatform] = useState<PlatformType>("mac")
   const [copied, setCopied] = useState(false)
-  const [apiKeyToken, setApiKeyToken] = useState("")
 
   // 使用 SWR Hook 获取配置信息
   const { config, error, loading } = useCliConfig(open ? apiKeyId : null)
@@ -43,9 +41,11 @@ export function CliConfigDialog({
   // 脚本 URL 使用前端环境变量（当前访问的后端地址）
   const scriptBaseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || (typeof window !== "undefined" ? window.location.origin : "")
   const apiUrl = config?.api_url || ""
-  const tokenValue = apiKeyToken.trim() || "YOUR_API_KEY"
-  const tokenReady = apiKeyToken.trim().length > 0
-  const scriptUrl = `${scriptBaseUrl}/api/v1/cli/install?client=${client}&platform=${platform}&key=${encodeURIComponent(tokenValue)}&url=${encodeURIComponent(apiUrl)}`
+  const params = new URLSearchParams({ client, platform })
+  if (apiUrl) {
+    params.set("url", apiUrl)
+  }
+  const scriptUrl = `${scriptBaseUrl}/api/v1/cli/install?${params.toString()}`
   
   const command = platform === "windows"
     ? `irm "${scriptUrl}" | iex`
@@ -60,13 +60,10 @@ export function CliConfigDialog({
       return
     }
     setCopied(false)
-    setApiKeyToken("")
   }, [open, apiKeyId])
 
   const handleCopy = async () => {
-    if (!tokenReady) {
-      return
-    }
+    if (loading || error) return
     await navigator.clipboard.writeText(command)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
@@ -116,12 +113,13 @@ export function CliConfigDialog({
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="claude">{t("cliConfig.claudeCli")}</SelectItem>
-                      <SelectItem value="codex">{t("cliConfig.codexCli")}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
+                  <SelectContent>
+                    <SelectItem value="claude">{t("cliConfig.claudeCli")}</SelectItem>
+                    <SelectItem value="codex">{t("cliConfig.codexCli")}</SelectItem>
+                    <SelectItem value="gemini">{t("cliConfig.geminiCli")}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
                 <div className="space-y-2">
                   <Label>{t("cliConfig.platformLabel")}</Label>
@@ -139,18 +137,15 @@ export function CliConfigDialog({
               </div>
 
               <div className="space-y-2">
-                <Label>{t("cliConfig.apiKeyLabel")}</Label>
-                <Input
-                  value={apiKeyToken}
-                  onChange={(e) => setApiKeyToken(e.target.value)}
-                  placeholder={t("cliConfig.apiKeyPlaceholder", {
-                    prefix: config?.key_prefix || "",
-                  })}
-                  autoComplete="off"
-                  spellCheck={false}
-                />
+                <Label>
+                  {client === "gemini"
+                    ? t("cliConfig.geminiApiKeyLabel")
+                    : t("cliConfig.apiKeyLabel")}
+                </Label>
                 <p className="text-xs text-muted-foreground">
-                  {t("cliConfig.apiKeyHelp", { prefix: config?.key_prefix || "" })}
+                  {client === "gemini"
+                    ? t("cliConfig.geminiApiKeyHelp")
+                    : t("cliConfig.apiKeyHelp", { prefix: config?.key_prefix || "" })}
                 </p>
               </div>
 
@@ -165,7 +160,7 @@ export function CliConfigDialog({
                     variant="ghost"
                     className="absolute top-2 right-2"
                     onClick={handleCopy}
-                    disabled={!tokenReady}
+                    disabled={loading || !!error}
                     title={copied ? t("cliConfig.copied") : t("cliConfig.copy")}
                   >
                     {copied ? (
@@ -175,11 +170,6 @@ export function CliConfigDialog({
                     )}
                   </Button>
                 </div>
-                {!tokenReady && (
-                  <p className="text-xs text-muted-foreground">
-                    {t("cliConfig.apiKeyRequired")}
-                  </p>
-                )}
               </div>
 
               <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded-md text-sm space-y-2">
