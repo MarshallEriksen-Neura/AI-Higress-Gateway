@@ -24,7 +24,6 @@ export function RoutingDecision() {
   const [formData, setFormData] = useState<RoutingDecisionRequest>({
     logical_model: '',
     strategy: 'balanced',
-    conversation_id: '',
     preferred_region: '',
     exclude_providers: [],
   });
@@ -42,9 +41,6 @@ export function RoutingDecision() {
       strategy: formData.strategy,
     };
 
-    if (formData.conversation_id) {
-      requestData.conversation_id = formData.conversation_id;
-    }
     if (formData.preferred_region) {
       requestData.preferred_region = formData.preferred_region;
     }
@@ -122,17 +118,6 @@ export function RoutingDecision() {
             </div>
 
             {/* 可选参数 */}
-            <div className="space-y-2">
-              <Label htmlFor="conversation_id">{t('routing.decision.conversation_id')}</Label>
-              <Input
-                id="conversation_id"
-                type="text"
-                placeholder={t('routing.decision.conversation_id_placeholder')}
-                value={formData.conversation_id}
-                onChange={(e) => setFormData({ ...formData, conversation_id: e.target.value })}
-              />
-            </div>
-
             <div className="space-y-2">
               <Label htmlFor="preferred_region">{t('routing.decision.preferred_region')}</Label>
               <Input
