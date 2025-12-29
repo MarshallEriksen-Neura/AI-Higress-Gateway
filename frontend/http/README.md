@@ -189,15 +189,8 @@ const { upstreams } = await logicalModelService.getLogicalModelUpstreams(modelId
 // 获取路由决策
 const decision = await routingService.makeRoutingDecision({
   logical_model: 'gpt-4',
-  conversation_id: 'conv123',
   strategy: 'latency_first',
 });
-
-// 获取会话信息
-const session = await routingService.getSession('conv123');
-
-// 删除会话
-await routingService.deleteSession('conv123');
 ```
 
 ### 8. 系统管理

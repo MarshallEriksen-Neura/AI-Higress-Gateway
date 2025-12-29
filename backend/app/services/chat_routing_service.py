@@ -1533,7 +1533,7 @@ async def _build_dynamic_logical_model_for_group(
       the requested id (to account for grouped ids like "provider-2/xxx").
     - When multiple providers advertise the same underlying model, we
       treat them as a single logical model group and let the scheduler
-      perform cross-provider load-balancing with session stickiness.
+      perform cross-provider load-balancing.
     - When no provider claims the model, we return None so that the
       caller can reject the request at the gateway.
     """
