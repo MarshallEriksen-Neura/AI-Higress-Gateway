@@ -1,5 +1,9 @@
-import { redirect } from "next/navigation";
+import DashboardOverviewPage, {
+  metadata as dashboardOverviewMetadata,
+} from "./overview/page";
 
-export default function DashboardIndexPage() {
-  redirect("/dashboard/overview");
+export const metadata = dashboardOverviewMetadata;
+
+export default async function DashboardPage() {
+  return DashboardOverviewPage();
 }

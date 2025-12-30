@@ -221,21 +221,43 @@ export function mark(name: string) {
 /**
  * 测量两个标记之间的时间
  */
-export function measure(name: string, startMark: string, endMark: string): number | null {
+export function measure(_name: string, startMark: string, endMark: string): number | null {
   if (typeof performance === 'undefined' || typeof performance.measure !== 'function') {
     return null;
   }
+  const getLastMarkTime = (markName: string): number | null => {
+    try {
+      const entries = performance.getEntriesByName(markName, 'mark');
+      const time = entries.at(-1)?.startTime;
+      return typeof time === 'number' && Number.isFinite(time) ? time : null;
+    } catch {
+      return null;
+    }
+  };
+
   try {
-    performance.measure(name, startMark, endMark);
-    const entries = performance.getEntriesByName(name);
-    const duration = entries.at(-1)?.duration ?? null;
-    performance.clearMeasures(name);
-    performance.clearMarks(startMark);
-    performance.clearMarks(endMark);
+    const startTime = getLastMarkTime(startMark);
+    const endTime = getLastMarkTime(endMark);
+
+    if (startTime === null || endTime === null) {
+      return null;
+    }
+
+    const duration = endTime - startTime;
+    if (!Number.isFinite(duration) || duration < 0) {
+      return null;
+    }
+
     return duration;
-  } catch (error) {
-    console.error('Failed to measure performance:', error);
+  } catch {
     return null;
+  } finally {
+    try {
+      performance.clearMarks(startMark);
+      performance.clearMarks(endMark);
+    } catch {
+      // ignore
+    }
   }
 }
 

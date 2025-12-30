@@ -116,6 +116,21 @@ const nextConfig: NextConfig = {
       }
     ];
   },
+
+  async redirects() {
+    return [
+      {
+        source: '/dashboard',
+        destination: '/dashboard/overview',
+        permanent: false,
+      },
+      {
+        source: '/dashboard/providers',
+        destination: '/dashboard/my-providers',
+        permanent: false,
+      },
+    ];
+  },
   
   // 生产构建输出配置
   output: process.env.BUILD_STANDALONE === 'true' ? 'standalone' : undefined,

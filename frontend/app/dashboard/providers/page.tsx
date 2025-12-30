@@ -1,5 +1,9 @@
-import { redirect } from "next/navigation";
+import MyProvidersPage, {
+  metadata as myProvidersMetadata,
+} from "../my-providers/page";
+
+export const metadata = myProvidersMetadata;
 
 export default function ProvidersPage() {
-  redirect("/dashboard/my-providers");
+  return MyProvidersPage();
 }
