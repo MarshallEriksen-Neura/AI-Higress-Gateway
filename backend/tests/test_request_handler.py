@@ -128,6 +128,7 @@ async def test_handle_non_stream_success(request_handler, selection_result):
         )
 
         assert isinstance(resp, JSONResponse)
+        assert mock_moderate.call_args.kwargs.get("session_id") == "s1"
         mock_select.assert_called_once()
         mock_record_success.assert_called_once()
         mock_bill.assert_called_once()
@@ -161,6 +162,7 @@ async def test_handle_non_stream_moderation_blocks(request_handler, selection_re
                 session_id=None,
                 idempotency_key="k1",
             )
+        assert mock_moderate.call_args.kwargs.get("session_id") is None
 
 
 @pytest.mark.asyncio

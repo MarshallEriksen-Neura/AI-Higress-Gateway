@@ -109,6 +109,121 @@ def test_user_dashboard_v2_kpis(client: TestClient, db_session: Session) -> None
     assert payload["credits_spent"] >= 42
 
 
+def test_user_dashboard_v2_pulse_returns_non_zero_points(client: TestClient, db_session: Session) -> None:
+    user = _get_admin_user(db_session)
+    _seed_provider(db_session, provider_id="openai", transport="http")
+
+    now = dt.datetime.now(dt.UTC)
+    window_start = (now - dt.timedelta(minutes=5)).replace(second=0, microsecond=0)
+
+    db_session.add(
+        ProviderRoutingMetricsHistory(
+            provider_id="openai",
+            logical_model="gpt-4o",
+            transport="http",
+            is_stream=False,
+            user_id=user.id,
+            api_key_id=None,
+            window_start=window_start,
+            window_duration=60,
+            total_requests_1m=10,
+            success_requests=9,
+            error_requests=1,
+            latency_avg_ms=100.0,
+            latency_p50_ms=90.0,
+            latency_p95_ms=200.0,
+            latency_p99_ms=250.0,
+            error_rate=0.1,
+            success_qps_1m=0.15,
+            status="healthy",
+            input_tokens_sum=0,
+            output_tokens_sum=0,
+            total_tokens_sum=0,
+            token_estimated_requests=0,
+            error_4xx_requests=0,
+            error_5xx_requests=1,
+            error_429_requests=0,
+            error_timeout_requests=0,
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(
+        "/metrics/user-dashboard/pulse?transport=http&is_stream=false",
+        headers=jwt_auth_headers(str(user.id)),
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    expected = window_start
+    matched = None
+    for point in payload["points"]:
+        ts = dt.datetime.fromisoformat(point["window_start"].replace("Z", "+00:00"))
+        if ts == expected:
+            matched = point
+            break
+    assert matched is not None
+    assert matched["total_requests"] >= 10
+    assert matched["error_5xx_requests"] >= 1
+
+
+def test_system_dashboard_v2_pulse_returns_non_zero_points(client: TestClient, db_session: Session) -> None:
+    admin = _get_admin_user(db_session)
+    _seed_provider(db_session, provider_id="openai", transport="http")
+
+    now = dt.datetime.now(dt.UTC)
+    window_start = (now - dt.timedelta(minutes=5)).replace(second=0, microsecond=0)
+
+    db_session.add(
+        ProviderRoutingMetricsHistory(
+            provider_id="openai",
+            logical_model="gpt-4o",
+            transport="http",
+            is_stream=False,
+            user_id=admin.id,
+            api_key_id=None,
+            window_start=window_start,
+            window_duration=60,
+            total_requests_1m=10,
+            success_requests=10,
+            error_requests=0,
+            latency_avg_ms=100.0,
+            latency_p50_ms=90.0,
+            latency_p95_ms=200.0,
+            latency_p99_ms=250.0,
+            error_rate=0.0,
+            success_qps_1m=0.15,
+            status="healthy",
+            input_tokens_sum=0,
+            output_tokens_sum=0,
+            total_tokens_sum=0,
+            token_estimated_requests=0,
+            error_4xx_requests=0,
+            error_5xx_requests=0,
+            error_429_requests=0,
+            error_timeout_requests=0,
+        )
+    )
+    db_session.commit()
+
+    resp = client.get(
+        "/metrics/system-dashboard/pulse?transport=http&is_stream=false",
+        headers=jwt_auth_headers(str(admin.id)),
+    )
+    assert resp.status_code == 200
+    payload = resp.json()
+
+    expected = window_start
+    matched = None
+    for point in payload["points"]:
+        ts = dt.datetime.fromisoformat(point["window_start"].replace("Z", "+00:00"))
+        if ts == expected:
+            matched = point
+            break
+    assert matched is not None
+    assert matched["total_requests"] >= 10
+
+
 def test_system_dashboard_v2_requires_superuser(client: TestClient, db_session: Session) -> None:
     admin = _get_admin_user(db_session)
     assert admin.is_superuser is True

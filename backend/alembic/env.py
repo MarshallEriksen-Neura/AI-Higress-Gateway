@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+from logging.config import fileConfig
 
 import sqlalchemy as sa
 from alembic.config import Config as AlembicConfig
@@ -59,6 +60,12 @@ def _configure_alembic() -> AlembicConfig:
     仅在 Alembic CLI 运行时被调用，此时 context 已初始化。
     """
     cfg = context.config
+    # Alembic 默认模板会通过 fileConfig() 读取 alembic.ini 中的 logging 配置。
+    # 但本项目在应用进程内有自己的 logging 初始化逻辑，若在进程启动时
+    # 通过 command.upgrade() 触发迁移，再调用 fileConfig() 可能会污染/覆盖
+    # 应用日志配置。因此仅在通过 Alembic CLI 执行时启用它。
+    if cfg.config_file_name is not None and pathlib.Path(sys.argv[0]).name.lower().endswith("alembic"):
+        fileConfig(cfg.config_file_name, disable_existing_loggers=False)
     cfg.set_main_option("sqlalchemy.url", settings.database_url)
     return cfg
 

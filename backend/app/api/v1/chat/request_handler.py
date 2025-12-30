@@ -95,6 +95,7 @@ class RequestHandler:
         lookup_model_id: str,
         api_style: str,
         effective_provider_ids: set[str],
+        session_id: str | None = None,
         request_id: str | None = None,
         log_request: bool = False,
         request_method: str | None = None,
@@ -216,7 +217,7 @@ class RequestHandler:
         try:
             moderated = apply_response_moderation(
                 response_payload if response_payload is not None else {"raw": raw_text},
-                session_id=None,
+                session_id=session_id,
                 api_key=self.api_key,
                 logical_model=lookup_model_id,
                 provider_id=selected_provider_id,
@@ -305,6 +306,7 @@ class RequestHandler:
         lookup_model_id: str,
         api_style: str,
         effective_provider_ids: set[str],
+        session_id: str | None = None,
         selection: ProviderSelectionResult | None = None,
         request_id: str | None = None,
         log_request: bool = False,

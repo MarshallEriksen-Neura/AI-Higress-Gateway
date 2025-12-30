@@ -78,6 +78,36 @@ def _pulse_window() -> tuple[dt.datetime, dt.datetime]:
     return start_at, end_at
 
 
+def _coerce_utc_datetime(value: dt.datetime | str) -> dt.datetime:
+    """
+    Normalize DB-returned timestamps to timezone-aware UTC datetimes.
+
+    Notes:
+    - SQLite may return DateTime columns as naive datetime or as ISO strings.
+    - Pulse bucket fill uses timezone-aware UTC bucket boundaries, so keys must match.
+    """
+    if isinstance(value, dt.datetime):
+        ts = value
+    elif isinstance(value, str):
+        text = value
+        # Handle common "Z" suffix.
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        ts = dt.datetime.fromisoformat(text)
+    else:  # pragma: no cover
+        raise TypeError(f"Unsupported timestamp type: {type(value)!r}")
+
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=dt.UTC)
+    return ts.astimezone(dt.UTC)
+
+
+def _floor_to_step(ts: dt.datetime, step_seconds: int) -> dt.datetime:
+    epoch = int(ts.timestamp())
+    bucket = epoch - (epoch % step_seconds)
+    return dt.datetime.fromtimestamp(bucket, tz=dt.UTC)
+
+
 def _fill_time_buckets(
     *,
     start_at: dt.datetime,
@@ -92,9 +122,7 @@ def _fill_time_buckets(
         end_at = end_at.replace(tzinfo=dt.UTC)
 
     def _floor(ts: dt.datetime) -> dt.datetime:
-        epoch = int(ts.timestamp())
-        bucket = epoch - (epoch % step_seconds)
-        return dt.datetime.fromtimestamp(bucket, tz=dt.UTC)
+        return _floor_to_step(ts, step_seconds)
 
     cur = _floor(start_at)
     end_floor = _floor(end_at)
@@ -365,7 +393,7 @@ async def user_dashboard_pulse(
 
     points: dict[dt.datetime, DashboardPulsePoint] = {}
     for row in rows:
-        ts = row[0]
+        ts = _floor_to_step(_coerce_utc_datetime(row[0]), 60)
         weight_sum = row[9] or 0
         points[ts] = DashboardPulsePoint(
             window_start=ts,
@@ -1002,7 +1030,7 @@ async def system_dashboard_pulse(
 
     points: dict[dt.datetime, DashboardPulsePoint] = {}
     for row in rows:
-        ts = row[0]
+        ts = _floor_to_step(_coerce_utc_datetime(row[0]), 60)
         weight_sum = row[9] or 0
         points[ts] = DashboardPulsePoint(
             window_start=ts,

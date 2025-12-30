@@ -3,11 +3,11 @@
 修复 alembic_version 表的 version_num 字段长度问题。
 
 Alembic 默认创建的 version_num 字段是 VARCHAR(32)，
-但项目中的迁移版本号最长达到 51 字符，导致迁移失败。
+但项目中的迁移版本号可能更长（例如 `0030_widen_alembic_version_num`），导致迁移失败。
 
 此脚本会：
 1. 检查 alembic_version 表是否存在
-2. 如果不存在，创建一个 version_num 为 VARCHAR(64) 的表
+2. 如果不存在，创建一个 version_num 为 VARCHAR(128) 的表
 3. 如果存在但字段长度不够，修改字段长度
 """
 from __future__ import annotations
@@ -44,24 +44,24 @@ def main():
             """))
             current_length = result.scalar()
 
-            if current_length and current_length < 64:
-                print(f"⚠ 当前 version_num 字段长度: {current_length}，需要扩展到 64")
+            if current_length and current_length < 128:
+                print(f"⚠ 当前 version_num 字段长度: {current_length}，需要扩展到 128")
                 conn.execute(text("""
                     ALTER TABLE alembic_version 
-                    ALTER COLUMN version_num TYPE VARCHAR(64)
+                    ALTER COLUMN version_num TYPE VARCHAR(128)
                 """))
-                print("✓ 字段长度已扩展到 VARCHAR(64)")
+                print("✓ 字段长度已扩展到 VARCHAR(128)")
             else:
                 print(f"✓ version_num 字段长度已足够: {current_length}")
         else:
             print("⚠ alembic_version 表不存在，正在创建...")
             conn.execute(text("""
                 CREATE TABLE alembic_version (
-                    version_num VARCHAR(64) NOT NULL,
+                    version_num VARCHAR(128) NOT NULL,
                     CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)
                 )
             """))
-            print("✓ alembic_version 表已创建 (version_num VARCHAR(64))")
+            print("✓ alembic_version 表已创建 (version_num VARCHAR(128))")
 
     print("\n✓ 修复完成！现在可以运行 'alembic upgrade head' 了")
 
