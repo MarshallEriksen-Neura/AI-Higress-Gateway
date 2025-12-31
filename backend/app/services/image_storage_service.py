@@ -38,18 +38,43 @@ def get_effective_image_storage_mode() -> Literal["local", "oss"]:
 
 
 def _oss_backend_kind() -> Literal["aliyun_oss", "s3"]:
-    kind = str(settings.image_storage_provider or "aliyun_oss").strip().lower()
+    # Prefer shared provider if shared endpoint is configured.
+    if str(settings.oss_endpoint or "").strip():
+        kind = str(settings.oss_provider or settings.image_storage_provider or "aliyun_oss").strip().lower()
+    else:
+        kind = str(settings.image_storage_provider or "aliyun_oss").strip().lower()
     if kind not in ("aliyun_oss", "s3"):
         raise ImageStorageNotConfigured(f"unsupported storage provider: {kind}")
     return kind  # type: ignore[return-value]
 
 
+def _resolve_image_endpoint() -> str:
+    return str(settings.image_oss_endpoint or settings.oss_endpoint or "").strip()
+
+
+def _resolve_image_region() -> str:
+    return str(settings.image_oss_region or settings.oss_region or "").strip()
+
+
+def _resolve_image_bucket() -> str:
+    # Prefer private bucket by default for signed short-link images.
+    return str(settings.image_oss_bucket or settings.oss_private_bucket or settings.oss_public_bucket or "").strip()
+
+
+def _resolve_image_access_key_id() -> str:
+    return str(settings.image_oss_access_key_id or settings.oss_access_key_id or "").strip()
+
+
+def _resolve_image_access_key_secret() -> str:
+    return str(settings.image_oss_access_key_secret or settings.oss_access_key_secret or "").strip()
+
+
 def _oss_is_configured() -> bool:
     required = (
-        settings.image_oss_endpoint,
-        settings.image_oss_bucket,
-        settings.image_oss_access_key_id,
-        settings.image_oss_access_key_secret,
+        _resolve_image_endpoint(),
+        _resolve_image_bucket(),
+        _resolve_image_access_key_id(),
+        _resolve_image_access_key_secret(),
     )
     return all(bool(str(v or "").strip()) for v in required)
 
@@ -138,11 +163,11 @@ def _create_oss_bucket():
             "缺少依赖 oss2，请安装后端依赖（backend/pyproject.toml）。"
         ) from exc
 
-    endpoint = str(settings.image_oss_endpoint).strip()
-    bucket_name = str(settings.image_oss_bucket).strip()
+    endpoint = _resolve_image_endpoint()
+    bucket_name = _resolve_image_bucket()
     auth = oss2.Auth(
-        str(settings.image_oss_access_key_id).strip(),
-        str(settings.image_oss_access_key_secret).strip(),
+        _resolve_image_access_key_id(),
+        _resolve_image_access_key_secret(),
     )
     return oss2.Bucket(auth, endpoint, bucket_name)
 
@@ -161,10 +186,10 @@ def _create_s3_client():
     session = boto3.session.Session()
     return session.client(
         "s3",
-        endpoint_url=str(settings.image_oss_endpoint).strip() or None,
-        region_name=str(settings.image_oss_region or "").strip() or None,
-        aws_access_key_id=str(settings.image_oss_access_key_id).strip() or None,
-        aws_secret_access_key=str(settings.image_oss_access_key_secret).strip() or None,
+        endpoint_url=_resolve_image_endpoint() or None,
+        region_name=_resolve_image_region() or None,
+        aws_access_key_id=_resolve_image_access_key_id() or None,
+        aws_secret_access_key=_resolve_image_access_key_secret() or None,
         config=Config(signature_version="s3v4"),
     )
 
@@ -196,7 +221,7 @@ async def store_image_bytes(
     def _put_s3() -> None:
         client = _create_s3_client()
         client.put_object(
-            Bucket=str(settings.image_oss_bucket).strip(),
+            Bucket=_resolve_image_bucket(),
             Key=object_key,
             Body=data,
             ContentType=detected_type,
@@ -301,7 +326,7 @@ async def load_image_bytes(object_key: str) -> tuple[bytes, str]:
 
     def _get_s3() -> tuple[bytes, str]:
         client = _create_s3_client()
-        result = client.get_object(Bucket=str(settings.image_oss_bucket).strip(), Key=object_key)
+        result = client.get_object(Bucket=_resolve_image_bucket(), Key=object_key)
         body_bytes: bytes = result["Body"].read()
         content_type = str(result.get("ContentType") or "")
         if not content_type:
@@ -338,7 +363,7 @@ async def presign_image_get_url(object_key: str, *, expires_seconds: int) -> str
         client = _create_s3_client()
         return client.generate_presigned_url(
             ClientMethod="get_object",
-            Params={"Bucket": str(settings.image_oss_bucket).strip(), "Key": object_key},
+            Params={"Bucket": _resolve_image_bucket(), "Key": object_key},
             ExpiresIn=ttl,
         )
 
@@ -390,7 +415,7 @@ async def presign_object_put_url(
         return client.generate_presigned_url(
             ClientMethod="put_object",
             Params={
-                "Bucket": str(settings.image_oss_bucket).strip(),
+                "Bucket": _resolve_image_bucket(),
                 "Key": object_key,
                 "ContentType": content_type,
             },

@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy import select
 from fastapi.encoders import jsonable_encoder
 
@@ -420,22 +420,50 @@ async def create_message_endpoint(
         run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
         return MessageCreateResponse(message_id=message_id, baseline_run=_run_to_summary(run))
 
+    ReplaySessionLocal = sessionmaker(
+        bind=db.get_bind(),
+        autoflush=False,
+        autocommit=False,
+        future=True,
+        expire_on_commit=False,
+    )
+
+    def _iter_db_message_events(*, run_id: UUID, after_seq: int):
+        with ReplaySessionLocal() as replay_db:
+            for ev in list_run_events(replay_db, run_id=run_id, after_seq=after_seq, limit=1000):
+                seq = int(getattr(ev, "seq", 0) or 0)
+                et = str(getattr(ev, "event_type", "") or "")
+                if not et.startswith("message."):
+                    continue
+                data = getattr(ev, "payload", None) or {}
+                yield seq, et, data
+
     async def _wait_for_terminal_event(*, run_id: UUID, after_seq: int) -> None:
         last_seq = int(after_seq or 0)
         # DB replay（防止 worker 很快写完导致我们错过热通道事件）
-        for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=1000):
-            seq = int(getattr(ev, "seq", 0) or 0)
+        for seq, et, _data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
             if seq <= last_seq:
                 continue
             last_seq = seq
-            et = str(getattr(ev, "event_type", "") or "")
             if et in {"message.completed", "message.failed"}:
                 return
 
-        async for env in subscribe_run_events(redis, run_id=run_id, after_seq=last_seq, request=request):
+        async for env in subscribe_run_events(
+            redis,
+            run_id=run_id,
+            after_seq=last_seq,
+            request=request,
+            heartbeat_seconds=1,
+        ):
             if not isinstance(env, dict):
                 continue
             if str(env.get("type") or "") == "heartbeat":
+                for seq, et, _data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                    if seq <= last_seq:
+                        continue
+                    last_seq = seq
+                    if et in {"message.completed", "message.failed"}:
+                        return
                 continue
             try:
                 seq = int(env.get("seq") or 0)
@@ -476,24 +504,33 @@ async def create_message_endpoint(
             yield _encode_sse_event(event_type="message.created", data=created_payload)
 
             # 先回放 DB 中的缺失 message.* 事件，再订阅 Redis 热通道实时续订
-            for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=1000):
-                seq = int(getattr(ev, "seq", 0) or 0)
+            for seq, et, data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
                 if seq <= last_seq:
                     continue
                 last_seq = seq
-                et = str(getattr(ev, "event_type", "") or "")
-                if not et.startswith("message."):
-                    continue
-                data = getattr(ev, "payload", None) or {}
                 yield _encode_sse_event(event_type=et, data=data)
                 if et in {"message.completed", "message.failed"}:
                     yield _encode_sse_event(event_type="done", data="[DONE]")
                     return
 
-            async for env in subscribe_run_events(redis, run_id=run_id, after_seq=last_seq, request=request):
+            async for env in subscribe_run_events(
+                redis,
+                run_id=run_id,
+                after_seq=last_seq,
+                request=request,
+                heartbeat_seconds=1,
+            ):
                 if not isinstance(env, dict):
                     continue
                 if str(env.get("type") or "") == "heartbeat":
+                    for seq, et, data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                        if seq <= last_seq:
+                            continue
+                        last_seq = seq
+                        yield _encode_sse_event(event_type=et, data=data)
+                        if et in {"message.completed", "message.failed"}:
+                            yield _encode_sse_event(event_type="done", data="[DONE]")
+                            return
                     continue
                 try:
                     seq = int(env.get("seq") or 0)
@@ -727,21 +764,49 @@ async def create_image_generation_endpoint(
         # 入队失败：让后续等待流程/前端拿到明确失败（由 run 终态事件驱动），这里不吞掉错误。
         raise
 
+    ReplaySessionLocal = sessionmaker(
+        bind=db.get_bind(),
+        autoflush=False,
+        autocommit=False,
+        future=True,
+        expire_on_commit=False,
+    )
+
+    def _iter_db_message_events(*, run_id: UUID, after_seq: int):
+        with ReplaySessionLocal() as replay_db:
+            for ev in list_run_events(replay_db, run_id=run_id, after_seq=after_seq, limit=1000):
+                seq = int(getattr(ev, "seq", 0) or 0)
+                et = str(getattr(ev, "event_type", "") or "")
+                if not et.startswith("message."):
+                    continue
+                data = getattr(ev, "payload", None) or {}
+                yield seq, et, data
+
     async def _wait_for_terminal_event(*, run_id: UUID, after_seq: int) -> None:
         last_seq = int(after_seq or 0)
-        for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=1000):
-            seq = int(getattr(ev, "seq", 0) or 0)
+        for seq, et, _data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
             if seq <= last_seq:
                 continue
             last_seq = seq
-            et = str(getattr(ev, "event_type", "") or "")
             if et in {"message.completed", "message.failed"}:
                 return
 
-        async for env in subscribe_run_events(redis, run_id=run_id, after_seq=last_seq, request=request):
+        async for env in subscribe_run_events(
+            redis,
+            run_id=run_id,
+            after_seq=last_seq,
+            request=request,
+            heartbeat_seconds=1,
+        ):
             if not isinstance(env, dict):
                 continue
             if str(env.get("type") or "") == "heartbeat":
+                for seq, et, _data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                    if seq <= last_seq:
+                        continue
+                    last_seq = seq
+                    if et in {"message.completed", "message.failed"}:
+                        return
                 continue
             try:
                 seq = int(env.get("seq") or 0)
@@ -759,15 +824,10 @@ async def create_image_generation_endpoint(
             last_seq = int(created_seq or 0)
             yield _encode_sse_event(event_type="message.created", data=created_payload)
 
-            for ev in list_run_events(db, run_id=run_id, after_seq=last_seq, limit=1000):
-                seq = int(getattr(ev, "seq", 0) or 0)
+            for seq, et, data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
                 if seq <= last_seq:
                     continue
                 last_seq = seq
-                et = str(getattr(ev, "event_type", "") or "")
-                if not et.startswith("message."):
-                    continue
-                data = getattr(ev, "payload", None) or {}
                 if et == "message.completed" and isinstance(data, dict):
                     img = data.get("image_generation")
                     if isinstance(img, dict):
@@ -777,10 +837,28 @@ async def create_image_generation_endpoint(
                     yield _encode_sse_event(event_type="done", data="[DONE]")
                     return
 
-            async for env in subscribe_run_events(redis, run_id=run_id, after_seq=last_seq, request=request):
+            async for env in subscribe_run_events(
+                redis,
+                run_id=run_id,
+                after_seq=last_seq,
+                request=request,
+                heartbeat_seconds=1,
+            ):
                 if not isinstance(env, dict):
                     continue
                 if str(env.get("type") or "") == "heartbeat":
+                    for seq, et, data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                        if seq <= last_seq:
+                            continue
+                        last_seq = seq
+                        if et == "message.completed" and isinstance(data, dict):
+                            img = data.get("image_generation")
+                            if isinstance(img, dict):
+                                data["image_generation"] = _hydrate_image_generation_content(img)
+                        yield _encode_sse_event(event_type=et, data=data)
+                        if et in {"message.completed", "message.failed"}:
+                            yield _encode_sse_event(event_type="done", data="[DONE]")
+                            return
                     continue
                 try:
                     seq = int(env.get("seq") or 0)

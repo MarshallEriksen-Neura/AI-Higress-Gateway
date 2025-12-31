@@ -470,6 +470,8 @@
   - OSS/S3 模式：`<AVATAR_OSS_BASE_URL>/<key>`（建议该 bucket 为公开读或绑定 CDN，便于前端直链访问）；
   - 否则为：`<GATEWAY_API_BASE_URL>/<AVATAR_LOCAL_BASE_URL>/<key>`，默认等价于 `http://localhost:8000/media/avatars/<key>`；当未显式配置网关地址或仍使用默认 localhost 时，会优先使用当前请求的 base_url（包含 `X-Forwarded-Proto`/`Host`）来拼接，避免返回错误域名。
 
+> 推荐配置：对象存储建议区分两桶 `ai-gateway-public`（公共读：头像/图标等直链）与 `ai-gateway-private`（私有：生成图片短链、RAG 文档等）。网关支持通过 `OSS_PUBLIC_BUCKET`/`OSS_PRIVATE_BUCKET` 提供默认 bucket，并允许用 `AVATAR_OSS_BUCKET`/`IMAGE_OSS_BUCKET` 覆盖。
+
 **响应**:
 
 成功时返回更新后的用户信息，结构与 `GET /users/me` 相同：
@@ -1286,7 +1288,7 @@ data: {"error":{"type":"upstream_error","status":429,"message":"insufficient_quo
 - 当 `response_format="b64_json"`：`data[*].b64_json` 返回 base64 图片；
 - 当 `response_format="url"`：
   - 若 `IMAGE_STORAGE_MODE=local`（或 `IMAGE_STORAGE_MODE=auto` 且 `APP_ENV!=production`），网关会把图片写入本地磁盘目录（`IMAGE_LOCAL_DIR`），并返回网关域名下的签名短链 URL（`/media/images/...`）；
-  - 若 `IMAGE_STORAGE_MODE=oss`（或 `IMAGE_STORAGE_MODE=auto` 且 `APP_ENV=production`），且配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`），网关会把图片写入对应存储（默认阿里 OSS，也可 S3/R2 兼容），并返回网关域名下的签名短链 URL（`/media/images/...`）；
+  - 若 `IMAGE_STORAGE_MODE=oss`（或 `IMAGE_STORAGE_MODE=auto` 且 `APP_ENV=production`），且配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`，或共享配置 `OSS_*` + `OSS_PRIVATE_BUCKET`），网关会把图片写入对应存储（默认阿里 OSS，也可 S3/R2 兼容），并返回网关域名下的签名短链 URL（`/media/images/...`）；
   - 若强制 OSS 但未配置对象存储，网关会退化为 `data:image/...;base64,...` 的 Data URL（兼容前端直接渲染）。
 - `extra_body`（可选）：网关保留扩展字段，用于透传上游厂商高级参数（避免网关 schema 落后导致能力缺失）。
   - `extra_body.openai`：在 OpenAI lane 下合并到上游请求体（覆盖同名字段）。

@@ -33,7 +33,7 @@ from app.services.project_eval_config_service import (
     get_or_default_project_eval_config,
     resolve_project_context,
 )
-from app.services.run_event_bus import build_run_event_envelope, publish_run_event_best_effort
+from app.services.run_event_bus import build_run_event_envelope, publish_run_event, publish_run_event_best_effort
 from app.services.run_cancel_service import is_run_canceled
 from app.services.tool_loop_runner import ToolLoopRunner, split_text_into_deltas
 from app.services.eval_service import execute_run_stream
@@ -124,6 +124,45 @@ def _append_run_event_and_publish_best_effort(
                 payload=payload,
             ),
         )
+        return int(getattr(row, "seq", 0) or 0)
+    except Exception:  # pragma: no cover - best-effort only
+        logger.debug("chat_run task: append_run_event failed (run_id=%s type=%s)", run_id, event_type, exc_info=True)
+        return None
+
+
+async def _append_run_event_and_publish(
+    db,
+    *,
+    redis: Redis | None,
+    run_id: UUID,
+    event_type: str,
+    payload: dict[str, Any],
+) -> int | None:
+    """
+    写入 RunEvent 真相并尽量确保 Redis 热通道发布完成。
+
+    说明：Celery worker 使用 asyncio.run 执行任务时，loop 关闭会取消未 await 的后台 task；
+    对终态事件（message.* / run.canceled）需要 await 发布，避免前端 SSE 一直等待。
+    """
+    try:
+        row = append_run_event(db, run_id=run_id, event_type=event_type, payload=payload)
+        created_at_iso = None
+        try:
+            created_at_iso = row.created_at.isoformat() if getattr(row, "created_at", None) is not None else None
+        except Exception:
+            created_at_iso = None
+        if redis is not None:
+            await publish_run_event(
+                redis,
+                run_id=run_id,
+                envelope=build_run_event_envelope(
+                    run_id=run_id,
+                    seq=int(getattr(row, "seq", 0) or 0),
+                    event_type=str(getattr(row, "event_type", event_type) or event_type),
+                    created_at_iso=created_at_iso,
+                    payload=payload,
+                ),
+            )
         return int(getattr(row, "seq", 0) or 0)
     except Exception:  # pragma: no cover - best-effort only
         logger.debug("chat_run task: append_run_event failed (run_id=%s type=%s)", run_id, event_type, exc_info=True)
@@ -273,14 +312,14 @@ async def execute_chat_run(
                 db.commit()
                 db.refresh(run)
 
-                _append_run_event_and_publish_best_effort(
+                await _append_run_event_and_publish(
                     db,
                     redis=redis,
                     run_id=UUID(str(run.id)),
                     event_type="run.canceled",
                     payload={"type": "run.canceled", "run_id": str(run.id)},
                 )
-                _append_run_event_and_publish_best_effort(
+                await _append_run_event_and_publish(
                     db,
                     redis=redis,
                     run_id=UUID(str(run.id)),
@@ -445,9 +484,9 @@ async def execute_chat_run(
                             "chat_run: conversation summary update failed (conversation_id=%s)",
                             str(conv.id),
                             exc_info=True,
-                        )
+                    )
 
-                _append_run_event_and_publish_best_effort(
+                await _append_run_event_and_publish(
                     db,
                     redis=redis,
                     run_id=UUID(str(run.id)),
@@ -681,7 +720,7 @@ async def execute_chat_run(
                         exc_info=True,
                     )
 
-            _append_run_event_and_publish_best_effort(
+            await _append_run_event_and_publish(
                 db,
                 redis=redis,
                 run_id=UUID(str(run.id)),

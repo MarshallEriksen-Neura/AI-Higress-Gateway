@@ -59,12 +59,9 @@ def build_avatar_url(
 
     设计约定：
     - 数据库存储的是「key」或相对路径，例如：avatars/<user_id>/<uuid>.png
-    - 如果管理员在环境变量中配置了 AVATAR_OSS_BASE_URL，则认为所有 key
-      都对应 OSS 中的对象，返回形式为：
-        <AVATAR_OSS_BASE_URL>/<key>
-    - 否则，默认走本地静态目录，返回形式为：
-        <AVATAR_LOCAL_BASE_URL>/<key>
-      其中 AVATAR_LOCAL_BASE_URL 默认是 /media/avatars。
+    - 头像存储模式由 AVATAR_STORAGE_MODE 控制：
+      - OSS/S3 模式：返回 <AVATAR_OSS_BASE_URL>/<key>（用于前端直链）；
+      - 本地模式：返回 <AVATAR_LOCAL_BASE_URL>/<key>（默认 /media/avatars）。
 
     兼容策略：
     - 如果 avatar_value 本身已经是完整 URL（http/https 或 // 开头），直接返回；
@@ -89,8 +86,20 @@ def build_avatar_url(
 
     storage_mode = str(getattr(settings, "avatar_storage_mode", "auto") or "auto").strip().lower()
     env = str(getattr(settings, "environment", "") or "").strip().lower()
-    if storage_mode == "oss" or (storage_mode == "auto" and env == "production"):
-        base = str(settings.avatar_oss_base_url or "").strip().rstrip("/")
+
+    def _avatar_oss_is_configured() -> bool:
+        required = (
+            getattr(settings, "avatar_oss_endpoint", None) or getattr(settings, "oss_endpoint", None) or getattr(settings, "image_oss_endpoint", None),
+            getattr(settings, "avatar_oss_bucket", None) or getattr(settings, "oss_public_bucket", None),
+            getattr(settings, "avatar_oss_access_key_id", None) or getattr(settings, "oss_access_key_id", None) or getattr(settings, "image_oss_access_key_id", None),
+            getattr(settings, "avatar_oss_access_key_secret", None) or getattr(settings, "oss_access_key_secret", None) or getattr(settings, "image_oss_access_key_secret", None),
+        )
+        return all(bool(str(v or "").strip()) for v in required)
+
+    use_oss = storage_mode == "oss" or (storage_mode == "auto" and env == "production" and _avatar_oss_is_configured())
+
+    if use_oss:
+        base = str(settings.avatar_oss_base_url or settings.oss_public_base_url or "").strip().rstrip("/")
         if base:
             return f"{base}/{key}"
         # OSS 模式但未配置可访问域名时，宁愿不返回（前端显示默认头像），避免返回错误 URL。

@@ -46,6 +46,53 @@ if settings.metrics_buffer_enabled:
     metrics_recorder.start()
     user_metrics_recorder.start()
 
+def ensure_metrics_buffers_started() -> None:
+    """
+    Ensure metrics buffer background flushers are running in the current process.
+
+    Why:
+    - Some deployment models may import modules before forking worker processes.
+      Threads started during import won't survive fork, which would prevent buffered
+      metrics from being flushed to DB and make dashboard trends appear as all zeros.
+    """
+    if not settings.metrics_buffer_enabled:
+        return
+    metrics_recorder.start()
+    user_metrics_recorder.start()
+
+
+def shutdown_metrics_buffers(*, flush: bool = True) -> None:
+    """
+    Best-effort flush + stop background flushers.
+
+    This is mainly used during process shutdown to avoid losing recent buffered metrics.
+    """
+    if settings.metrics_buffer_enabled and flush:
+        try:
+            metrics_recorder.flush()
+        except Exception:  # pragma: no cover
+            logger.exception("Failed to flush provider metrics buffer on shutdown")
+        try:
+            user_metrics_recorder.flush()
+        except Exception:  # pragma: no cover
+            logger.exception("Failed to flush user metrics buffer on shutdown")
+
+    metrics_recorder.shutdown()
+    user_metrics_recorder.shutdown()
+
+
+def metrics_buffers_running() -> dict[str, bool]:
+    """Return whether background flush threads are alive (for debugging/tests)."""
+    provider_alive = bool(
+        getattr(metrics_recorder, "_flush_thread", None)
+        and metrics_recorder._flush_thread.is_alive()  # type: ignore[attr-defined]
+    )
+    user_alive = bool(
+        getattr(user_metrics_recorder, "_flush_thread", None)
+        and user_metrics_recorder._flush_thread.is_alive()  # type: ignore[attr-defined]
+    )
+    return {"provider": provider_alive, "user": user_alive}
+
 def _timeout_seconds(timeout_cfg: object) -> float:
     if isinstance(timeout_cfg, (int, float)):
         return float(timeout_cfg)

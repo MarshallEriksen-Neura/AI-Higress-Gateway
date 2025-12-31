@@ -156,6 +156,9 @@ class BufferedMetricsRecorder:
         if self._flush_thread and self._flush_thread.is_alive():
             return
 
+        # Allow restarting after a shutdown() call (e.g., in tests or when a process model
+        # imports modules before forking and then starts background workers per-process).
+        self._stop_event.clear()
         self._flush_thread = threading.Thread(
             target=self._flush_loop, name="metrics-buffer-flusher", daemon=True
         )
@@ -389,6 +392,7 @@ class BufferedUserMetricsRecorder:
         if self._flush_thread and self._flush_thread.is_alive():
             return
 
+        self._stop_event.clear()
         self._flush_thread = threading.Thread(
             target=self._flush_loop,
             name="user-metrics-buffer-flusher",

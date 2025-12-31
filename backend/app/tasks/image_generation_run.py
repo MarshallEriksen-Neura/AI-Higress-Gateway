@@ -21,7 +21,7 @@ from app.repositories.run_event_repository import append_run_event
 from app.schemas.image import ImageGenerationRequest
 from app.services.chat_history_service import finalize_assistant_image_generation_after_user_sequence
 from app.services.image_app_service import ImageAppService
-from app.services.run_event_bus import build_run_event_envelope, publish_run_event_best_effort
+from app.services.run_event_bus import build_run_event_envelope, publish_run_event, publish_run_event_best_effort
 
 try:
     from redis.asyncio import Redis
@@ -84,6 +84,50 @@ def _append_run_event_and_publish_best_effort(
                 payload=payload,
             ),
         )
+        return int(getattr(row, "seq", 0) or 0)
+    except Exception:  # pragma: no cover
+        logger.debug(
+            "image_generation task: append_run_event failed (run_id=%s type=%s)",
+            run_id,
+            event_type,
+            exc_info=True,
+        )
+        return None
+
+
+async def _append_run_event_and_publish(
+    db,
+    *,
+    redis: Redis | None,
+    run_id: UUID,
+    event_type: str,
+    payload: dict[str, Any],
+) -> int | None:
+    """
+    写入 RunEvent 真相并尽量确保 Redis 热通道发布完成。
+
+    说明：Celery worker 使用 asyncio.run 执行任务时，loop 关闭会取消未 await 的后台 task；
+    对终态事件需要 await 发布，避免 SSE 一直等待。
+    """
+    try:
+        row = append_run_event(db, run_id=run_id, event_type=event_type, payload=payload)
+        created_at_iso = None
+        try:
+            created_at_iso = row.created_at.isoformat() if getattr(row, "created_at", None) is not None else None
+        except Exception:
+            created_at_iso = None
+        if redis is not None:
+            await publish_run_event(
+                redis,
+                run_id=run_id,
+                envelope=build_run_event_envelope(
+                    run_id=run_id,
+                    seq=int(getattr(row, "seq", 0) or 0),
+                    event_type=str(getattr(row, "event_type", event_type) or event_type),
+                    created_at_iso=created_at_iso,
+                    payload=payload,
+                ),
+            )
         return int(getattr(row, "seq", 0) or 0)
     except Exception:  # pragma: no cover
         logger.debug(
@@ -211,7 +255,7 @@ async def execute_image_generation_run(
                 except Exception:
                     logger.exception("finalize image_generation message failed (run_id=%s)", run_id)
 
-                _append_run_event_and_publish_best_effort(
+                await _append_run_event_and_publish(
                     db,
                     redis=redis,
                     run_id=UUID(str(run.id)),
@@ -296,7 +340,7 @@ async def execute_image_generation_run(
                 preview_text=f"[图片] {prompt[:60]}",
             )
 
-            _append_run_event_and_publish_best_effort(
+            await _append_run_event_and_publish(
                 db,
                 redis=redis,
                 run_id=UUID(str(run.id)),

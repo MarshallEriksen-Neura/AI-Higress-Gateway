@@ -13,12 +13,47 @@ class AvatarStorageNotConfigured(RuntimeError):
     pass
 
 
+def _resolve_avatar_base_url() -> str:
+    return str(settings.avatar_oss_base_url or settings.oss_public_base_url or "").strip()
+
+
+def _resolve_avatar_bucket() -> str:
+    return str(settings.avatar_oss_bucket or settings.oss_public_bucket or "").strip()
+
+
+def _resolve_avatar_endpoint() -> str:
+    # Backward-compat: if user only configured IMAGE_OSS_*, reuse it for avatar uploads.
+    return str(settings.avatar_oss_endpoint or settings.oss_endpoint or settings.image_oss_endpoint or "").strip()
+
+
+def _resolve_avatar_region() -> str:
+    return str(settings.avatar_oss_region or settings.oss_region or settings.image_oss_region or "").strip()
+
+
+def _resolve_avatar_access_key_id() -> str:
+    return str(
+        settings.avatar_oss_access_key_id
+        or settings.oss_access_key_id
+        or settings.image_oss_access_key_id
+        or ""
+    ).strip()
+
+
+def _resolve_avatar_access_key_secret() -> str:
+    return str(
+        settings.avatar_oss_access_key_secret
+        or settings.oss_access_key_secret
+        or settings.image_oss_access_key_secret
+        or ""
+    ).strip()
+
+
 def _avatar_oss_is_configured() -> bool:
     required = (
-        settings.avatar_oss_endpoint,
-        settings.avatar_oss_bucket,
-        settings.avatar_oss_access_key_id,
-        settings.avatar_oss_access_key_secret,
+        _resolve_avatar_endpoint(),
+        _resolve_avatar_bucket(),
+        _resolve_avatar_access_key_id(),
+        _resolve_avatar_access_key_secret(),
     )
     return all(bool(str(v or "").strip()) for v in required)
 
@@ -39,7 +74,15 @@ def get_effective_avatar_storage_mode() -> Literal["local", "oss"]:
 
 
 def _avatar_backend_kind() -> Literal["aliyun_oss", "s3"]:
-    kind = str(settings.avatar_storage_provider or "aliyun_oss").strip().lower()
+    # Prefer shared provider if shared endpoint is configured.
+    if str(settings.oss_endpoint or "").strip():
+        kind = str(settings.oss_provider or settings.avatar_storage_provider or "aliyun_oss").strip().lower()
+    elif str(settings.avatar_oss_endpoint or "").strip():
+        kind = str(settings.avatar_storage_provider or "aliyun_oss").strip().lower()
+    elif str(settings.image_oss_endpoint or "").strip():
+        kind = str(settings.oss_provider or settings.image_storage_provider or settings.avatar_storage_provider or "aliyun_oss").strip().lower()
+    else:
+        kind = str(settings.avatar_storage_provider or "aliyun_oss").strip().lower()
     if kind not in ("aliyun_oss", "s3"):
         raise AvatarStorageNotConfigured(f"unsupported storage provider: {kind}")
     return kind  # type: ignore[return-value]
@@ -56,11 +99,11 @@ def _create_oss_bucket():
             "缺少依赖 oss2，请安装后端依赖（backend/pyproject.toml）。"
         ) from exc
 
-    endpoint = str(settings.avatar_oss_endpoint).strip()
-    bucket_name = str(settings.avatar_oss_bucket).strip()
+    endpoint = _resolve_avatar_endpoint()
+    bucket_name = _resolve_avatar_bucket()
     auth = oss2.Auth(
-        str(settings.avatar_oss_access_key_id).strip(),
-        str(settings.avatar_oss_access_key_secret).strip(),
+        _resolve_avatar_access_key_id(),
+        _resolve_avatar_access_key_secret(),
     )
     return oss2.Bucket(auth, endpoint, bucket_name)
 
@@ -79,10 +122,10 @@ def _create_s3_client():
     session = boto3.session.Session()
     return session.client(
         "s3",
-        endpoint_url=str(settings.avatar_oss_endpoint).strip() or None,
-        region_name=str(settings.avatar_oss_region or "").strip() or None,
-        aws_access_key_id=str(settings.avatar_oss_access_key_id).strip() or None,
-        aws_secret_access_key=str(settings.avatar_oss_access_key_secret).strip() or None,
+        endpoint_url=_resolve_avatar_endpoint() or None,
+        region_name=_resolve_avatar_region() or None,
+        aws_access_key_id=_resolve_avatar_access_key_id() or None,
+        aws_secret_access_key=_resolve_avatar_access_key_secret() or None,
         config=Config(signature_version="s3v4"),
     )
 
@@ -113,7 +156,7 @@ async def store_avatar_bytes(
     def _put_s3() -> None:
         client = _create_s3_client()
         client.put_object(
-            Bucket=str(settings.avatar_oss_bucket).strip(),
+            Bucket=_resolve_avatar_bucket(),
             Key=normalized_key,
             Body=data,
             ContentType=str(content_type or "").strip() or "application/octet-stream",
@@ -123,8 +166,10 @@ async def store_avatar_bytes(
         await anyio.to_thread.run_sync(_put_local)
         return
 
-    if not str(settings.avatar_oss_base_url or "").strip():
-        raise AvatarStorageNotConfigured("启用 OSS/S3 头像存储时必须配置 AVATAR_OSS_BASE_URL")
+    if not _resolve_avatar_base_url():
+        raise AvatarStorageNotConfigured(
+            "启用 OSS/S3 头像存储时必须配置 AVATAR_OSS_BASE_URL（或 OSS_PUBLIC_BASE_URL）"
+        )
 
     kind = _avatar_backend_kind()
     if kind == "aliyun_oss":
@@ -138,4 +183,3 @@ __all__ = [
     "get_effective_avatar_storage_mode",
     "store_avatar_bytes",
 ]
-

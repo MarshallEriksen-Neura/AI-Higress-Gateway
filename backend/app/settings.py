@@ -835,6 +835,48 @@ class Settings(BaseSettings):
         description="头像对象存储 AccessKeySecret（用于后端上传对象）",
     )
 
+    # Shared object storage configuration (public/private buckets)
+    oss_provider: Literal["aliyun_oss", "s3"] | None = Field(
+        default=None,
+        alias="OSS_PROVIDER",
+        description="共享对象存储提供商（可选）；设置后可供头像/生成图等复用，支持 aliyun_oss 或 s3",
+    )
+    oss_endpoint: str | None = Field(
+        default=None,
+        alias="OSS_ENDPOINT",
+        description="共享对象存储 Endpoint（可选）；设置后可供头像/生成图等复用",
+    )
+    oss_region: str | None = Field(
+        default=None,
+        alias="OSS_REGION",
+        description="共享对象存储 region（可选）；S3/R2 兼容接口常用",
+    )
+    oss_access_key_id: str | None = Field(
+        default=None,
+        alias="OSS_ACCESS_KEY_ID",
+        description="共享对象存储 AccessKeyId（可选）",
+    )
+    oss_access_key_secret: str | None = Field(
+        default=None,
+        alias="OSS_ACCESS_KEY_SECRET",
+        description="共享对象存储 AccessKeySecret（可选）",
+    )
+    oss_public_bucket: str | None = Field(
+        default=None,
+        alias="OSS_PUBLIC_BUCKET",
+        description="公共读 bucket（建议用于头像/系统图标等前端直链访问资源）",
+    )
+    oss_private_bucket: str | None = Field(
+        default=None,
+        alias="OSS_PRIVATE_BUCKET",
+        description="私有 bucket（建议用于需要受控访问/短链的资源，如生成图片、RAG 文档等）",
+    )
+    oss_public_base_url: str | None = Field(
+        default=None,
+        alias="OSS_PUBLIC_BASE_URL",
+        description="公共读 bucket 的访问基础 URL（可选；可作为 AVATAR_OSS_BASE_URL 的默认值）",
+    )
+
     # Generated images (text-to-image) OSS storage configuration
     image_storage_mode: Literal["auto", "oss", "local"] = Field(
         default="auto",

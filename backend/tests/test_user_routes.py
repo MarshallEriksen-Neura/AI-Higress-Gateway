@@ -476,8 +476,10 @@ def test_upload_my_avatar_oss_mode_uploads_to_object_storage(client_with_db, mon
     monkeypatch.setattr(settings, "avatar_storage_mode", "oss", raising=False)
     monkeypatch.setattr(settings, "avatar_storage_provider", "s3", raising=False)
     monkeypatch.setattr(settings, "avatar_oss_base_url", "https://cdn.example.com/avatars", raising=False)
+    monkeypatch.setattr(settings, "oss_public_bucket", "ai-gateway-public", raising=False)
     monkeypatch.setattr(settings, "avatar_oss_endpoint", "https://r2.example.com", raising=False)
     monkeypatch.setattr(settings, "avatar_oss_region", "auto", raising=False)
+    # 显式覆盖 avatar bucket，避免依赖共享 bucket 的默认行为
     monkeypatch.setattr(settings, "avatar_oss_bucket", "avatars-public", raising=False)
     monkeypatch.setattr(settings, "avatar_oss_access_key_id", "ak", raising=False)
     monkeypatch.setattr(settings, "avatar_oss_access_key_secret", "sk", raising=False)

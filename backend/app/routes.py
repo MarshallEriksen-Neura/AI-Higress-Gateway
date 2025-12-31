@@ -113,6 +113,21 @@ async def lifespan(app: FastAPI):
     finally:
         session.close()
 
+    # Ensure metrics buffer flushers are running in this process.
+    # (Important for pre-fork/preload deployments where import-time threads don't survive.)
+    try:
+        from app.services.metrics_service import ensure_metrics_buffers_started, metrics_buffers_running
+
+        ensure_metrics_buffers_started()
+        status = metrics_buffers_running()
+        logger.info(
+            "Metrics buffer flushers ready (provider=%s user=%s)",
+            status.get("provider"),
+            status.get("user"),
+        )
+    except Exception:
+        logger.exception("Failed to initialize metrics buffer flushers")
+
     # 启动工作流运行时（Bridge 全局分发器）
     try:
         from app.services.workflow_runtime import get_workflow_runtime
@@ -125,6 +140,13 @@ async def lifespan(app: FastAPI):
     yield
 
     # 关闭时清理
+    try:
+        from app.services.metrics_service import shutdown_metrics_buffers
+
+        shutdown_metrics_buffers(flush=True)
+    except Exception:
+        logger.exception("Failed to shutdown metrics buffers")
+
     try:
         from app.services.workflow_runtime import get_workflow_runtime
 
