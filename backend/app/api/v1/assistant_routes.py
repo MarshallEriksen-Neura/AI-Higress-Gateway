@@ -22,7 +22,7 @@ except ModuleNotFoundError:  # pragma: no cover
 from app.deps import get_db, get_http_client, get_redis
 from app.auth import AuthenticatedAPIKey
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
-from app.models import APIKey, Message
+from app.models import APIKey, AssistantPreset, Message
 from app.repositories.run_event_repository import append_run_event, list_run_events
 from app.schemas.audio import MessageSpeechRequest, SpeechRequest
 from app.schemas import (
@@ -1156,6 +1156,9 @@ async def message_speech_endpoint(
         conversation_id=UUID(str(msg.conversation_id)),
         user_id=UUID(str(current_user.id)),
     )
+    assistant = db.get(AssistantPreset, UUID(str(conv.assistant_id)))
+    if assistant is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Assistant not found")
     api_key_row = db.get(APIKey, UUID(str(conv.api_key_id)))
     if api_key_row is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Project API key not found")
@@ -1183,8 +1186,12 @@ async def message_speech_endpoint(
         allowed_provider_ids=list(getattr(api_key_row, "allowed_provider_ids", []) or []),
     )
 
+    requested_model = str(payload.model or "").strip() or str(getattr(assistant, "default_logical_model", "") or "").strip()
+    if not requested_model:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing model")
+
     req = SpeechRequest(
-        model=str(payload.model),
+        model=requested_model,
         input=text,
         voice=payload.voice,
         response_format=payload.response_format,

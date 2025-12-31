@@ -51,7 +51,7 @@ backend/app/
 - **Max Input Length:** 4096 characters hard limit (防止DoS和成本失控)
 - **Voice Whitelist:** Only allow predefined voices: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer`
 - **Speed Range:** 0.25 - 4.0 (inclusive)
-- **Model Whitelist:** `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts`
+- **Model:** 逻辑模型 ID（不做固定枚举）；从系统的 Logical Models 列表中选择 `capabilities` 包含 `audio` 的模型。
 
 ### 3.2 Rate Limiting
 - **Per-User Limit:** 20 requests/minute (configurable)
@@ -172,7 +172,7 @@ Content-Type: application/json
 **Request Body:**
 ```json
 {
-  "model": "tts-1",
+  "model": "string",
   "input": "The text to generate audio for.",
   "voice": "alloy",
   "response_format": "mp3",
@@ -183,7 +183,7 @@ Content-Type: application/json
 **Validation Rules:**
 | Field | Type | Constraint |
 |:------|:-----|:-----------|
-| `model` | string | Enum: `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` |
+| `model` | string | 逻辑模型 ID（不做固定枚举；需支持 `audio` 能力） |
 | `input` | string | **Max 4096 chars**, non-empty |
 | `voice` | string | Enum: `alloy`, `echo`, `fable`, `onyx`, `nova`, `shimmer` |
 | `response_format` | string | Enum: `mp3`, `opus`, `aac`, `wav`, `pcm` (default: `mp3`) |

@@ -17,7 +17,7 @@ const AUDIO_CACHE_TTL_MS = 30 * 60 * 1000;
 const audioCache = new Map<string, CachedAudio>();
 
 function buildAudioCacheKey(messageId: string, payload: MessageSpeechRequest): string {
-  const model = (payload.model ?? "tts-1").trim();
+  const model = String(payload.model ?? "").trim();
   const voice = payload.voice ?? "alloy";
   const responseFormat = payload.response_format ?? "mp3";
   const speed = Number.isFinite(payload.speed) ? String(payload.speed) : "1";
@@ -81,11 +81,14 @@ export function useMessageSpeechAudio(messageId: string) {
     key,
     async (_url, { arg }) => {
       const payload: MessageSpeechRequest = {
-        model: arg?.model ?? "tts-1",
+        model: arg?.model,
         voice: arg?.voice ?? "alloy",
         response_format: arg?.response_format ?? "mp3",
         speed: arg?.speed ?? 1.0,
       };
+      if (!payload.model || !String(payload.model).trim()) {
+        throw new Error("Missing TTS model");
+      }
 
       const audioKey = buildAudioCacheKey(messageId, payload);
       const cached = getCachedAudio(audioKey);

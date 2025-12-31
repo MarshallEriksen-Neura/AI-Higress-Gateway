@@ -36,7 +36,10 @@ class MessageSpeechRequest(BaseModel):
     会话内朗读请求：从消息内容获取文本，再按 model/voice/speed 生成音频。
     """
 
-    model: str = Field(default="tts-1", description="逻辑模型 ID（默认 tts-1）")
+    model: str | None = Field(
+        default=None,
+        description="逻辑模型 ID（为空则跟随会话默认）",
+    )
     voice: Literal["alloy", "echo", "fable", "onyx", "nova", "shimmer"] = Field(
         default="alloy",
         description="语音选项（OpenAI 风格）",

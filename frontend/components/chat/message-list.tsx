@@ -765,15 +765,17 @@ export const MessageList = memo(function MessageList({
                     <div className="pb-6">
                       {isAssistantImageGen ? (
                         <AssistantImageGenerationMessageItem message={item.message} />
-                      ) : (
-                        <MessageItem
-                          message={item.message}
-                          runs={item.runs}
-                          runSourceMessageId={item.runSourceMessageId}
-                          userAvatarUrl={user?.avatar ?? null}
-                          userDisplayName={user?.display_name ?? user?.username ?? null}
-                          onViewDetails={onViewDetails}
-                          onTriggerEval={onTriggerEval}
+	                      ) : (
+	                        <MessageItem
+	                          message={item.message}
+	                          runs={item.runs}
+	                          runSourceMessageId={item.runSourceMessageId}
+	                          projectId={projectId}
+	                          defaultTtsModel={assistant?.default_logical_model ?? null}
+	                          userAvatarUrl={user?.avatar ?? null}
+	                          userDisplayName={user?.display_name ?? user?.username ?? null}
+	                          onViewDetails={onViewDetails}
+	                          onTriggerEval={onTriggerEval}
                           showEvalButton={showEvalButton}
                           comparisonVariants={
                             variantsByKey[`${conversationId}:${item.message.message_id}`] ?? []

@@ -9,7 +9,7 @@ from tests.utils import InMemoryRedis
 @pytest.mark.parametrize("fmt", ["ogg", "flac", "aiff"])
 def test_speech_request_accepts_extended_response_formats(fmt: str) -> None:
     req = SpeechRequest(
-        model="tts-1",
+        model="auto",
         input="hello",
         voice="alloy",
         response_format=fmt,

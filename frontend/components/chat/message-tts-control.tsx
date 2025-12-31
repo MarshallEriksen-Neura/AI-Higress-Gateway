@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useI18n } from "@/lib/i18n-context";
 import { useMessageSpeechAudio } from "@/lib/swr/use-tts";
-import { useChatStore } from "@/lib/stores/chat-store";
 import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
 import type { MessageSpeechRequest } from "@/lib/api-types";
 
@@ -19,28 +18,34 @@ declare global {
 
 export interface MessageTtsControlProps {
   messageId: string;
+  projectId?: string | null;
+  fallbackModel?: string | null;
   disabled?: boolean;
 }
 
-export function MessageTtsControl({ messageId, disabled = false }: MessageTtsControlProps) {
+export function MessageTtsControl({
+  messageId,
+  projectId = null,
+  fallbackModel = null,
+  disabled = false,
+}: MessageTtsControlProps) {
   const { t } = useI18n();
   const { getAudio, loading } = useMessageSpeechAudio(messageId);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const preferredTtsModel = useUserPreferencesStore(
-    (s) =>
-      (selectedProjectId && s.preferences.preferredTtsModelByProject[selectedProjectId]) || null
+    (s) => (projectId && s.preferences.preferredTtsModelByProject[projectId]) || null
   );
+  const effectiveModel = preferredTtsModel || fallbackModel;
 
   const payload = useMemo<MessageSpeechRequest>(
     () => ({
-      model: preferredTtsModel || "tts-1",
+      model: effectiveModel || undefined,
       voice: "alloy",
       response_format: "wav",
       speed: 1.0,
     }),
-    [preferredTtsModel]
+    [effectiveModel]
   );
 
   const stop = useCallback(() => {
@@ -53,6 +58,10 @@ export function MessageTtsControl({ messageId, disabled = false }: MessageTtsCon
 
   const play = useCallback(async () => {
     if (disabled) return;
+    if (!effectiveModel) {
+      toast.error(t("chat.tts.model_not_set"));
+      return;
+    }
 
     try {
       if (audioRef.current) {
@@ -95,7 +104,7 @@ export function MessageTtsControl({ messageId, disabled = false }: MessageTtsCon
       toast.error(t("chat.tts.failed"));
       stop();
     }
-  }, [disabled, getAudio, payload, stop, t]);
+  }, [disabled, effectiveModel, getAudio, payload, stop, t]);
 
   const toggle = useCallback(() => {
     if (disabled) return;

@@ -13,7 +13,7 @@ def test_audio_speech_requires_api_key(client):
     resp = client.post(
         "/v1/audio/speech",
         json={
-            "model": "tts-1",
+            "model": "auto",
             "input": "hello",
             "voice": "alloy",
             "response_format": "mp3",
@@ -52,9 +52,8 @@ def test_message_speech_non_text_returns_400(client, db_session):
 
     resp = client.post(
         f"/v1/messages/{UUID(str(msg.id))}/speech",
-        json={"model": "tts-1", "voice": "alloy", "speed": 1.0, "response_format": "mp3"},
+        json={"voice": "alloy", "speed": 1.0, "response_format": "mp3"},
         headers=jwt_auth_headers(str(user.id)),
     )
     assert resp.status_code == 400
     assert resp.json().get("detail") == "Message is not plain text"
-

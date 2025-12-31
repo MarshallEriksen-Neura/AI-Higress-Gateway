@@ -34,6 +34,8 @@ export interface MessageItemProps {
   message: Message;
   runs?: RunSummary[]; // 改为 runs 数组
   runSourceMessageId?: string; // runs 所属的 user message_id（用于创建 eval）
+  projectId?: string | null;
+  defaultTtsModel?: string | null;
   userAvatarUrl?: string | null;
   userDisplayName?: string | null;
   onViewDetails?: (runId: string) => void;
@@ -56,6 +58,8 @@ export function MessageItem({
   message,
   runs = [], // 默认为空数组
   runSourceMessageId,
+  projectId = null,
+  defaultTtsModel = null,
   userAvatarUrl,
   userDisplayName,
   onViewDetails,
@@ -309,6 +313,8 @@ export function MessageItem({
             <div className="flex items-center gap-1 opacity-60 md:group-hover:opacity-100 transition-opacity duration-200">
               <MessageTtsControl
                 messageId={message.message_id}
+                projectId={projectId}
+                fallbackModel={runs?.[0]?.requested_logical_model ?? defaultTtsModel}
                 disabled={
                   disableActions ||
                   isActivelyGenerating ||

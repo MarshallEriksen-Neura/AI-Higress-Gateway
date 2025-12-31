@@ -24,7 +24,6 @@ import { useSelectableTtsModels } from "@/lib/swr/use-selectable-tts-models";
 import { ChatSettingsPreferences } from "./chat-settings-preferences";
 
 const DISABLE_VALUE = "__disable__";
-const DEFAULT_TTS_MODEL = "tts-1";
 
 export function ChatSettingsPageClient() {
   const { t } = useI18n();
@@ -57,9 +56,9 @@ export function ChatSettingsPageClient() {
   );
 
   const projectTtsModelValue =
-    (selectedProjectId && preferences.preferredTtsModelByProject[selectedProjectId]) || DEFAULT_TTS_MODEL;
+    (selectedProjectId && preferences.preferredTtsModelByProject[selectedProjectId]) || null;
   const { filterOptions: filterTtsOptions } = useSelectableTtsModels(selectedProjectId, {
-    extraModels: [projectTtsModelValue, DEFAULT_TTS_MODEL],
+    extraModels: [projectTtsModelValue],
   });
   const projectTtsModels = useMemo(
     () => filterTtsOptions(projectTtsSearch),
@@ -69,7 +68,7 @@ export function ChatSettingsPageClient() {
   const updateProjectTtsModel = (value: string) => {
     if (!selectedProjectId) return;
     const next = (value || "").trim();
-    if (!next || next === DEFAULT_TTS_MODEL) {
+    if (!next || next === DISABLE_VALUE) {
       setPreferredTtsModel(selectedProjectId, null);
     } else {
       setPreferredTtsModel(selectedProjectId, next);
@@ -170,7 +169,7 @@ export function ChatSettingsPageClient() {
                 <div className="grid gap-2">
                   <div className="text-sm font-medium">{t("chat.settings.project.tts_model")}</div>
                   <Select
-                    value={projectTtsModelValue}
+                    value={projectTtsModelValue ?? DISABLE_VALUE}
                     onValueChange={(value) => updateProjectTtsModel(value)}
                     onOpenChange={(open) => {
                       if (!open) setProjectTtsSearch("");
@@ -188,6 +187,9 @@ export function ChatSettingsPageClient() {
                           className="h-9"
                         />
                       </div>
+                      <SelectItem value={DISABLE_VALUE}>
+                        {t("chat.settings.project.tts_model_disable")}
+                      </SelectItem>
                       {projectTtsModels.map((model) => (
                         <SelectItem key={model.value} value={model.value}>
                           {model.label}

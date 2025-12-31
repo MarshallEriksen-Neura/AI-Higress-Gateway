@@ -3968,7 +3968,7 @@ X-API-Key: {api_key}
 **请求体**:
 ```json
 {
-  "model": "string (default: tts-1)",
+  "model": "string | null (为空则跟随会话默认)",
   "voice": "alloy | echo | fable | onyx | nova | shimmer",
   "response_format": "mp3 | opus | aac | wav | pcm | ogg | flac | aiff",
   "speed": 1.0
