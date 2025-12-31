@@ -974,6 +974,25 @@ export interface Message {
   created_at: string;
 }
 
+export type TtsVoice = "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
+
+export type TtsResponseFormat =
+  | "mp3"
+  | "opus"
+  | "aac"
+  | "wav"
+  | "pcm"
+  | "ogg"
+  | "flac"
+  | "aiff";
+
+export interface MessageSpeechRequest {
+  model?: string;
+  voice?: TtsVoice;
+  response_format?: TtsResponseFormat;
+  speed?: number;
+}
+
 export interface RunSummary {
   run_id: string;
   requested_logical_model: string;

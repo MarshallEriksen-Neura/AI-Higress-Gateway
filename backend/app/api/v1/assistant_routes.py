@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -20,9 +20,11 @@ except ModuleNotFoundError:  # pragma: no cover
     Redis = object  # type: ignore
 
 from app.deps import get_db, get_http_client, get_redis
+from app.auth import AuthenticatedAPIKey
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
-from app.models import Message
+from app.models import APIKey, Message
 from app.repositories.run_event_repository import append_run_event, list_run_events
+from app.schemas.audio import MessageSpeechRequest, SpeechRequest
 from app.schemas import (
     AssistantPresetCreateRequest,
     AssistantPresetListResponse,
@@ -53,6 +55,7 @@ from app.services.chat_history_service import (
     delete_conversation,
     get_assistant,
     delete_message,
+    get_conversation,
     get_run_detail,
     list_assistants,
     list_conversations,
@@ -66,6 +69,11 @@ from app.services.image_generation_chat_service import (
     execute_image_generation_inline,
 )
 from app.services.chat_history_service import finalize_assistant_image_generation_after_user_sequence
+from app.services.tts_app_service import (
+    TTSAppService,
+    _content_type_for_format,
+    _extract_text_from_message_content,
+)
 
 router = APIRouter(
     tags=["assistants"],
@@ -1120,6 +1128,73 @@ async def regenerate_message_endpoint(
     return MessageRegenerateResponse(
         assistant_message_id=assistant_message_id,
         baseline_run=_run_to_summary(run),
+    )
+
+
+@router.post("/v1/messages/{message_id}/speech")
+async def message_speech_endpoint(
+    message_id: UUID,
+    payload: MessageSpeechRequest = Body(...),
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    client: Any = Depends(get_http_client),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> StreamingResponse:
+    """
+    会话内朗读：对指定 message 生成 TTS 音频并直接返回二进制流。
+
+    - JWT 鉴权（复用 assistant_routes 的全局依赖）；
+    - 不落库、不走 OSS；
+    - 会复用后端 Redis 缓存（按 user_id + 文本哈希 + 参数隔离）。
+    """
+    msg = db.get(Message, message_id)
+    if msg is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Message not found")
+
+    conv = get_conversation(
+        db,
+        conversation_id=UUID(str(msg.conversation_id)),
+        user_id=UUID(str(current_user.id)),
+    )
+    api_key_row = db.get(APIKey, UUID(str(conv.api_key_id)))
+    if api_key_row is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Project API key not found")
+
+    # 对齐 require_api_key 的关键校验：禁用/过期即拒绝。
+    if not bool(getattr(api_key_row, "is_active", True)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project API key disabled")
+    expires_at = getattr(api_key_row, "expires_at", None)
+    if expires_at is not None and expires_at <= datetime.now(UTC):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Project API key expired")
+
+    text = _extract_text_from_message_content(getattr(msg, "content", None))
+    if not text:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message is not plain text")
+
+    auth_key = AuthenticatedAPIKey(
+        id=UUID(str(api_key_row.id)),
+        user_id=UUID(str(api_key_row.user_id)),
+        user_username=str(current_user.username),
+        is_superuser=bool(current_user.is_superuser),
+        name=str(api_key_row.name),
+        is_active=bool(api_key_row.is_active),
+        disabled_reason=getattr(api_key_row, "disabled_reason", None),
+        has_provider_restrictions=bool(api_key_row.has_provider_restrictions),
+        allowed_provider_ids=list(getattr(api_key_row, "allowed_provider_ids", []) or []),
+    )
+
+    req = SpeechRequest(
+        model=str(payload.model),
+        input=text,
+        voice=payload.voice,
+        response_format=payload.response_format,
+        speed=float(payload.speed),
+    )
+
+    service = TTSAppService(client=client, redis=redis, db=db, api_key=auth_key)
+    return StreamingResponse(
+        service.stream_speech(req),
+        media_type=_content_type_for_format(req.response_format),
     )
 
 

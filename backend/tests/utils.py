@@ -136,7 +136,7 @@ def jwt_auth_headers(user_id: str) -> dict[str, str]:
 
 class InMemoryRedis:
     def __init__(self) -> None:
-        self._data: dict[str, str] = {}
+        self._data: dict[str, str | bytes] = {}
         self._sets: dict[str, set[str]] = {}
         self._counters: dict[str, int] = {}
         self._zsets: dict[str, dict[str, float]] = {}
@@ -150,11 +150,16 @@ class InMemoryRedis:
             return str(self._counters.get(key, 0))
         return None
 
-    async def set(self, key: str, value: str, ex: int | None = None, nx: bool = False):
+    async def set(
+        self, key: str, value: str | bytes, ex: int | None = None, nx: bool = False
+    ):
         _ = ex
         if nx and key in self._data:
             return None
-        self._data[key] = str(value)
+        if isinstance(value, (bytes, bytearray)):
+            self._data[key] = bytes(value)
+        else:
+            self._data[key] = str(value)
         return True
 
     async def mget(self, keys: list[str] | tuple[str, ...]):

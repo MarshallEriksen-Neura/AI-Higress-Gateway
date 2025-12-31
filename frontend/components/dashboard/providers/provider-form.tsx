@@ -605,6 +605,7 @@ export function ProviderFormEnhanced({
                                     selectedPresetId={selectedPreset?.preset_id || null}
                                     onPresetSelect={setSelectedPreset}
                                     disabled={isSubmitting}
+                                    isEditing={isEditing}
                                 />
 
                                 {editingProvider && isLoadingEditingProvider && (
@@ -622,6 +623,7 @@ export function ProviderFormEnhanced({
                                     sdkVendorsLoading={sdkVendorsLoading}
                                     isEditing={isEditing}
                                     apiKeyPlaceholder={maskedApiKey}
+                                    hasPresetSelected={Boolean(selectedPreset)}
                                 />
 
                                 <AdvancedProviderConfig
@@ -630,6 +632,8 @@ export function ProviderFormEnhanced({
                                     markFieldAsOverridden={markFieldAsOverridden}
                                     showAdvanced={showAdvanced}
                                     onToggleAdvanced={() => setShowAdvanced(!showAdvanced)}
+                                    hasPresetSelected={Boolean(selectedPreset)}
+                                    isEditing={isEditing}
                                 />
                             </fieldset>
                         </div>

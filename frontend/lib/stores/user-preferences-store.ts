@@ -13,6 +13,8 @@ export interface UserPreferences {
   preferredChatModelByProject: Record<string, string>;
   /** 用户最近选择的文生图模型（按项目存储） */
   preferredImageModelByProject: Record<string, string>;
+  /** 用户偏好的语音模型（TTS，按项目存储） */
+  preferredTtsModelByProject: Record<string, string>;
 }
 
 /**
@@ -23,6 +25,7 @@ interface UserPreferencesState {
   updatePreferences: (updates: Partial<UserPreferences>) => void;
   setPreferredChatModel: (projectId: string | null | undefined, model: string | null) => void;
   setPreferredImageModel: (projectId: string | null | undefined, model: string | null) => void;
+  setPreferredTtsModel: (projectId: string | null | undefined, model: string | null) => void;
   resetPreferences: () => void;
 }
 
@@ -33,6 +36,7 @@ const DEFAULT_PREFERENCES: UserPreferences = {
   sendShortcut: "ctrl-enter",
   preferredChatModelByProject: {},
   preferredImageModelByProject: {},
+  preferredTtsModelByProject: {},
 };
 
 /**
@@ -78,6 +82,21 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
             preferences: { ...state.preferences, preferredImageModelByProject: next },
           };
         }),
+
+      setPreferredTtsModel: (projectId, model) =>
+        set((state) => {
+          const key = (projectId || "").trim();
+          if (!key) return state;
+          const next = { ...state.preferences.preferredTtsModelByProject };
+          if (!model) {
+            delete next[key];
+          } else {
+            next[key] = model;
+          }
+          return {
+            preferences: { ...state.preferences, preferredTtsModelByProject: next },
+          };
+        }),
       
       resetPreferences: () =>
         set({ preferences: DEFAULT_PREFERENCES }),
@@ -85,7 +104,7 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
     {
       name: "user-preferences", // localStorage key
       storage: createJSONStorage(() => localStorage),
-      version: 2,
+      version: 3,
       migrate: (persistedState: unknown, version: number) => {
         if (!persistedState || typeof persistedState !== "object") {
           return { preferences: DEFAULT_PREFERENCES };
@@ -101,10 +120,11 @@ export const useUserPreferencesStore = create<UserPreferencesState>()(
             : DEFAULT_PREFERENCES.sendShortcut,
           preferredChatModelByProject: prefs.preferredChatModelByProject ?? {},
           preferredImageModelByProject: prefs.preferredImageModelByProject ?? {},
+          preferredTtsModelByProject: prefs.preferredTtsModelByProject ?? {},
         };
 
         // 如果版本号未变化，也直接返回合并后的结构
-        if (version >= 2) {
+        if (version >= 3) {
           return { preferences: next };
         }
         return { preferences: next };

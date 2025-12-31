@@ -1,10 +1,12 @@
 "use client";
 
-import { useMemo, useState, useCallback } from "react";
+import { useMemo, useState, useCallback, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import type { Layout } from "react-resizable-panels";
 
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useAssistants } from "@/lib/swr/use-assistants";
+import { useConversations } from "@/lib/swr/use-conversations";
 import { SlateChatInput } from "@/components/chat/slate-chat-input";
 import { useQuickStartChat } from "@/lib/hooks/use-quick-start-chat";
 import type { ComposerMode } from "@/components/chat/chat-input/chat-toolbar";
@@ -19,8 +21,10 @@ import {
 import { useChatLayoutStore } from "@/lib/stores/chat-layout-store";
 
 export function ChatHomeClient({ assistantId }: { assistantId?: string | null } = {}) {
-  const { selectedProjectId, selectedAssistantId } = useChatStore();
+  const router = useRouter();
+  const { selectedProjectId, selectedAssistantId, setSelectedConversation } = useChatStore();
   const setChatVerticalLayout = useChatLayoutStore((s) => s.setChatVerticalLayout);
+  const hasAutoNavigated = useRef(false);
 
   const needsAutoAssistant = !assistantId && !selectedAssistantId;
   const { assistants } = useAssistants(
@@ -29,9 +33,43 @@ export function ChatHomeClient({ assistantId }: { assistantId?: string | null } 
       : { project_id: "", limit: 0 }
   );
 
+  // 确定目标助手ID
   const targetAssistantId = useMemo(() => {
     return assistantId ?? selectedAssistantId ?? assistants[0]?.assistant_id ?? null;
   }, [assistantId, selectedAssistantId, assistants]);
+
+  // 获取会话列表用于自动导航
+  const { conversations, isLoading: isLoadingConversations } = useConversations(
+    targetAssistantId
+      ? { assistant_id: targetAssistantId, limit: 50 }
+      : { assistant_id: "", limit: 0 }
+  );
+
+  // 自动导航到第一个会话：当用户在欢迎页面且有会话可选时
+  useEffect(() => {
+    // 防止重复导航
+    if (hasAutoNavigated.current) return;
+
+    // 条件：有目标助手、会话列表已加载完成、有会话可选
+    if (
+      targetAssistantId &&
+      !isLoadingConversations &&
+      conversations.length > 0
+    ) {
+      const firstConversation = conversations[0];
+      if (firstConversation) {
+        hasAutoNavigated.current = true;
+        setSelectedConversation(firstConversation.conversation_id);
+        router.push(`/chat/${targetAssistantId}/${firstConversation.conversation_id}`);
+      }
+    }
+  }, [
+    targetAssistantId,
+    isLoadingConversations,
+    conversations,
+    setSelectedConversation,
+    router,
+  ]);
 
   const { handleSend, isSubmitting, canSubmit } = useQuickStartChat({
     assistantId: targetAssistantId,

@@ -1,0 +1,110 @@
+"use client";
+
+import useSWRMutation from "swr/mutation";
+import { messageService } from "@/http/message";
+import type { MessageSpeechRequest } from "@/lib/api-types";
+
+type CachedAudio = {
+  blob: Blob;
+  contentType: string | null;
+  objectUrl: string;
+  createdAt: number;
+};
+
+const AUDIO_CACHE_MAX_ITEMS = 32;
+const AUDIO_CACHE_TTL_MS = 30 * 60 * 1000;
+
+const audioCache = new Map<string, CachedAudio>();
+
+function buildAudioCacheKey(messageId: string, payload: MessageSpeechRequest): string {
+  const model = (payload.model ?? "tts-1").trim();
+  const voice = payload.voice ?? "alloy";
+  const responseFormat = payload.response_format ?? "mp3";
+  const speed = Number.isFinite(payload.speed) ? String(payload.speed) : "1";
+  return `msg:${messageId}|m:${model}|v:${voice}|f:${responseFormat}|s:${speed}`;
+}
+
+function pruneAudioCache(now: number) {
+  for (const [key, item] of audioCache.entries()) {
+    if (now - item.createdAt > AUDIO_CACHE_TTL_MS) {
+      URL.revokeObjectURL(item.objectUrl);
+      audioCache.delete(key);
+    }
+  }
+
+  if (audioCache.size <= AUDIO_CACHE_MAX_ITEMS) return;
+
+  const entries = Array.from(audioCache.entries()).sort((a, b) => a[1].createdAt - b[1].createdAt);
+  for (const [key, item] of entries) {
+    if (audioCache.size <= AUDIO_CACHE_MAX_ITEMS) break;
+    URL.revokeObjectURL(item.objectUrl);
+    audioCache.delete(key);
+  }
+}
+
+function getCachedAudio(key: string): CachedAudio | null {
+  const item = audioCache.get(key);
+  if (!item) return null;
+  const now = Date.now();
+  if (now - item.createdAt > AUDIO_CACHE_TTL_MS) {
+    URL.revokeObjectURL(item.objectUrl);
+    audioCache.delete(key);
+    return null;
+  }
+  return item;
+}
+
+function storeCachedAudio(key: string, blob: Blob, contentType: string | null): CachedAudio {
+  const now = Date.now();
+  pruneAudioCache(now);
+
+  const objectUrl = URL.createObjectURL(blob);
+  const item: CachedAudio = {
+    blob,
+    contentType,
+    objectUrl,
+    createdAt: now,
+  };
+  audioCache.set(key, item);
+  return item;
+}
+
+export function useMessageSpeechAudio(messageId: string) {
+  const key = `/v1/messages/${messageId}/speech`;
+
+  const { trigger, data, error, isMutating, reset } = useSWRMutation<
+    CachedAudio,
+    any,
+    string,
+    MessageSpeechRequest
+  >(
+    key,
+    async (_url, { arg }) => {
+      const payload: MessageSpeechRequest = {
+        model: arg?.model ?? "tts-1",
+        voice: arg?.voice ?? "alloy",
+        response_format: arg?.response_format ?? "mp3",
+        speed: arg?.speed ?? 1.0,
+      };
+
+      const audioKey = buildAudioCacheKey(messageId, payload);
+      const cached = getCachedAudio(audioKey);
+      if (cached) return cached;
+
+      const { blob, contentType } = await messageService.getMessageSpeechAudio(messageId, payload);
+      return storeCachedAudio(audioKey, blob, contentType);
+    },
+    {
+      revalidate: false,
+      populateCache: false,
+    }
+  );
+
+  return {
+    getAudio: trigger,
+    audio: data,
+    error,
+    loading: isMutating,
+    reset,
+  };
+}

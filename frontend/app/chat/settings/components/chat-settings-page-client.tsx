@@ -17,15 +17,19 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { useI18n } from "@/lib/i18n-context";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useUserPreferencesStore } from "@/lib/stores/user-preferences-store";
 import { useProjectChatSettings, useUpdateProjectChatSettings } from "@/lib/swr/use-project-chat-settings";
 import { useSelectableChatModels } from "@/lib/swr/use-selectable-chat-models";
+import { useSelectableTtsModels } from "@/lib/swr/use-selectable-tts-models";
 import { ChatSettingsPreferences } from "./chat-settings-preferences";
 
 const DISABLE_VALUE = "__disable__";
+const DEFAULT_TTS_MODEL = "tts-1";
 
 export function ChatSettingsPageClient() {
   const { t } = useI18n();
   const { selectedProjectId } = useChatStore();
+  const { preferences, setPreferredTtsModel } = useUserPreferencesStore();
 
   const { settings, mutate: mutateProjectSettings } = useProjectChatSettings(selectedProjectId);
   const updateProjectSettings = useUpdateProjectChatSettings();
@@ -45,11 +49,33 @@ export function ChatSettingsPageClient() {
     }
   );
   const [projectTitleSearch, setProjectTitleSearch] = useState("");
+  const [projectTtsSearch, setProjectTtsSearch] = useState("");
 
   const projectTitleModels = useMemo(
     () => filterOptions(projectTitleSearch),
     [filterOptions, projectTitleSearch]
   );
+
+  const projectTtsModelValue =
+    (selectedProjectId && preferences.preferredTtsModelByProject[selectedProjectId]) || DEFAULT_TTS_MODEL;
+  const { filterOptions: filterTtsOptions } = useSelectableTtsModels(selectedProjectId, {
+    extraModels: [projectTtsModelValue, DEFAULT_TTS_MODEL],
+  });
+  const projectTtsModels = useMemo(
+    () => filterTtsOptions(projectTtsSearch),
+    [filterTtsOptions, projectTtsSearch]
+  );
+
+  const updateProjectTtsModel = (value: string) => {
+    if (!selectedProjectId) return;
+    const next = (value || "").trim();
+    if (!next || next === DEFAULT_TTS_MODEL) {
+      setPreferredTtsModel(selectedProjectId, null);
+    } else {
+      setPreferredTtsModel(selectedProjectId, next);
+    }
+    toast.success(t("chat.settings.saved"));
+  };
 
   const updateProjectTitleModel = async (value: string) => {
     if (!selectedProjectId) return;
@@ -138,6 +164,39 @@ export function ChatSettingsPageClient() {
                   </Select>
                   <div className="text-xs text-muted-foreground">
                     {t("chat.settings.project.title_model_help")}
+                  </div>
+                </div>
+
+                <div className="grid gap-2">
+                  <div className="text-sm font-medium">{t("chat.settings.project.tts_model")}</div>
+                  <Select
+                    value={projectTtsModelValue}
+                    onValueChange={(value) => updateProjectTtsModel(value)}
+                    onOpenChange={(open) => {
+                      if (!open) setProjectTtsSearch("");
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={t("chat.settings.project.tts_model_placeholder")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <div className="p-2 pb-1">
+                        <Input
+                          value={projectTtsSearch}
+                          onChange={(event) => setProjectTtsSearch(event.target.value)}
+                          placeholder={t("chat.model.search_placeholder")}
+                          className="h-9"
+                        />
+                      </div>
+                      {projectTtsModels.map((model) => (
+                        <SelectItem key={model.value} value={model.value}>
+                          {model.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="text-xs text-muted-foreground">
+                    {t("chat.settings.project.tts_model_help")}
                   </div>
                 </div>
 

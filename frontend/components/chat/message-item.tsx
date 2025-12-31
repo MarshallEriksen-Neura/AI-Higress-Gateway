@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { MessageContent } from "./message-content";
 import { MessageBubble } from "./message-bubble";
 import { ToolInvocationBubbles } from "./tool-invocation-bubbles";
+import { MessageTtsControl } from "./message-tts-control";
 
 export interface MessageItemProps {
   message: Message;
@@ -306,6 +307,15 @@ export function MessageItem({
           {/* 助手消息的操作按钮 */}
           {isAssistant && (
             <div className="flex items-center gap-1 opacity-60 md:group-hover:opacity-100 transition-opacity duration-200">
+              <MessageTtsControl
+                messageId={message.message_id}
+                disabled={
+                  disableActions ||
+                  isActivelyGenerating ||
+                  isRegenerating ||
+                  !(message.content ?? "").trim()
+                }
+              />
               {/* 重新生成 */}
               {onRegenerate && (
                 <Button

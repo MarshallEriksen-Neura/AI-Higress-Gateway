@@ -12,7 +12,6 @@ import { PWAInstallPrompt } from "@/components/pwa-install-prompt";
 import { PWARegister } from "@/components/pwa-register";
 import { PerformanceMonitor } from "@/components/performance-monitor";
 import { generateJsonLd } from "@/lib/seo";
-import { ThemeBackground } from "@/components/theme-background";
 import { Analytics } from "@vercel/analytics/next"
 
 export const metadata: Metadata = {
@@ -120,7 +119,6 @@ export default function RootLayout({
           themes={['light', 'dark', 'christmas', 'ocean', 'spring']}
           disableTransitionOnChange
         >
-          <ThemeBackground />
           <Analytics />
           <main className="relative z-10">
             <I18nProvider>

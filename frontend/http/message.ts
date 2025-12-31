@@ -7,6 +7,7 @@ import type {
   RunDetail,
   RegenerateMessageResponse,
   RegenerateMessageRequest,
+  MessageSpeechRequest,
 } from '@/lib/api-types';
 import {
   normalizeMessagesResponse,
@@ -88,5 +89,28 @@ export const messageService = {
       timeout: RUN_DETAIL_TIMEOUT_MS,
     });
     return normalizeRunDetail(data);
+  },
+
+  /**
+   * 会话消息朗读（TTS）
+   * 注意：返回二进制音频流（Blob），网关不做转码；浏览器兼容性取决于 response_format。
+   */
+  getMessageSpeechAudio: async (
+    messageId: string,
+    request: MessageSpeechRequest
+  ): Promise<{ blob: Blob; contentType: string | null }> => {
+    const resp = await httpClient.post<Blob>(`/v1/messages/${messageId}/speech`, request, {
+      responseType: "blob",
+      headers: {
+        Accept: "audio/*",
+      },
+    });
+    const contentType =
+      (resp.headers?.["content-type"] as string | undefined) ?? null;
+    const blob =
+      resp.data instanceof Blob
+        ? resp.data
+        : new Blob([resp.data as any], { type: contentType ?? undefined });
+    return { blob, contentType };
   },
 };

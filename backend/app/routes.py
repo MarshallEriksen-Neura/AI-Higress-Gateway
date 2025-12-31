@@ -29,6 +29,7 @@ from .api.v1.admin_user_permission_routes import (
 from .api.v1.admin_user_routes import router as admin_user_router
 from .api.v1.api_key_routes import router as api_key_router
 from .api.v1.assistant_routes import router as assistant_router
+from .api.v1.audio_routes import router as audio_router
 from .api.v1.bridge_routes import router as bridge_router
 from .api.v1.chat_routes import router as chat_router
 from .api.v1.image_routes import router as image_router
@@ -247,6 +248,7 @@ def create_app() -> FastAPI:
 
     # Chat 相关网关路由（/v1/chat/completions、/v1/responses、/v1/messages）
     app.include_router(chat_router)
+    app.include_router(audio_router)
     app.include_router(image_router)
     app.include_router(media_router)
     # MCP Bridge（Agent / Tools / Events）

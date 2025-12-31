@@ -13,6 +13,7 @@
 - [逻辑模型管理](#逻辑模型管理)
 - [路由管理](#路由管理)
 - [会话管理](#会话管理)
+- [音频（TTS）](#音频tts)
 - [通知](#通知)
 - [系统管理](#系统管理)
 
@@ -3928,6 +3929,57 @@ X-API-Key: {api_key}
 > {api_key} 即创建密钥时返回的字符串，无需再做 Base64 编码。
 
 ---
+
+## 音频（TTS）
+
+### 1. 生成语音（API Key）
+
+**接口**: `POST /v1/audio/speech`
+
+**鉴权**: API Key（`Authorization: Bearer {api_key}` 或 `X-API-Key: {api_key}`）
+
+**请求体**:
+```json
+{
+  "model": "string",
+  "input": "string (max 4096 chars)",
+  "voice": "alloy | echo | fable | onyx | nova | shimmer",
+  "response_format": "mp3 | opus | aac | wav | pcm | ogg | flac | aiff",
+  "speed": 1.0,
+  "instructions": "string | null"
+}
+```
+
+**响应**:
+- `200 OK`: 二进制音频流，`Content-Type` 取决于 `response_format`（例如 `audio/mpeg` / `audio/wav`）
+- 说明：网关不做音频转码；若上游返回的是 PCM（如 `audio/L16` / `audio/pcm`），当 `response_format=wav` 时仅封装 WAV 头（不重采样/不转码）
+- `400`: 参数不合法（例如 input 为空/过长）
+- `401/403`: API Key 无效或不可用
+- `402`: 开启积分校验时余额不足
+- `429`: 触发限流
+- `503`: 上游全部失败或不可用
+
+### 2. 会话消息朗读（JWT）
+
+**接口**: `POST /v1/messages/{message_id}/speech`
+
+**鉴权**: JWT（`Authorization: Bearer {access_token}`）
+
+**请求体**:
+```json
+{
+  "model": "string (default: tts-1)",
+  "voice": "alloy | echo | fable | onyx | nova | shimmer",
+  "response_format": "mp3 | opus | aac | wav | pcm | ogg | flac | aiff",
+  "speed": 1.0
+}
+```
+
+**响应**:
+- `200 OK`: 二进制音频流
+- `404`: message 不存在或无权限访问
+- `400`: message 不是纯文本消息
+- 其余错误码同上
 
 ## 错误响应格式
 

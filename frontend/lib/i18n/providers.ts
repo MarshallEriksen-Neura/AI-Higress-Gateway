@@ -363,6 +363,30 @@ export const providersTranslations: Record<Language, Record<string, string>> = {
     "providers.form_field_static_models_schema_capabilities": "(optional): Model capabilities, e.g., [\"chat\"]. Supported values: chat, completion, embedding, vision, audio, function_calling, image_generation",
     "providers.form_field_static_models_schema_pricing": "(optional): Pricing info, format:",
     "providers.form_field_static_models_schema_example": "Example:",
+
+    // Preset Selector UI
+    "providers.preset_quick_setup": "Quick Setup",
+    "providers.preset_search": "Search providers...",
+    "providers.preset_manual_config": "Custom Config",
+    "providers.preset_selected": "Selected",
+    "providers.preset_change": "Change",
+    "providers.preset_fill_api_key_hint": "Just fill in your API Key below to get started.",
+    "providers.preset_no_results": "No matching providers found",
+    "providers.preset_load_error": "Failed to load presets",
+
+    // Technical options (collapsed in preset mode)
+    "providers.form_technical_options": "Technical Options (Pre-configured)",
+    "providers.form_from_preset": "From preset",
+
+    // Advanced config sections
+    "providers.form_preset_configured": "Pre-configured",
+    "providers.form_advanced_preset_hint": "These settings have been pre-configured based on your selected provider. Adjust only if needed.",
+    "providers.form_section_api_paths_desc": "Configure API endpoint paths",
+    "providers.form_section_routing_cost": "Routing & Cost",
+    "providers.form_section_routing_cost_desc": "Load balancing and pricing settings",
+    "providers.form_section_technical": "Technical Settings",
+    "providers.form_section_technical_desc": "API styles, headers, and model config",
+    "providers.form_configured": "Configured",
   },
   zh: {
     // Providers page
@@ -724,5 +748,29 @@ export const providersTranslations: Record<Language, Record<string, string>> = {
     "providers.form_field_static_models_schema_capabilities": "（可选）：模型能力，如 [\"chat\"]；支持值：chat（聊天）、completion、embedding、vision（图文理解）、audio、function_calling、image_generation（文生图）",
     "providers.form_field_static_models_schema_pricing": "（可选）：定价信息，格式：",
     "providers.form_field_static_models_schema_example": "示例：",
+
+    // Preset Selector UI
+    "providers.preset_quick_setup": "快速配置",
+    "providers.preset_search": "搜索服务商...",
+    "providers.preset_manual_config": "自定义配置",
+    "providers.preset_selected": "已选择",
+    "providers.preset_change": "更换",
+    "providers.preset_fill_api_key_hint": "只需填写下方 API Key 即可开始使用。",
+    "providers.preset_no_results": "未找到匹配的服务商",
+    "providers.preset_load_error": "加载预设失败",
+
+    // Technical options (collapsed in preset mode)
+    "providers.form_technical_options": "技术选项（已预配置）",
+    "providers.form_from_preset": "来自预设",
+
+    // Advanced config sections
+    "providers.form_preset_configured": "已预配置",
+    "providers.form_advanced_preset_hint": "这些设置已根据所选服务商预配置好，通常无需调整。",
+    "providers.form_section_api_paths_desc": "配置 API 端点路径",
+    "providers.form_section_routing_cost": "路由与成本",
+    "providers.form_section_routing_cost_desc": "负载均衡和定价设置",
+    "providers.form_section_technical": "技术设置",
+    "providers.form_section_technical_desc": "API 样式、请求头和模型配置",
+    "providers.form_configured": "已配置",
   },
 };
