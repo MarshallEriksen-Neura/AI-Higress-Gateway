@@ -461,10 +461,13 @@
 
 **行为说明**:
 
-- 头像文件会暂时保存到本地磁盘目录（由环境变量 `AVATAR_LOCAL_DIR` 控制，默认 `backend/media/avatars`）；
+- 头像存储模式由 `AVATAR_STORAGE_MODE` 控制：
+  - `auto`（默认）：非生产环境写本地；生产环境优先写 OSS/S3（未配置则回退本地）；
+  - `local`：强制写本地（由环境变量 `AVATAR_LOCAL_DIR` 控制，默认 `backend/media/avatars`）；
+  - `oss`：强制写 OSS/S3（需要配置 `AVATAR_OSS_*` + `AVATAR_OSS_BASE_URL`）；
 - 数据库中 `users.avatar` 字段只保存相对路径 / 对象 key，例如：`"<user_id>/<uuid>.png"`；
 - 对外返回的 `avatar` 字段为前端可直接访问的完整 URL：
-  - 如果配置了 `AVATAR_OSS_BASE_URL`，则为：`<AVATAR_OSS_BASE_URL>/<key>`；
+  - OSS/S3 模式：`<AVATAR_OSS_BASE_URL>/<key>`（建议该 bucket 为公开读或绑定 CDN，便于前端直链访问）；
   - 否则为：`<GATEWAY_API_BASE_URL>/<AVATAR_LOCAL_BASE_URL>/<key>`，默认等价于 `http://localhost:8000/media/avatars/<key>`；当未显式配置网关地址或仍使用默认 localhost 时，会优先使用当前请求的 base_url（包含 `X-Forwarded-Proto`/`Host`）来拼接，避免返回错误域名。
 
 **响应**:
@@ -1282,8 +1285,9 @@ data: {"error":{"type":"upstream_error","status":429,"message":"insufficient_quo
 **返回字段说明**:
 - 当 `response_format="b64_json"`：`data[*].b64_json` 返回 base64 图片；
 - 当 `response_format="url"`：
-  - 若配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`），网关会把图片写入对应存储（默认阿里 OSS，也可 S3/R2 兼容），并返回网关域名下的签名短链 URL（`/media/images/...`）；
-  - 若未配置 OSS，网关会退化为 `data:image/...;base64,...` 的 Data URL（兼容前端直接渲染）。
+  - 若 `IMAGE_STORAGE_MODE=local`（或 `IMAGE_STORAGE_MODE=auto` 且 `APP_ENV!=production`），网关会把图片写入本地磁盘目录（`IMAGE_LOCAL_DIR`），并返回网关域名下的签名短链 URL（`/media/images/...`）；
+  - 若 `IMAGE_STORAGE_MODE=oss`（或 `IMAGE_STORAGE_MODE=auto` 且 `APP_ENV=production`），且配置了对象存储（`IMAGE_STORAGE_PROVIDER` + `IMAGE_OSS_*`），网关会把图片写入对应存储（默认阿里 OSS，也可 S3/R2 兼容），并返回网关域名下的签名短链 URL（`/media/images/...`）；
+  - 若强制 OSS 但未配置对象存储，网关会退化为 `data:image/...;base64,...` 的 Data URL（兼容前端直接渲染）。
 - `extra_body`（可选）：网关保留扩展字段，用于透传上游厂商高级参数（避免网关 schema 落后导致能力缺失）。
   - `extra_body.openai`：在 OpenAI lane 下合并到上游请求体（覆盖同名字段）。
   - `extra_body.google`：在 Google lane 下合并到上游请求体（覆盖同名字段）。
@@ -1362,7 +1366,9 @@ data: {"error":{"type":"upstream_error","status":429,"message":"insufficient_quo
 
 **接口**: `GET /media/images/{object_key}`
 
-**描述**: 通过签名短链获取 OSS 私有桶图片对象的预签名下载地址（网关返回 302 跳转，直下）。
+**描述**:
+- 当图片存储在 OSS/S3 时：通过签名短链获取私有桶图片对象的预签名下载地址（网关返回 302 跳转，直下）。
+- 当图片存储在本地磁盘时：通过签名短链直接返回图片二进制内容（`200 OK`）。
 
 **认证**: 无（通过签名参数校验）
 
@@ -1370,7 +1376,9 @@ data: {"error":{"type":"upstream_error","status":429,"message":"insufficient_quo
 - `expires` (int, 必填): 过期时间戳（Unix seconds）
 - `sig` (string, 必填): HMAC 签名
 
-**成功响应**: `302 Found`，响应头 `Location` 为 OSS 预签名 GET URL；客户端跟随跳转后由 OSS 返回图片二进制内容（`Content-Type` 为 `image/png`/`image/jpeg`/`image/webp` 等）
+**成功响应**:
+- OSS/S3 模式：`302 Found`，响应头 `Location` 为对象存储预签名 GET URL；客户端跟随跳转后由对象存储返回图片二进制内容（`Content-Type` 为 `image/png`/`image/jpeg`/`image/webp` 等）
+- 本地模式：`200 OK`，响应体为图片二进制内容（`Content-Type` 为 `image/png`/`image/jpeg`/`image/webp` 等）
 
 ### 计费规则
 

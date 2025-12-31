@@ -248,7 +248,7 @@ export function AdaptiveSidebar() {
           "flex items-center space-x-3 px-3 py-2.5 rounded transition-colors text-sm",
           isActive
             ? "bg-primary text-primary-foreground"
-            : "hover:bg-muted",
+            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
           isCollapsed && "justify-center px-2"
         )}
       >
@@ -275,12 +275,12 @@ export function AdaptiveSidebar() {
   return (
     <aside
       className={cn(
-        "hidden lg:flex flex-col border-r h-full min-h-0 theme-adaptive-sidebar bg-card transition-all duration-200",
+        "relative z-10 hidden lg:flex flex-col border-r border-sidebar-border h-full min-h-0 theme-adaptive-sidebar bg-sidebar text-sidebar-foreground transition-all duration-200",
         isCollapsed ? "w-16" : "w-64"
       )}
     >
       {/* Header */}
-      <div className="p-4 border-b">
+      <div className="p-4 border-b border-sidebar-border">
         <Link
           href="/"
           className={cn(
@@ -302,12 +302,12 @@ export function AdaptiveSidebar() {
               <>
                 {!isCollapsed && (
                   <div className="pt-4 pb-2">
-                    <p className="px-3 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    <p className="px-3 text-xs font-semibold text-sidebar-foreground/70 uppercase tracking-wider">
                       {t("nav.admin")}
                     </p>
                   </div>
                 )}
-                {isCollapsed && <div className="pt-4 pb-2"><hr className="border-muted" /></div>}
+                {isCollapsed && <div className="pt-4 pb-2"><hr className="border-sidebar-border" /></div>}
 
                 {visibleAdminItems.map((item) =>
                   renderMenuItem(item, pathname === item.href)
@@ -319,11 +319,11 @@ export function AdaptiveSidebar() {
       </div>
 
       {/* Footer */}
-      <div className="p-3 border-t">
+      <div className="p-3 border-t border-sidebar-border">
         <Link
           href="/profile"
           className={cn(
-            "flex items-center space-x-3 px-3 py-2.5 rounded hover:bg-muted transition-colors text-sm",
+            "flex items-center space-x-3 px-3 py-2.5 rounded text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors text-sm",
             isCollapsed && "justify-center px-2"
           )}
         >

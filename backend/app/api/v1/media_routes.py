@@ -3,11 +3,13 @@ from __future__ import annotations
 import time
 
 from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 
 from app.services.image_storage_service import (
     ImageStorageNotConfigured,
     SignedUrlError,
+    get_effective_image_storage_mode,
+    load_image_bytes,
     presign_image_get_url,
     verify_signed_image_request,
 )
@@ -27,7 +29,9 @@ async def get_generated_image(
     说明：
     - 不要求 API Key/JWT 鉴权；
     - 通过 expires+sig 做短链校验；
-    - 图片实际存储在 OSS 私有桶中，网关校验签名后 302 跳转到 OSS 预签名 URL（直下）。
+    - 图片可存储在本地磁盘或 OSS/S3；
+      - 本地模式：网关校验签名后直接返回图片二进制；
+      - OSS/S3 模式：网关校验签名后 302 跳转到对象存储预签名 URL（直下）。
     """
     try:
         verify_signed_image_request(object_key, expires=expires, sig=sig)
@@ -36,6 +40,15 @@ async def get_generated_image(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
         ) from exc
+
+    if get_effective_image_storage_mode() == "local":
+        try:
+            body, content_type = await load_image_bytes(object_key)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="image not found") from exc
+        return Response(content=body, media_type=content_type, headers={"Cache-Control": "no-store"})
 
     try:
         remaining = max(1, int(expires) - int(time.time()))

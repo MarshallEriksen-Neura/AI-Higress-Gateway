@@ -456,3 +456,79 @@ def test_upload_my_avatar_stores_key_and_exposes_url(client_with_db):
         # 对应的本地文件应存在于头像存储目录
         avatar_path = get_avatar_file_path(stored.avatar)
         assert avatar_path.exists()
+
+
+def test_upload_my_avatar_oss_mode_uploads_to_object_storage(client_with_db, monkeypatch):
+    """
+    当 AVATAR_STORAGE_MODE=oss 时：
+    - 后端会把头像上传到对象存储（bucket 可与文生图区分）；
+    - 对外返回 AVATAR_OSS_BASE_URL 前缀的直链 URL；
+    - 本地磁盘不会写入头像文件。
+    """
+
+    import uuid
+
+    from app.services.avatar_service import get_avatar_file_path
+    from app.settings import settings
+
+    client, session_factory, admin_id, _redis = client_with_db
+
+    monkeypatch.setattr(settings, "avatar_storage_mode", "oss", raising=False)
+    monkeypatch.setattr(settings, "avatar_storage_provider", "s3", raising=False)
+    monkeypatch.setattr(settings, "avatar_oss_base_url", "https://cdn.example.com/avatars", raising=False)
+    monkeypatch.setattr(settings, "avatar_oss_endpoint", "https://r2.example.com", raising=False)
+    monkeypatch.setattr(settings, "avatar_oss_region", "auto", raising=False)
+    monkeypatch.setattr(settings, "avatar_oss_bucket", "avatars-public", raising=False)
+    monkeypatch.setattr(settings, "avatar_oss_access_key_id", "ak", raising=False)
+    monkeypatch.setattr(settings, "avatar_oss_access_key_secret", "sk", raising=False)
+
+    seen: dict[str, object] = {}
+
+    class DummyS3Client:
+        def put_object(self, *, Bucket: str, Key: str, Body: bytes, ContentType: str):
+            seen["bucket"] = Bucket
+            seen["key"] = Key
+            seen["content_type"] = ContentType
+            seen["body_prefix"] = Body[:8]
+
+    monkeypatch.setattr(
+        "app.services.avatar_storage_service._create_s3_client",
+        lambda: DummyS3Client(),
+    )
+
+    # 先创建一个普通用户
+    create_payload = {
+        "username": "avatar-oss-user",
+        "email": "avatar-oss-user@example.com",
+        "password": "Secret123!",
+    }
+    resp_user = client.post("/users", json=create_payload, headers=_jwt_auth_headers(admin_id))
+    assert resp_user.status_code == 201
+    user_id = resp_user.json()["id"]
+
+    # 使用该用户身份上传头像
+    user_headers = _jwt_auth_headers(user_id)
+    files = {
+        "file": ("avatar.png", b"\x89PNG\r\n\x1a\nfake-image-data", "image/png"),
+    }
+    resp_upload = client.post("/users/me/avatar", files=files, headers=user_headers)
+    assert resp_upload.status_code == 200
+    data = resp_upload.json()
+
+    # 返回 URL 应为 OSS/CDN 直链
+    assert data["avatar"] is not None
+    assert data["avatar"].startswith("https://cdn.example.com/avatars/")
+    assert user_id in data["avatar"]
+
+    assert seen["bucket"] == "avatars-public"
+    assert isinstance(seen["key"], str) and seen["key"].startswith(user_id + "/")
+    assert seen["content_type"] == "image/png"
+    assert seen["body_prefix"] == b"\x89PNG\r\n\x1a\n"
+
+    # 数据库中仅保存 key
+    with session_factory() as session:
+        stored = session.get(User, uuid.UUID(user_id))
+        assert stored is not None
+        assert stored.avatar is not None
+        assert not stored.avatar.startswith("http")
+        assert get_avatar_file_path(stored.avatar).exists() is False

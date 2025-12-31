@@ -794,8 +794,63 @@ class Settings(BaseSettings):
             "此时用户头像只在数据库中保存对象 key，完整访问 URL 在读取时按该前缀拼接。"
         ),
     )
+    avatar_storage_mode: Literal["auto", "oss", "local"] = Field(
+        default="auto",
+        alias="AVATAR_STORAGE_MODE",
+        description=(
+            "头像存储模式："
+            "auto（非 production 默认用本地磁盘；production 环境优先用 OSS/S3，未配置则回退本地），"
+            "oss（强制用 OSS/S3），"
+            "local（强制写入本地磁盘）。"
+        ),
+    )
+    avatar_storage_provider: Literal["aliyun_oss", "s3"] = Field(
+        default="aliyun_oss",
+        alias="AVATAR_STORAGE_PROVIDER",
+        description="头像对象存储提供商，支持 aliyun_oss 或 s3（AWS/MinIO/Cloudflare R2 等兼容接口）",
+    )
+    avatar_oss_endpoint: str | None = Field(
+        default=None,
+        alias="AVATAR_OSS_ENDPOINT",
+        description="头像对象存储 Endpoint；阿里 OSS 形如 https://oss-cn-hangzhou.aliyuncs.com；S3/R2 可填兼容 Endpoint",
+    )
+    avatar_oss_region: str | None = Field(
+        default=None,
+        alias="AVATAR_OSS_REGION",
+        description="S3/R2 兼容接口的 region（阿里 OSS 可留空）",
+    )
+    avatar_oss_bucket: str | None = Field(
+        default=None,
+        alias="AVATAR_OSS_BUCKET",
+        description="头像对象存储 Bucket 名称（建议公开读或绑定 CDN，便于前端直链访问）",
+    )
+    avatar_oss_access_key_id: str | None = Field(
+        default=None,
+        alias="AVATAR_OSS_ACCESS_KEY_ID",
+        description="头像对象存储 AccessKeyId（用于后端上传对象）",
+    )
+    avatar_oss_access_key_secret: str | None = Field(
+        default=None,
+        alias="AVATAR_OSS_ACCESS_KEY_SECRET",
+        description="头像对象存储 AccessKeySecret（用于后端上传对象）",
+    )
 
     # Generated images (text-to-image) OSS storage configuration
+    image_storage_mode: Literal["auto", "oss", "local"] = Field(
+        default="auto",
+        alias="IMAGE_STORAGE_MODE",
+        description=(
+            "图片存储模式："
+            "auto（非 production 默认用本地磁盘，production 默认用 OSS/S3），"
+            "oss（强制用 OSS/S3），"
+            "local（强制写入本地磁盘）。"
+        ),
+    )
+    image_local_dir: str = Field(
+        default=str(_project_root / "backend" / "media" / "images"),
+        alias="IMAGE_LOCAL_DIR",
+        description="本地图片存储目录（IMAGE_STORAGE_MODE=local 或 auto+非 production 时生效）",
+    )
     image_storage_provider: Literal["aliyun_oss", "s3"] = Field(
         default="aliyun_oss",
         alias="IMAGE_STORAGE_PROVIDER",

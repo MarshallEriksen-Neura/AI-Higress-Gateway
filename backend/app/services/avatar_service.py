@@ -87,10 +87,14 @@ def build_avatar_url(
 
     key = avatar_value.lstrip("/")
 
-    # 如果配置了 OSS 基础 URL，则优先走 OSS
-    if settings.avatar_oss_base_url:
-        base = settings.avatar_oss_base_url.rstrip("/")
-        return f"{base}/{key}"
+    storage_mode = str(getattr(settings, "avatar_storage_mode", "auto") or "auto").strip().lower()
+    env = str(getattr(settings, "environment", "") or "").strip().lower()
+    if storage_mode == "oss" or (storage_mode == "auto" and env == "production"):
+        base = str(settings.avatar_oss_base_url or "").strip().rstrip("/")
+        if base:
+            return f"{base}/{key}"
+        # OSS 模式但未配置可访问域名时，宁愿不返回（前端显示默认头像），避免返回错误 URL。
+        return None
 
     # 默认走本地静态目录：<GATEWAY_API_BASE_URL>/<AVATAR_LOCAL_BASE_URL>/<key>
     base_path = settings.avatar_local_base_url or "/media/avatars"

@@ -56,6 +56,7 @@ services:
       - .env
     environment:
       - AVATAR_LOCAL_DIR=/app/media/avatars
+      - IMAGE_LOCAL_DIR=/app/media/images
     volumes:
       - ./security:/app/security:ro
       - ./backend/logs:/app/logs
@@ -93,6 +94,7 @@ services:
       - .env
     environment:
       - AVATAR_LOCAL_DIR=/app/media/avatars
+      - IMAGE_LOCAL_DIR=/app/media/images
     volumes:
       - ./security:/app/security:ro
       - ./backend/logs:/app/logs
@@ -120,6 +122,7 @@ services:
       - .env
     environment:
       - AVATAR_LOCAL_DIR=/app/media/avatars
+      - IMAGE_LOCAL_DIR=/app/media/images
     volumes:
       - ./security:/app/security:ro
       - ./backend/logs:/app/logs

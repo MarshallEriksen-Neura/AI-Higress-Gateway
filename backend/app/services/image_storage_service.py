@@ -7,6 +7,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from hashlib import sha256
+from pathlib import Path
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -24,14 +25,26 @@ class SignedUrlError(ValueError):
     pass
 
 
-def _backend_kind() -> Literal["aliyun_oss", "s3"]:
+def get_effective_image_storage_mode() -> Literal["local", "oss"]:
+    mode = str(getattr(settings, "image_storage_mode", "auto") or "auto").strip().lower()
+    if mode == "local":
+        return "local"
+    if mode == "oss":
+        return "oss"
+    if mode != "auto":
+        logger.warning("Unknown IMAGE_STORAGE_MODE=%s; fallback to auto", mode)
+    env = str(getattr(settings, "environment", "") or "").strip().lower()
+    return "oss" if env == "production" else "local"
+
+
+def _oss_backend_kind() -> Literal["aliyun_oss", "s3"]:
     kind = str(settings.image_storage_provider or "aliyun_oss").strip().lower()
     if kind not in ("aliyun_oss", "s3"):
         raise ImageStorageNotConfigured(f"unsupported storage provider: {kind}")
     return kind  # type: ignore[return-value]
 
 
-def _is_configured() -> bool:
+def _oss_is_configured() -> bool:
     required = (
         settings.image_oss_endpoint,
         settings.image_oss_bucket,
@@ -94,8 +107,28 @@ def _build_object_key(*, ext: str, kind: str | None = None) -> str:
     return f"{date_part}/{filename}"
 
 
+def _local_base_dir() -> Path:
+    base = Path(str(settings.image_local_dir or "")).expanduser()
+    return base.resolve()
+
+
+def _local_path_for_object_key(object_key: str) -> Path:
+    raw = str(object_key or "").lstrip("/").replace("\\", "/")
+    parts = [p for p in raw.split("/") if p]
+    if not parts:
+        raise ValueError("empty object key")
+    if any(p in {".", ".."} for p in parts):
+        raise ValueError("invalid object key path")
+
+    base_dir = _local_base_dir()
+    target = base_dir.joinpath(*parts).resolve()
+    if not target.is_relative_to(base_dir):
+        raise ValueError("invalid object key path")
+    return target
+
+
 def _create_oss_bucket():
-    if not _is_configured():
+    if not _oss_is_configured():
         raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法启用 OSS 图片存储")
 
     try:
@@ -115,7 +148,7 @@ def _create_oss_bucket():
 
 
 def _create_s3_client():
-    if not _is_configured():
+    if not _oss_is_configured():
         raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法启用 S3/R2 存储")
     try:
         import boto3  # type: ignore
@@ -140,7 +173,7 @@ async def store_image_bytes(
     data: bytes, *, content_type: str | None = None, kind: str | None = None
 ) -> StoredImage:
     """
-    将图片写入 OSS（私有桶），返回对象 key。
+    将图片写入存储后端（本地磁盘或 OSS/S3），返回对象 key。
     """
     if not data:
         raise ValueError("empty image bytes")
@@ -149,7 +182,12 @@ async def store_image_bytes(
     ext = _guess_ext(detected_type)
     object_key = _build_object_key(ext=ext, kind=kind)
 
-    kind_name = _backend_kind()
+    mode = get_effective_image_storage_mode()
+
+    def _put_local() -> None:
+        path = _local_path_for_object_key(object_key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
 
     def _put_oss() -> None:
         bucket = _create_oss_bucket()
@@ -164,10 +202,14 @@ async def store_image_bytes(
             ContentType=detected_type,
         )
 
-    if kind_name == "aliyun_oss":
-        await anyio.to_thread.run_sync(_put_oss)
+    if mode == "local":
+        await anyio.to_thread.run_sync(_put_local)
     else:
-        await anyio.to_thread.run_sync(_put_s3)
+        kind_name = _oss_backend_kind()
+        if kind_name == "aliyun_oss":
+            await anyio.to_thread.run_sync(_put_oss)
+        else:
+            await anyio.to_thread.run_sync(_put_s3)
 
     return StoredImage(object_key=object_key, content_type=detected_type, size_bytes=len(data))
 
@@ -225,10 +267,24 @@ def verify_signed_image_request(object_key: str, *, expires: int, sig: str) -> N
 
 async def load_image_bytes(object_key: str) -> tuple[bytes, str]:
     """
-    从 OSS 拉取图片对象，返回 (bytes, content_type)。
+    从存储后端读取图片对象，返回 (bytes, content_type)。
     """
-    if not _is_configured():
-        raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法读取 OSS 图片")
+    if get_effective_image_storage_mode() == "local":
+        def _get_local() -> tuple[bytes, str]:
+            path = _local_path_for_object_key(object_key)
+            body = path.read_bytes()
+            guessed = mimetypes.guess_type(path.name)[0] or ""
+            content_type = str(guessed or _detect_content_type_from_bytes(body))
+            return body, content_type
+
+        try:
+            return await anyio.to_thread.run_sync(_get_local)
+        except Exception:
+            logger.exception("Failed to load image from local storage (key=%s)", object_key)
+            raise
+
+    if not _oss_is_configured():
+        raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法读取 OSS/S3 图片")
 
     def _get_oss() -> tuple[bytes, str]:
         bucket = _create_oss_bucket()
@@ -253,7 +309,7 @@ async def load_image_bytes(object_key: str) -> tuple[bytes, str]:
         return body_bytes, content_type
 
     try:
-        if _backend_kind() == "aliyun_oss":
+        if _oss_backend_kind() == "aliyun_oss":
             return await anyio.to_thread.run_sync(_get_oss)
         return await anyio.to_thread.run_sync(_get_s3)
     except Exception:
@@ -265,8 +321,10 @@ async def presign_image_get_url(object_key: str, *, expires_seconds: int) -> str
     """
     生成 OSS 预签名 GET URL，用于直下（不经由网关转发图片内容）。
     """
-    if not _is_configured():
-        raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法生成 OSS 预签名 URL")
+    if get_effective_image_storage_mode() == "local":
+        raise ImageStorageNotConfigured("IMAGE_STORAGE_MODE=local 时不支持生成预签名 URL")
+    if not _oss_is_configured():
+        raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法生成 OSS/S3 预签名 URL")
     ttl = int(expires_seconds)
     if ttl <= 0:
         raise ValueError("expires_seconds must be positive")
@@ -285,7 +343,7 @@ async def presign_image_get_url(object_key: str, *, expires_seconds: int) -> str
         )
 
     try:
-        if _backend_kind() == "aliyun_oss":
+        if _oss_backend_kind() == "aliyun_oss":
             return await anyio.to_thread.run_sync(_sign_oss)
         return await anyio.to_thread.run_sync(_sign_s3)
     except Exception:
@@ -307,7 +365,9 @@ async def presign_object_put_url(
     """
     生成直传（PUT）预签名 URL，便于客户端直接上传（用于未来视频/音频等大文件场景）。
     """
-    if not _is_configured():
+    if get_effective_image_storage_mode() == "local":
+        raise ImageStorageNotConfigured("IMAGE_STORAGE_MODE=local 时不支持生成上传预签名 URL")
+    if not _oss_is_configured():
         raise ImageStorageNotConfigured("IMAGE_OSS_* 未配置，无法生成上传预签名 URL")
     ttl = int(expires_seconds)
     if ttl <= 0:
@@ -338,7 +398,7 @@ async def presign_object_put_url(
         )
 
     try:
-        if _backend_kind() == "aliyun_oss":
+        if _oss_backend_kind() == "aliyun_oss":
             url = await anyio.to_thread.run_sync(_sign_oss)
         else:
             url = await anyio.to_thread.run_sync(_sign_s3)
@@ -362,6 +422,7 @@ __all__ = [
     "detect_image_content_type",
     "detect_image_content_type_b64",
     "build_signed_image_url",
+    "get_effective_image_storage_mode",
     "load_image_bytes",
     "presign_image_get_url",
     "presign_object_put_url",

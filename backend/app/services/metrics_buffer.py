@@ -5,6 +5,7 @@ import math
 import random
 import threading
 from dataclasses import dataclass, field
+from enum import Enum
 from uuid import UUID
 
 from sqlalchemy import Float, cast
@@ -15,6 +16,33 @@ from app.logging_config import logger
 from app.models import ProviderRoutingMetricsHistory, UserRoutingMetricsHistory
 
 BucketSeconds = int
+_TRANSPORT_MAX_LEN = 16
+
+
+def _normalize_transport(transport: object) -> str:
+    """
+    Normalize transport values for DB persistence.
+
+    - Enum(str) like TransportType.HTTP must persist as its value ("http"),
+      not its repr ("TransportType.HTTP"), to avoid varchar(16) truncation.
+    - As a safety net, any remaining value is truncated to 16 chars to match
+      the DB schema.
+    """
+
+    if isinstance(transport, Enum):
+        value = getattr(transport, "value", None)
+        transport_str = value if isinstance(value, str) else str(value)
+    else:
+        transport_str = str(transport)
+
+    if transport_str.startswith("TransportType."):
+        transport_str = transport_str.split(".", 1)[1].lower()
+
+    if len(transport_str) > _TRANSPORT_MAX_LEN:
+        logger.warning("Metrics transport value too long (%d): %s", len(transport_str), transport_str)
+        transport_str = transport_str[:_TRANSPORT_MAX_LEN]
+
+    return transport_str
 
 
 @dataclass(frozen=True)
@@ -157,10 +185,11 @@ class BufferedMetricsRecorder:
             if random.random() > self.success_sample_rate:
                 return
 
+        normalized_transport = _normalize_transport(transport)
         key = MetricsKey(
             provider_id=provider_id,
             logical_model=logical_model,
-            transport=transport,
+            transport=normalized_transport,
             is_stream=is_stream,
             user_id=user_id,
             api_key_id=api_key_id,
@@ -239,11 +268,12 @@ class BufferedMetricsRecorder:
         error_rate = (error_requests / total_requests) if total_requests else 0.0
         success_qps = success_requests / key.bucket_seconds if key.bucket_seconds else 0.0
         status = self._status_from_error_rate(error_rate)
+        normalized_transport = _normalize_transport(key.transport)
 
         base_insert = insert(ProviderRoutingMetricsHistory).values(
             provider_id=key.provider_id,
             logical_model=key.logical_model,
-            transport=key.transport,
+            transport=normalized_transport,
             is_stream=key.is_stream,
             user_id=key.user_id,
             api_key_id=key.api_key_id,
@@ -388,11 +418,12 @@ class BufferedUserMetricsRecorder:
             if random.random() > self.success_sample_rate:
                 return
 
+        normalized_transport = _normalize_transport(transport)
         key = UserMetricsKey(
             user_id=user_id,
             provider_id=provider_id,
             logical_model=logical_model,
-            transport=transport,
+            transport=normalized_transport,
             is_stream=is_stream,
             window_start=window_start,
             bucket_seconds=bucket_seconds,
@@ -457,12 +488,13 @@ class BufferedUserMetricsRecorder:
         latency_p95 = stats.latency_p95()
         latency_p99 = stats.latency_p99()
         error_rate = (error_requests / total_requests) if total_requests else 0.0
+        normalized_transport = _normalize_transport(key.transport)
 
         base_insert = insert(UserRoutingMetricsHistory).values(
             user_id=key.user_id,
             provider_id=key.provider_id,
             logical_model=key.logical_model,
-            transport=key.transport,
+            transport=normalized_transport,
             is_stream=key.is_stream,
             window_start=key.window_start,
             window_duration=key.bucket_seconds,

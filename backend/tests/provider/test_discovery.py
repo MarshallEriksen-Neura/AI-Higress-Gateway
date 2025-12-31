@@ -73,6 +73,36 @@ async def test_fetch_models_from_provider_normalises_payload():
 
 
 @pytest.mark.asyncio
+async def test_fetch_models_from_provider_infers_tts_capability():
+    provider = _make_provider()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/v1/models")
+        data = {
+            "object": "list",
+            "data": [
+                # upstream /models 通常不返回 capabilities；这里验证网关的启发式推断
+                {"id": "tts-1", "context_length": 4096},
+                {"id": "gpt-4o-mini-tts", "context_length": 8192},
+            ],
+        }
+        return httpx.Response(200, json=data)
+
+    transport = httpx.MockTransport(handler)
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        models: list[Model] = await fetch_models_from_provider(client, provider)
+
+    assert [m.model_id for m in models] == ["tts-1", "gpt-4o-mini-tts"]
+
+    for model in models:
+        assert model.capabilities == [model.capabilities[0]]
+        assert model.capabilities[0].value == "audio"
+        # TTS-only 模型不应被标记为 chat，否则会污染聊天模型下拉框并导致路由失败。
+        assert "chat" not in {c.value for c in model.capabilities}
+
+
+@pytest.mark.asyncio
 async def test_fetch_models_from_provider_uses_static_models():
     provider = _make_provider(
         static_models=[

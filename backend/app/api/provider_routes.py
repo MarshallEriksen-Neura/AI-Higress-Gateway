@@ -223,7 +223,7 @@ async def get_provider(
 
 def _sync_provider_models_to_db(
     db: Session, provider_id_slug: str, items: list[dict[str, Any]]
-) -> None:
+) -> bool:
     """
     将 Redis 缓存中的模型列表尽量同步到 provider_models 表中。
 
@@ -231,6 +231,8 @@ def _sync_provider_models_to_db(
     - 只做「增量创建 / 更新」，不删除旧记录，以免覆盖人工配置；
     - 若 Provider 不存在或出现异常，仅记录日志，不影响主流程。
     """
+    logical_models_changed = False
+    db_changed = False
     try:
         provider = (
             db.execute(
@@ -244,7 +246,7 @@ def _sync_provider_models_to_db(
                 "sync_provider_models_to_db: provider %s not found, skip sync",
                 provider_id_slug,
             )
-            return
+            return False
 
         existing_rows = (
             db.execute(
@@ -290,6 +292,8 @@ def _sync_provider_models_to_db(
                 )
                 db.add(row)
                 existing_by_model_id[model_id] = row
+                db_changed = True
+                logical_models_changed = True
             else:
                 gateway_meta: dict[str, Any] | None = None
                 existing_meta = getattr(row, "metadata_json", None)
@@ -298,6 +302,25 @@ def _sync_provider_models_to_db(
                     override = gateway_meta.get("capabilities_override")
                     if isinstance(override, list):
                         capabilities = override
+
+                if row.display_name != display_name:
+                    logical_models_changed = True
+                if list(getattr(row, "capabilities") or []) != list(capabilities or []):
+                    logical_models_changed = True
+                if getattr(row, "meta_hash", None) != meta_hash:
+                    logical_models_changed = True
+
+                if row.family != family:
+                    db_changed = True
+                if row.display_name != display_name:
+                    db_changed = True
+                if row.context_length != context_length_int:
+                    db_changed = True
+                if list(getattr(row, "capabilities") or []) != list(capabilities or []):
+                    db_changed = True
+                if getattr(row, "meta_hash", None) != meta_hash:
+                    db_changed = True
+
                 row.family = family
                 row.display_name = display_name
                 row.context_length = context_length_int
@@ -305,24 +328,37 @@ def _sync_provider_models_to_db(
                 # 若已有人为配置的 pricing，则不覆盖；否则可从缓存补充默认值。
                 if row.pricing is None and isinstance(pricing, dict):
                     row.pricing = pricing
+                    db_changed = True
                 if gateway_meta:
                     if isinstance(metadata, dict):
                         merged = dict(metadata)
                         merged["_gateway"] = gateway_meta
+                        if row.metadata_json != merged:
+                            db_changed = True
                         row.metadata_json = merged
                     else:
-                        row.metadata_json = {"_gateway": gateway_meta, "upstream": metadata}
+                        merged = {"_gateway": gateway_meta, "upstream": metadata}
+                        if row.metadata_json != merged:
+                            db_changed = True
+                        row.metadata_json = merged
                 else:
+                    if row.metadata_json != metadata:
+                        db_changed = True
                     row.metadata_json = metadata
                 row.meta_hash = meta_hash
 
-        db.commit()
+        if db_changed:
+            db.commit()
+        else:
+            db.rollback()
+        return logical_models_changed
     except Exception:
         # 防御性日志，不影响 /providers/{id}/models 接口的正常返回。
         logger.exception(
             "Failed to sync provider_models for provider=%s from /providers/{id}/models response",
             provider_id_slug,
         )
+        return False
 
 
 @router.get("/providers/{provider_id}/models", response_model=ProviderModelsResponse)
@@ -388,7 +424,18 @@ async def get_provider_models(
 
     # 后台异步写库：将发现到的模型信息同步到 provider_models 表中。
     # 若写库失败，仅记录日志，不影响主流程。
-    _sync_provider_models_to_db(db, provider_id, items)
+    logical_models_changed = _sync_provider_models_to_db(db, provider_id, items)
+    if logical_models_changed and hasattr(redis, "delete"):
+        try:
+            from app.services.logical_model_sync import sync_logical_models
+
+            await sync_logical_models(redis, session=db, provider_ids=[provider_id])
+        except Exception:
+            logger.warning(
+                "Failed to sync logical models after syncing provider_models for provider=%s",
+                provider_id,
+                exc_info=True,
+            )
 
     # 覆盖定价：使用数据库中 provider_models.pricing 的值，确保管理端修改后列表能立即反映。
     try:

@@ -71,6 +71,28 @@ def _infer_capabilities(raw_model: dict[str, Any]) -> list[ModelCapability]:
     caps: list[ModelCapability] = []
     raw_caps = raw_model.get("capabilities") or raw_model.get("capability") or []
 
+    def _looks_like_tts_model(model_id: str) -> bool:
+        """
+        Heuristic: detect TTS-only models from model id.
+
+        We intentionally keep this narrow (mostly "*tts*") to avoid marking
+        chat/audio-preview models as TTS, because the gateway's TTS endpoint
+        expects /audio/speech-compatible upstream models.
+        """
+        if not model_id:
+            return False
+        if model_id == "tts":
+            return True
+        if model_id.startswith("tts-"):
+            return True
+        if model_id.endswith("-tts"):
+            return True
+        if "-tts-" in model_id:
+            return True
+        if model_id.endswith("_tts") or "_tts_" in model_id:
+            return True
+        return False
+
     if isinstance(raw_caps, list):
         for c in raw_caps:
             if not isinstance(c, str):
@@ -86,16 +108,22 @@ def _infer_capabilities(raw_model: dict[str, Any]) -> list[ModelCapability]:
             if member.value == normalized:
                 caps.append(member)
 
-    if not caps:
-        caps = [ModelCapability.CHAT]
-
-    # Heuristic: infer image generation capability from model id/name when
-    # upstream does not provide explicit capabilities (common for /models lists).
     try:
         model_id = raw_model.get("id") or raw_model.get("model_id") or ""
     except Exception:
         model_id = ""
     model_id_str = str(model_id or "").lower()
+
+    if not caps:
+        # Heuristic: infer TTS capability from model id when upstream does not
+        # provide explicit capabilities (common for /models lists).
+        if model_id_str and _looks_like_tts_model(model_id_str):
+            caps = [ModelCapability.AUDIO]
+        else:
+            caps = [ModelCapability.CHAT]
+
+    # Heuristic: infer image generation capability from model id/name when
+    # upstream does not provide explicit capabilities (common for /models lists).
     if model_id_str:
         is_openai_image = model_id_str.startswith("gpt-image") or model_id_str.startswith("dall-e")
         is_google_image = (

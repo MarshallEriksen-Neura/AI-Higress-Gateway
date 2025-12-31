@@ -11,7 +11,7 @@ from sqlalchemy import Select, or_, select
 from sqlalchemy.orm import Session
 
 from app.deps import get_db, get_redis
-from app.errors import bad_request, forbidden, not_found
+from app.errors import bad_request, forbidden, not_found, service_unavailable
 from app.jwt_auth import AuthenticatedUser, require_jwt_token
 from app.models import User
 from app.schemas import (
@@ -22,7 +22,8 @@ from app.schemas import (
     UserUpdateRequest,
 )
 from app.services.api_key_cache import invalidate_cached_api_key
-from app.services.avatar_service import build_avatar_url, get_avatar_file_path
+from app.services.avatar_service import build_avatar_url
+from app.services.avatar_storage_service import AvatarStorageNotConfigured, store_avatar_bytes
 from app.services.credit_service import get_or_create_account_for_user
 from app.services.role_service import RoleCodeAlreadyExistsError, RoleService
 from app.services.token_redis_service import TokenRedisService
@@ -178,11 +179,14 @@ async def upload_my_avatar_endpoint(
     上传并更新当前用户的头像。
 
     实现约定：
-    - 当前阶段文件实际保存到本地目录 AVATAR_LOCAL_DIR（默认 backend/media/avatars）；
+    - 存储模式由 AVATAR_STORAGE_MODE 控制：
+      - auto（默认）：非 production 写本地；production 优先写 OSS/S3（未配置则回退本地）；
+      - local：强制写本地（AVATAR_LOCAL_DIR）；
+      - oss：强制写 OSS/S3（AVATAR_OSS_* + AVATAR_OSS_BASE_URL）。
     - 数据库 users.avatar 字段仅保存相对 key，例如 "<user_id>/<uuid>.png"；
     - 对外返回的 UserResponse.avatar 始终是可直接访问的 URL：
-      - 若配置了 AVATAR_OSS_BASE_URL，则为 "<AVATAR_OSS_BASE_URL>/<key>"；
-      - 否则为 "<AVATAR_LOCAL_BASE_URL>/<key>"（默认 /media/avatars/<key>）。
+      - OSS/S3 模式："<AVATAR_OSS_BASE_URL>/<key>"；
+      - 本地模式："<AVATAR_LOCAL_BASE_URL>/<key>"（默认 /media/avatars/<key>）。
     """
 
     # 只允许常见图片格式，避免用户误上传其他文件
@@ -207,29 +211,34 @@ async def upload_my_avatar_endpoint(
 
     # 为当前用户生成新的头像 key，形如 "<user_id>/<random>.png"
     avatar_key = f"{user.id}/{uuid4().hex}.{ext}"
-    avatar_path = get_avatar_file_path(avatar_key)
-    avatar_path.parent.mkdir(parents=True, exist_ok=True)
 
     # 简单限制单个头像文件大小：2MB
     max_bytes = 2 * 1024 * 1024
     written = 0
+    chunks: list[bytes] = []
 
     try:
-        with avatar_path.open("wb") as out:
-            while True:
-                chunk = await file.read(8192)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_bytes:
-                    # 删除已写入的临时文件，避免残留无效大文件
-                    out.close()
-                    avatar_path.unlink(missing_ok=True)
-                    raise bad_request("头像文件过大，最大支持 2MB")
-                out.write(chunk)
+        while True:
+            chunk = await file.read(8192)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_bytes:
+                raise bad_request("头像文件过大，最大支持 2MB")
+            chunks.append(chunk)
     finally:
         # 无论如何都关闭上传文件，避免后续误用
         await file.close()
+
+    data = b"".join(chunks)
+    try:
+        await store_avatar_bytes(
+            data,
+            avatar_key=avatar_key,
+            content_type=str(file.content_type or "application/octet-stream"),
+        )
+    except AvatarStorageNotConfigured as exc:
+        raise service_unavailable(str(exc)) from exc
 
     # 更新用户记录，仅保存 key，URL 在响应构造时再拼接
     user.avatar = avatar_key

@@ -39,7 +39,7 @@ const nextConfig: NextConfig = {
   
   allowedDevOrigins: process.env.ALLOWED_DEV_ORIGINS 
     ? process.env.ALLOWED_DEV_ORIGINS.split(',') 
-    : ["192.168.31.145"],
+    : ["192.168.31.132"],
   
   // 图片优化配置
   images: {

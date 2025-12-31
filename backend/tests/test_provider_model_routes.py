@@ -249,3 +249,64 @@ def test_provider_models_response_overlays_capabilities_override(client, db_sess
     assert models and models[0]["model_id"] == model_id
     # 覆盖生效：即使上游缓存里只有 chat，响应也应反映已配置的 image_generation
     assert "image_generation" in (models[0].get("capabilities") or [])
+
+
+def test_get_provider_models_triggers_logical_model_sync_when_models_changed(
+    client, db_session, monkeypatch
+):
+    admin = _create_admin(db_session)
+    provider = _create_provider(db_session, "provider-tts-sync")
+
+    db_session.add(
+        ProviderAPIKey(
+            provider_uuid=provider.id,
+            encrypted_key=encrypt_secret("upstream-key"),
+            weight=1.0,
+            status="active",
+        )
+    )
+    db_session.commit()
+
+    async def _fake_models_cached(*args, **kwargs):
+        return [
+            {
+                "model_id": "tts-1",
+                "provider_id": provider.provider_id,
+                "family": "tts",
+                "display_name": "TTS 1",
+                "context_length": 4096,
+                "capabilities": ["audio"],
+                "pricing": None,
+                "metadata": {"owned_by": "system"},
+            }
+        ]
+
+    calls: list[dict[str, object]] = []
+
+    async def _fake_sync_logical_models(redis, *, session=None, provider_ids=None):
+        calls.append({"provider_ids": list(provider_ids or [])})
+        return []
+
+    monkeypatch.setattr(
+        "app.api.provider_routes.ensure_provider_models_cached", _fake_models_cached
+    )
+    monkeypatch.setattr(
+        "app.services.logical_model_sync.sync_logical_models", _fake_sync_logical_models
+    )
+
+    headers = jwt_auth_headers(str(admin.id))
+
+    resp_first = client.get(
+        f"/providers/{provider.provider_id}/models",
+        headers=headers,
+    )
+    assert resp_first.status_code == 200
+    assert calls == [{"provider_ids": [provider.provider_id]}]
+
+    # 第二次请求不应重复触发同步（provider_models 无变化）
+    resp_second = client.get(
+        f"/providers/{provider.provider_id}/models",
+        headers=headers,
+    )
+    assert resp_second.status_code == 200
+    assert calls == [{"provider_ids": [provider.provider_id]}]

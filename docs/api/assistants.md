@@ -264,7 +264,7 @@ Response:
 - 认证：JWT（同 Messages）
 - 结果会持久化到 `chat_messages`，可用于历史记录/多端同步
 - 推荐使用 SSE（等待体验更好）
-- 返回内容默认走 `response_format="url"`（OSS + `/media/images` 短链），避免把大体积 base64 写入历史
+- 返回内容默认走 `response_format="url"`（本地磁盘或 OSS/S3 + `/media/images` 短链），避免把大体积 base64 写入历史
 
 Request:
 ```json
