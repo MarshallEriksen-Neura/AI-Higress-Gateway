@@ -68,8 +68,8 @@ export function VideoGenerationClient() {
 
   // Auto-select first video model if none selected
   useEffect(() => {
-    if (!config.model && videoModels.length > 0) {
-      setModel(videoModels[0].id);
+    if (!config.model && videoModels.length > 0 && videoModels[0]) {
+      setModel(videoModels[0].logical_id);
     }
   }, [config.model, videoModels, setModel]);
 
@@ -273,7 +273,7 @@ export function VideoGenerationClient() {
           {/* Model indicator */}
           {config.model && (
             <div className="mt-2 text-xs text-muted-foreground/60 text-center">
-              Using {videoModels.find((m) => m.id === config.model)?.name || config.model}
+              Using {videoModels.find((m) => m.logical_id === config.model)?.display_name || config.model}
             </div>
           )}
         </div>

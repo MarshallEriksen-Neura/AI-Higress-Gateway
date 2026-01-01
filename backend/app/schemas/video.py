@@ -52,6 +52,14 @@ class VideoGenerationRequest(BaseModel):
         default=None,
         description="Whether to generate accompanying audio (if supported by upstream).",
     )
+    image_url: Optional[str] = Field(
+        default=None,
+        description="URL of the input image for image-to-video generation.",
+    )
+    audio_url: Optional[str] = Field(
+        default=None,
+        description="URL of the input audio for audio-driven generation.",
+    )
     enhance_prompt: Optional[bool] = Field(
         default=None,
         description="Whether to let upstream enhance/expand prompt (if supported by upstream).",

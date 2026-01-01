@@ -18,7 +18,6 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
-import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
 import { RotateCcw, Sparkles, Volume2 } from "lucide-react";
 import {
@@ -84,8 +83,8 @@ export function VideoConfigSheet({
               </SelectTrigger>
               <SelectContent>
                 {models.map((model) => (
-                  <SelectItem key={model.id} value={model.id}>
-                    {model.name}
+                  <SelectItem key={model.logical_id} value={model.logical_id}>
+                    {model.display_name}
                   </SelectItem>
                 ))}
               </SelectContent>
