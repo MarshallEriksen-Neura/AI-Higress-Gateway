@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -19,57 +18,14 @@ from app.auth import AuthenticatedAPIKey
 from app.logging_config import logger
 from app.models import Conversation, Message
 from app.settings import settings
-
-
-def _safe_text_from_message_content(content: Any) -> str:
-    if not isinstance(content, dict):
-        return ""
-    if str(content.get("type") or "") == "text":
-        text = content.get("text")
-        if isinstance(text, str):
-            return text
-    text = content.get("text")
-    if isinstance(text, str):
-        return text
-    return ""
-
-
-def _extract_first_choice_text(payload: dict[str, Any] | None) -> str | None:
-    if not isinstance(payload, dict):
-        return None
-    choices = payload.get("choices")
-    if not isinstance(choices, list) or not choices:
-        return None
-    first = choices[0]
-    if not isinstance(first, dict):
-        return None
-    message = first.get("message")
-    if isinstance(message, dict):
-        content = message.get("content")
-        if isinstance(content, str) and content.strip():
-            return content
-    content = first.get("text")
-    if isinstance(content, str) and content.strip():
-        return content
-    return None
-
-
-def _parse_json_response_body(resp: JSONResponse) -> dict[str, Any] | None:
-    try:
-        raw = resp.body.decode("utf-8", errors="ignore")
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            return parsed
-    except Exception:
-        return None
-    return None
+from app.utils.response_utils import extract_first_choice_text, parse_json_response_body, safe_text_from_message_content
 
 
 def _build_delta_transcript(messages: list[Message]) -> str:
     lines: list[str] = []
     for msg in messages:
         role = str(getattr(msg, "role", "") or "").strip() or "user"
-        text = _safe_text_from_message_content(getattr(msg, "content", None))
+        text = safe_text_from_message_content(getattr(msg, "content", None))
         text = (text or "").strip()
         if not text:
             continue
@@ -178,8 +134,8 @@ async def maybe_update_conversation_summary(
         billing_reason="conversation_summary",
     )
 
-    response_payload = _parse_json_response_body(resp)
-    summary = (_extract_first_choice_text(response_payload) or "").strip()
+    response_payload = parse_json_response_body(resp)
+    summary = (extract_first_choice_text(response_payload) or "").strip()
     if not summary:
         return False
 

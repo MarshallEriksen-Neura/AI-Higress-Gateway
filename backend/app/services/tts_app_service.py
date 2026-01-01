@@ -12,7 +12,6 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -30,6 +29,11 @@ from app.provider.key_pool import (
     acquire_provider_key,
     record_key_failure,
     record_key_success,
+)
+from app.provider.utils import (
+    derive_openai_audio_speech_path,
+    is_google_native_provider_base_url,
+    is_openai_official_provider_base_url,
 )
 from app.schemas.audio import SpeechRequest
 from app.schemas.model import ModelCapability
@@ -57,10 +61,6 @@ _MAX_CACHE_BYTES = 4 * 1024 * 1024
 
 _CACHEABLE_FORMATS: set[str] = {"mp3", "aac", "opus", "wav", "ogg", "flac", "aiff", "pcm"}
 
-_OPENAI_AUDIO_PATH_FALLBACK = "/v1/audio/speech"
-
-_GEMINI_BASE_URL_HOST = "generativelanguage.googleapis.com"
-
 _GEMINI_VOICE_MAPPING: dict[str, str] = {
     "alloy": "Charon",
     "echo": "Enceladus",
@@ -69,56 +69,6 @@ _GEMINI_VOICE_MAPPING: dict[str, str] = {
     "nova": "Puck",
     "shimmer": "Zephyr",
 }
-
-_OPENAI_OFFICIAL_HOSTS: set[str] = {"api.openai.com"}
-
-
-def _is_google_native_provider_base_url(base_url: str) -> bool:
-    raw = str(base_url or "").strip()
-    if not raw:
-        return False
-    try:
-        parsed = urlsplit(raw)
-    except Exception:
-        return False
-    return str(parsed.netloc or "").lower() == _GEMINI_BASE_URL_HOST
-
-
-def _is_openai_official_provider_base_url(base_url: str) -> bool:
-    """
-    OpenAI 官方 API 对未知字段通常会严格校验；为避免“可选扩展字段”导致请求失败，
-    对官方域名默认不透传扩展字段。
-    """
-    raw = str(base_url or "").strip()
-    if not raw:
-        return False
-    try:
-        parsed = urlsplit(raw)
-    except Exception:
-        return False
-    host = str(parsed.netloc or "").lower()
-    # netloc may include port
-    host = host.split(":", 1)[0]
-    return host in _OPENAI_OFFICIAL_HOSTS
-
-
-def _derive_openai_audio_speech_path(provider_cfg) -> str:
-    """
-    尽量从 provider 的已知 path 推导 /audio/speech，兼容 base_url 是否自带 /v1 两种配置。
-    """
-    raw = str(getattr(provider_cfg, "chat_completions_path", None) or "").strip()
-    lowered = raw.lower()
-    if raw and "chat/completions" in lowered:
-        prefix = raw[: lowered.rfind("chat/completions")]
-        return f"{prefix}audio/speech".replace("//", "/")
-
-    raw = str(getattr(provider_cfg, "images_generations_path", None) or "").strip()
-    lowered = raw.lower()
-    if raw and "images/generations" in lowered:
-        prefix = raw[: lowered.rfind("images/generations")]
-        return f"{prefix}audio/speech".replace("//", "/")
-
-    return _OPENAI_AUDIO_PATH_FALLBACK
 
 
 def _content_type_for_format(response_format: str) -> str:
@@ -582,7 +532,7 @@ class TTSAppService:
 
                 start = time.perf_counter()
                 try:
-                    if _is_google_native_provider_base_url(str(cfg.base_url)):
+                    if is_google_native_provider_base_url(str(cfg.base_url)):
                         async for chunk in self._call_gemini_tts(
                             provider_id=provider_id,
                             provider_cfg=cfg,
@@ -757,7 +707,7 @@ class TTSAppService:
         request: SpeechRequest,
         processed_text: str,
     ) -> AsyncIterator[bytes]:
-        path = _derive_openai_audio_speech_path(provider_cfg)
+        path = derive_openai_audio_speech_path(provider_cfg)
         base_url = str(getattr(provider_cfg, "base_url", "") or "").rstrip("/")
         if not base_url:
             raise HTTPException(
@@ -765,7 +715,7 @@ class TTSAppService:
                 detail={"message": f"Provider '{provider_id}' base_url is empty"},
             )
         url = f"{base_url}/{path.lstrip('/')}"
-        allow_extensions = not _is_openai_official_provider_base_url(base_url)
+        allow_extensions = not is_openai_official_provider_base_url(base_url)
 
         headers: dict[str, str] = {
             "Content-Type": "application/json",

@@ -4,7 +4,6 @@ import base64
 import logging
 import time
 from typing import Any
-from urllib.parse import urlsplit
 
 import anyio
 import httpx
@@ -29,72 +28,25 @@ from app.provider.key_pool import (
     record_key_failure,
     record_key_success,
 )
+from app.provider.utils import (
+    derive_openai_videos_path,
+    google_v1beta_base,
+    is_google_native_provider_base_url,
+)
 from app.schemas import ModelCapability
 from app.schemas.video import VideoGenerationRequest, VideoGenerationResponse, VideoObject
 from app.services.chat_routing_service import _apply_upstream_path_override, _is_retryable_upstream_status
 from app.services.credit_service import InsufficientCreditsError, ensure_account_usable
 from app.services.video_storage_service import build_signed_video_url, store_video_bytes
 from app.services.user_provider_service import get_accessible_provider_ids
+from app.utils.payload_utils import RetryableCandidateError, deep_merge_dict, get_vendor_extra
 
 
 video_debug_logger = logging.getLogger("apiproxy.video_debug")
 
 
-class _RetryableCandidateError(Exception):
-    pass
-
-
 _OPENAI_SORA_ALLOWED_SECONDS: set[int] = {4, 8, 12}
 _OPENAI_SORA_ALLOWED_SIZES: set[str] = {"720x1280", "1280x720", "1024x1792", "1792x1024"}
-
-
-def _is_google_native_provider_base_url(base_url: str) -> bool:
-    raw = str(base_url or "").strip()
-    if not raw:
-        return False
-    try:
-        parsed = urlsplit(raw)
-    except Exception:
-        return False
-    return str(parsed.netloc or "").lower() == "generativelanguage.googleapis.com"
-
-
-def _google_v1beta_base(base_url: str) -> str:
-    base = str(base_url or "").rstrip("/")
-    if base.endswith("/v1beta"):
-        return base
-    return f"{base}/v1beta"
-
-
-def _derive_openai_videos_path(provider_chat_path: str | None) -> str:
-    """
-    从 chat_completions_path 推导对应的 /videos 路径，以兼容 base_url 是否自带 /v1。
-    """
-    raw = str(provider_chat_path or "/v1/chat/completions").strip() or "/v1/chat/completions"
-    lowered = raw.lower()
-    if "chat/completions" in lowered:
-        prefix = raw[: lowered.rfind("chat/completions")]
-        return f"{prefix}videos".replace("//", "/")
-    return "/v1/videos"
-
-
-def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    for key, value in override.items():
-        if key in base and isinstance(base.get(key), dict) and isinstance(value, dict):
-            _deep_merge_dict(base[key], value)  # type: ignore[index]
-            continue
-        base[key] = value
-    return base
-
-
-def _get_vendor_extra(request: VideoGenerationRequest, vendor: str) -> dict[str, Any] | None:
-    extra = getattr(request, "extra_body", None)
-    if not isinstance(extra, dict):
-        return None
-    payload = extra.get(vendor)
-    if not isinstance(payload, dict):
-        return None
-    return payload
 
 
 def _parse_size(size: str | None) -> tuple[int, int] | None:
@@ -228,9 +180,9 @@ def _build_google_veo_predict_payload(*, request: VideoGenerationRequest) -> dic
     # 各上游差异较大，默认不强行映射；需要时通过 extra_body.google.parameters 显式配置。
 
     upstream_payload: dict[str, Any] = {"instances": [{"prompt": request.prompt}], "parameters": parameters}
-    vendor_extra = _get_vendor_extra(request, "google")
+    vendor_extra = get_vendor_extra(request, "google")
     if vendor_extra:
-        _deep_merge_dict(upstream_payload, vendor_extra)
+        deep_merge_dict(upstream_payload, vendor_extra)
     return upstream_payload
 
 
@@ -408,7 +360,7 @@ class VideoAppService:
 
             try:
                 async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as http_client:
-                    if _is_google_native_provider_base_url(base_url):
+                    if is_google_native_provider_base_url(base_url):
                         resp = await self._call_google_veo_predict_long_running(
                             http_client=http_client,
                             request=request,
@@ -436,7 +388,7 @@ class VideoAppService:
                 last_error = str(exc)
                 await self.routing_state.increment_provider_failure(provider_id)
                 continue
-            except _RetryableCandidateError:
+            except RetryableCandidateError:
                 continue
 
             record_key_success(key_selection, redis=self.redis)
@@ -466,14 +418,14 @@ class VideoAppService:
         endpoint: str,
         key_selection,
     ) -> VideoGenerationResponse:
-        videos_path = _derive_openai_videos_path(getattr(cfg, "chat_completions_path", None))
+        videos_path = derive_openai_videos_path(getattr(cfg, "chat_completions_path", None))
         url = _apply_upstream_path_override(endpoint, videos_path)
 
         headers = build_upstream_headers(key_selection.key, cfg, call_style="openai", is_stream=False)
         headers.pop("Content-Type", None)
         headers["Accept"] = "application/json"
 
-        vendor_extra = _get_vendor_extra(request, "openai")
+        vendor_extra = get_vendor_extra(request, "openai")
         multipart_fields = _build_openai_videos_multipart_fields(request=request, model_id=model_id)
         if vendor_extra:
             # Best-effort: allow extra openai fields as simple scalar form fields.
@@ -503,7 +455,7 @@ class VideoAppService:
             record_key_failure(key_selection, retryable=retryable, status_code=resp.status_code, redis=self.redis)
             if retryable and resp.status_code in (500, 502, 503, 504, 429, 404, 405):
                 await self.routing_state.increment_provider_failure(provider_id)
-                raise _RetryableCandidateError()
+                raise RetryableCandidateError()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Upstream error {resp.status_code}: {resp.text}",
@@ -535,7 +487,7 @@ class VideoAppService:
                 record_key_failure(key_selection, retryable=retryable, status_code=st_resp.status_code, redis=self.redis)
                 if retryable and st_resp.status_code in (500, 502, 503, 504, 429):
                     await self.routing_state.increment_provider_failure(provider_id)
-                    raise _RetryableCandidateError()
+                    raise RetryableCandidateError()
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail=f"Upstream status error {st_resp.status_code}: {st_resp.text}",
@@ -602,7 +554,7 @@ class VideoAppService:
         if not model_path.startswith("models/"):
             model_path = f"models/{model_path}"
 
-        base = _google_v1beta_base(base_url)
+        base = google_v1beta_base(base_url)
         url = f"{base}/{model_path}:predictLongRunning"
 
         headers: dict[str, str] = {"Accept": "application/json", "Content-Type": "application/json"}
@@ -672,7 +624,7 @@ class VideoAppService:
             record_key_failure(key_selection, retryable=retryable, status_code=start_resp.status_code, redis=self.redis)
             if retryable and start_resp.status_code in (500, 502, 503, 504, 429, 404, 405):
                 await self.routing_state.increment_provider_failure(provider_id)
-                raise _RetryableCandidateError()
+                raise RetryableCandidateError()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Upstream error {start_resp.status_code}: {start_resp.text}",
@@ -699,7 +651,7 @@ class VideoAppService:
                 record_key_failure(key_selection, retryable=retryable, status_code=st_resp.status_code, redis=self.redis)
                 if retryable and st_resp.status_code in (500, 502, 503, 504, 429):
                     await self.routing_state.increment_provider_failure(provider_id)
-                    raise _RetryableCandidateError()
+                    raise RetryableCandidateError()
                 raise HTTPException(
                     status_code=status.HTTP_502_BAD_GATEWAY,
                     detail=f"Upstream status error {st_resp.status_code}: {st_resp.text}",

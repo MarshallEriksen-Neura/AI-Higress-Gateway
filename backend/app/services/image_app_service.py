@@ -5,7 +5,6 @@ import logging
 import re
 import time
 from typing import Any
-from urllib.parse import urlsplit
 
 import httpx
 from fastapi import HTTPException, status
@@ -29,6 +28,10 @@ from app.provider.key_pool import (
     record_key_failure,
     record_key_success,
 )
+from app.provider.utils import (
+    derive_openai_images_generations_path,
+    is_google_native_provider_base_url,
+)
 from app.schemas.image import ImageGenerationRequest, ImageGenerationResponse, ImageObject
 from app.services.chat_routing_service import _apply_upstream_path_override, _is_retryable_upstream_status
 from app.services.credit_service import InsufficientCreditsError, ensure_account_usable
@@ -41,9 +44,7 @@ from app.services.image_storage_service import (
 from app.services.metrics_service import call_upstream_http_with_metrics
 from app.services.user_provider_service import get_accessible_provider_ids
 from app.schemas import ModelCapability
-
-class _RetryableCandidateError(Exception):
-    pass
+from app.utils.payload_utils import RetryableCandidateError, deep_merge_dict, get_vendor_extra, has_header
 
 _OPENAI_IMAGE_MODEL_RE = re.compile(r"^(gpt-image|dall-e)", re.IGNORECASE)
 _GOOGLE_GEMINI_IMAGE_MODEL_RE = re.compile(r"(gemini.*image|flash-image|nano[- ]banana)", re.IGNORECASE)
@@ -287,71 +288,6 @@ def _is_google_imagen_model(model: str) -> bool:
     return bool(_GOOGLE_IMAGEN_MODEL_RE.search(val))
 
 
-def _is_google_native_provider_base_url(base_url: str) -> bool:
-    """
-    判断某个 provider 是否按 Gemini API 的原生 REST 地址配置：
-    https://generativelanguage.googleapis.com
-    """
-    raw = str(base_url or "").strip()
-    if not raw:
-        return False
-    try:
-        parsed = urlsplit(raw)
-    except Exception:
-        return False
-    return str(parsed.netloc or "").lower() == "generativelanguage.googleapis.com"
-
-
-def _derive_openai_images_path(provider_chat_path: str | None) -> str:
-    """
-    尽量从 provider 的 chat_completions_path 推导对应的 images/generations 路径，
-    以兼容 base_url 是否自带 /v1 的两种配置方式。
-    """
-    raw = str(provider_chat_path or "/v1/chat/completions").strip() or "/v1/chat/completions"
-    lowered = raw.lower()
-    if "chat/completions" in lowered:
-        # Keep leading '/v1' if present.
-        prefix = raw[: lowered.rfind("chat/completions")]
-        return f"{prefix}images/generations".replace("//", "/")
-    return "/v1/images/generations"
-
-
-def _has_header(headers: dict[str, str] | None, name: str) -> bool:
-    if not headers:
-        return False
-    target = name.strip().lower()
-    for key in headers.keys():
-        if str(key).strip().lower() == target:
-            return True
-    return False
-
-
-def _deep_merge_dict(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """
-    Recursively merge override into base and return base (mutated).
-    """
-    for key, value in override.items():
-        if (
-            key in base
-            and isinstance(base.get(key), dict)
-            and isinstance(value, dict)
-        ):
-            _deep_merge_dict(base[key], value)  # type: ignore[index]
-            continue
-        base[key] = value
-    return base
-
-
-def _get_vendor_extra(request: ImageGenerationRequest, vendor: str) -> dict[str, Any] | None:
-    extra = getattr(request, "extra_body", None)
-    if not isinstance(extra, dict):
-        return None
-    payload = extra.get(vendor)
-    if not isinstance(payload, dict):
-        return None
-    return payload
-
-
 def _map_openai_size_to_google_image_config(size: str | None) -> dict[str, str] | None:
     if not size:
         return None
@@ -567,7 +503,7 @@ class ImageAppService:
                 continue
 
             try:
-                if _is_google_native_provider_base_url(base_url):
+                if is_google_native_provider_base_url(base_url):
                     if _is_google_imagen_model(str(model_id or "")):
                         resp = await self._call_google_imagen_predict(
                             request=request,
@@ -604,7 +540,7 @@ class ImageAppService:
                 last_error = str(exc)
                 await self.routing_state.increment_provider_failure(provider_id)
                 continue
-            except _RetryableCandidateError:
+            except RetryableCandidateError:
                 continue
 
             record_key_success(key_selection, redis=self.redis)
@@ -633,7 +569,7 @@ class ImageAppService:
         endpoint: str,
         key_selection,
     ) -> ImageGenerationResponse:
-        images_path = getattr(cfg, "images_generations_path", None) or _derive_openai_images_path(
+        images_path = getattr(cfg, "images_generations_path", None) or derive_openai_images_generations_path(
             getattr(cfg, "chat_completions_path", None)
         )
         url = _apply_upstream_path_override(endpoint, images_path)
@@ -651,10 +587,10 @@ class ImageAppService:
             }
         else:
             upstream_payload = request.model_dump(exclude_none=True)
-        vendor_extra = _get_vendor_extra(request, "openai")
+        vendor_extra = get_vendor_extra(request, "openai")
         if vendor_extra:
-            _deep_merge_dict(upstream_payload, vendor_extra)
-        gateway_extra = _get_vendor_extra(request, "gateway") or {}
+            deep_merge_dict(upstream_payload, vendor_extra)
+        gateway_extra = get_vendor_extra(request, "gateway") or {}
         upstream_payload["model"] = model_id
         upstream_payload.pop("extra_body", None)
         # 网关当前不支持上游 Images SSE；防止用户误传导致 resp.json 失败。
@@ -703,7 +639,7 @@ class ImageAppService:
             )
             if retryable and resp.status_code in (500, 502, 503, 504, 429, 404, 405):
                 await self.routing_state.increment_provider_failure(provider_id)
-                raise _RetryableCandidateError()
+                raise RetryableCandidateError()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Upstream error {resp.status_code}: {resp.text}",
@@ -757,7 +693,7 @@ class ImageAppService:
         url = f"{base_url}/v1beta/{model_path}:generateContent"
 
         headers: dict[str, str] = {"Accept": "application/json", "Content-Type": "application/json"}
-        if not _has_header(getattr(cfg, "custom_headers", None), "x-goog-api-key"):
+        if not has_header(getattr(cfg, "custom_headers", None), "x-goog-api-key"):
             headers["x-goog-api-key"] = key_selection.key
         if getattr(cfg, "custom_headers", None):
             headers.update(getattr(cfg, "custom_headers"))
@@ -774,9 +710,9 @@ class ImageAppService:
             "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
             "generationConfig": generation_config,
         }
-        vendor_extra = _get_vendor_extra(request, "google")
+        vendor_extra = get_vendor_extra(request, "google")
         if vendor_extra:
-            _deep_merge_dict(upstream_payload, vendor_extra)
+            deep_merge_dict(upstream_payload, vendor_extra)
 
         if image_debug_logger.isEnabledFor(logging.DEBUG):
             safe_payload = _redact_image_upstream_payload(upstream_payload)
@@ -806,7 +742,7 @@ class ImageAppService:
             record_key_failure(key_selection, retryable=retryable, status_code=resp.status_code, redis=self.redis)
             if retryable and resp.status_code in (500, 502, 503, 504, 429, 404, 405):
                 await self.routing_state.increment_provider_failure(provider_id)
-                raise _RetryableCandidateError()
+                raise RetryableCandidateError()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Upstream error {resp.status_code}: {resp.text}",
@@ -873,7 +809,7 @@ class ImageAppService:
         url = f"{base_url}/v1beta/{model_path}:predict"
 
         headers: dict[str, str] = {"Accept": "application/json", "Content-Type": "application/json"}
-        if not _has_header(getattr(cfg, "custom_headers", None), "x-goog-api-key"):
+        if not has_header(getattr(cfg, "custom_headers", None), "x-goog-api-key"):
             headers["x-goog-api-key"] = key_selection.key
         if getattr(cfg, "custom_headers", None):
             headers.update(getattr(cfg, "custom_headers"))
@@ -887,9 +823,9 @@ class ImageAppService:
             "instances": [{"prompt": request.prompt}],
             "parameters": parameters,
         }
-        vendor_extra = _get_vendor_extra(request, "google")
+        vendor_extra = get_vendor_extra(request, "google")
         if vendor_extra:
-            _deep_merge_dict(upstream_payload, vendor_extra)
+            deep_merge_dict(upstream_payload, vendor_extra)
 
         if image_debug_logger.isEnabledFor(logging.DEBUG):
             safe_payload = _redact_image_upstream_payload(upstream_payload)
@@ -919,7 +855,7 @@ class ImageAppService:
             record_key_failure(key_selection, retryable=retryable, status_code=resp.status_code, redis=self.redis)
             if retryable and resp.status_code in (500, 502, 503, 504, 429, 404, 405):
                 await self.routing_state.increment_provider_failure(provider_id)
-                raise _RetryableCandidateError()
+                raise RetryableCandidateError()
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
                 detail=f"Upstream error {resp.status_code}: {resp.text}",
@@ -992,7 +928,7 @@ class ImageAppService:
                 last_error = str(exc)
                 continue
 
-            images_path = getattr(cfg, "images_generations_path", None) or _derive_openai_images_path(
+            images_path = getattr(cfg, "images_generations_path", None) or derive_openai_images_generations_path(
                 getattr(cfg, "chat_completions_path", None)
             )
             url = _apply_upstream_path_override(cand.endpoint, images_path)
@@ -1001,9 +937,9 @@ class ImageAppService:
             )
 
             upstream_payload: dict[str, Any] = request.model_dump(exclude_none=True)
-            vendor_extra = _get_vendor_extra(request, "openai")
+            vendor_extra = get_vendor_extra(request, "openai")
             if vendor_extra:
-                _deep_merge_dict(upstream_payload, vendor_extra)
+                deep_merge_dict(upstream_payload, vendor_extra)
             upstream_payload["model"] = model_id
             upstream_payload.pop("extra_body", None)
 
@@ -1119,7 +1055,7 @@ class ImageAppService:
                 "Accept": "application/json",
                 "Content-Type": "application/json",
             }
-            if not _has_header(getattr(cfg, "custom_headers", None), "x-goog-api-key"):
+            if not has_header(getattr(cfg, "custom_headers", None), "x-goog-api-key"):
                 headers["x-goog-api-key"] = key_selection.key
             if getattr(cfg, "custom_headers", None):
                 headers.update(getattr(cfg, "custom_headers"))
@@ -1136,9 +1072,9 @@ class ImageAppService:
                 "contents": [{"role": "user", "parts": [{"text": request.prompt}]}],
                 "generationConfig": generation_config,
             }
-            vendor_extra = _get_vendor_extra(request, "google")
+            vendor_extra = get_vendor_extra(request, "google")
             if vendor_extra:
-                _deep_merge_dict(upstream_payload, vendor_extra)
+                deep_merge_dict(upstream_payload, vendor_extra)
 
             try:
                 resp = await call_upstream_http_with_metrics(
