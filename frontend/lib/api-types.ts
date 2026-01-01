@@ -372,7 +372,8 @@ export type ModelCapability =
   | "vision"
   | "audio"
   | "function_calling"
-  | "image_generation";
+  | "image_generation"
+  | "video_generation";
 
 export type ApiStyle = "openai" | "responses" | "claude";
 
@@ -438,6 +439,41 @@ export interface ImageGenerationImage {
 export interface ImageGenerationResponse {
   created: number;
   data: ImageGenerationImage[];
+}
+
+// ============= 视频生成 / Video Generation =============
+
+export type VideoAspectRatio = "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9";
+export type VideoResolution = "480p" | "720p" | "1080p";
+
+export interface VideoGenerationRequest {
+  prompt: string;
+  model: string;
+  size?: string;
+  seconds?: number;
+  aspect_ratio?: VideoAspectRatio;
+  resolution?: VideoResolution;
+  negative_prompt?: string;
+  seed?: number;
+  fps?: number;
+  num_outputs?: number;
+  generate_audio?: boolean;
+  enhance_prompt?: boolean;
+  extra_body?: {
+    openai?: Record<string, unknown>;
+    google?: Record<string, unknown>;
+  };
+}
+
+export interface VideoObject {
+  url?: string;
+  object_key?: string;
+  revised_prompt?: string;
+}
+
+export interface VideoGenerationResponse {
+  created: number;
+  data: VideoObject[];
 }
 
 export type UpdateGatewayConfigRequest = GatewayConfig;
@@ -1108,7 +1144,7 @@ export interface MessagesResponse {
     message: Message;
     /**
      * 兼容字段：历史代码只使用单个 run（通常为 baseline）。
-     * 新代码优先使用 runs 数组以支持“多 run 展示”。
+     * 新代码优先使用 runs 数组以支持"多 run 展示"。
      */
     run?: RunSummary;
     runs?: RunSummary[];

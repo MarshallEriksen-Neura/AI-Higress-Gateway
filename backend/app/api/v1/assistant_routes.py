@@ -32,6 +32,7 @@ from app.schemas import (
     AssistantPresetResponse,
     AssistantPresetUpdateRequest,
     ConversationImageGenerationRequest,
+    ConversationVideoGenerationRequest,
     ConversationCreateRequest,
     ConversationItem,
     ConversationListResponse,
@@ -69,9 +70,14 @@ from app.services.chat_history_service import (
     update_conversation,
 )
 from app.services.image_storage_service import build_signed_image_url
+from app.services.video_storage_service import build_signed_video_url
 from app.services.image_generation_chat_service import (
     create_image_generation_and_queue_run,
     execute_image_generation_inline,
+)
+from app.services.video_generation_chat_service import (
+    create_video_generation_and_queue_run,
+    execute_video_generation_inline,
 )
 from app.services.chat_history_service import finalize_assistant_image_generation_after_user_sequence
 from app.services.tts_app_service import (
@@ -177,6 +183,37 @@ def _hydrate_image_generation_content(content: dict) -> dict:
 
     next_content = dict(content)
     next_content["images"] = hydrated
+    return next_content
+
+
+def _hydrate_video_generation_content(content: dict) -> dict:
+    """
+    将存储在 DB 中的 video_generation content（通常只保存 object_key）补全为带短链 url 的响应体。
+    """
+    if not isinstance(content, dict):
+        return content
+    if str(content.get("type") or "") != "video_generation":
+        return content
+
+    videos = content.get("videos")
+    if not isinstance(videos, list) or not videos:
+        return content
+
+    hydrated: list[dict[str, Any]] = []
+    for item in videos:
+        if not isinstance(item, dict):
+            continue
+        object_key = item.get("object_key")
+        url = item.get("url")
+        next_item = dict(item)
+        if isinstance(object_key, str) and object_key.strip():
+            next_item["url"] = build_signed_video_url(object_key.strip())
+        elif isinstance(url, str) and url.strip():
+            next_item["url"] = url.strip()
+        hydrated.append(next_item)
+
+    next_content = dict(content)
+    next_content["videos"] = hydrated
     return next_content
 
 
@@ -1202,6 +1239,8 @@ def list_messages_endpoint(
         content = msg.content
         if isinstance(content, dict) and str(content.get("type") or "") == "image_generation":
             content = _hydrate_image_generation_content(content)
+        if isinstance(content, dict) and str(content.get("type") or "") == "video_generation":
+            content = _hydrate_video_generation_content(content)
         if isinstance(content, dict):
             content = _hydrate_input_audio_content(content)
         items.append(
@@ -1215,6 +1254,302 @@ def list_messages_endpoint(
         )
 
     return MessageListResponse(items=items, next_cursor=next_cursor)
+
+
+@router.post("/v1/conversations/{conversation_id}/video-generations")
+async def create_video_generation_endpoint(
+    conversation_id: UUID,
+    request: Request,
+    payload: ConversationVideoGenerationRequest,
+    db: Session = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+    client: Any = Depends(get_http_client),
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> Any:
+    """
+    会话内视频生成（写入聊天历史）。
+
+    - 默认推荐 SSE（streaming=true 或 Accept:text/event-stream），以获得更好的等待体验；
+    - 生产环境通过 Celery 异步执行，并通过 RunEvent 推送状态；
+    - 测试环境下跳过 Celery，沿用“请求内执行”。
+    """
+    accept_header = request.headers.get("accept", "")
+    wants_event_stream = "text/event-stream" in accept_header.lower()
+    stream = bool(payload.streaming) or wants_event_stream
+
+    video_request = payload.model_dump(exclude_none=True)
+    prompt = str(video_request.pop("prompt") or "").strip()
+    video_request.pop("streaming", None)
+
+    video_request["model"] = str(video_request.get("model") or "").strip()
+    if not video_request["model"]:
+        return Response(status_code=status.HTTP_400_BAD_REQUEST, content="model required")
+
+    # 测试环境下跳过真正的 Celery 调度，避免 broker 依赖导致卡住。
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        (
+            user_message_id,
+            run_id,
+            assistant_message_id,
+            created_payload,
+            _created_seq,
+            api_key,
+        ) = create_video_generation_and_queue_run(
+            db,
+            redis=redis,
+            current_user=current_user,
+            conversation_id=conversation_id,
+            prompt=prompt,
+            video_request=video_request,
+            streaming=stream,
+        )
+
+        async def _finalize(content_with_urls: dict[str, Any]) -> None:
+            # DB 持久化：只保存 object_key（url 由 list_messages 时动态续签）。
+            stored = dict(content_with_urls)
+            vids = stored.get("videos")
+            kept: list[dict[str, Any]] = []
+            if isinstance(vids, list):
+                for it in vids:
+                    if not isinstance(it, dict):
+                        continue
+                    obj = it.get("object_key")
+                    url = it.get("url")
+                    revised = it.get("revised_prompt")
+                    if isinstance(obj, str) and obj.strip():
+                        kept.append({"object_key": obj.strip(), "revised_prompt": revised})
+                    elif isinstance(url, str) and url.strip():
+                        kept.append({"url": url.strip(), "revised_prompt": revised})
+            stored["videos"] = kept
+
+            user_msg = db.get(Message, user_message_id)
+            if user_msg is None:
+                return
+            finalize_assistant_image_generation_after_user_sequence(
+                db,
+                conversation_id=conversation_id,
+                user_sequence=int(getattr(user_msg, "sequence", 0) or 0),
+                content=stored,
+                preview_text=f"[视频] {prompt[:60]}",
+            )
+
+        async def _gen():
+            if stream:
+                yield _encode_sse_event(event_type="message.created", data=created_payload)
+                yield _encode_sse_event(
+                    event_type="message.delta",
+                    data={
+                        "type": "message.delta",
+                        "conversation_id": str(conversation_id),
+                        "assistant_message_id": str(assistant_message_id) if assistant_message_id else None,
+                        "delta": "正在生成视频…",
+                        "kind": "video_generation",
+                    },
+                )
+
+            content_with_urls = await execute_video_generation_inline(
+                db=db,
+                redis=redis,
+                client=client,
+                api_key=api_key,
+                prompt=prompt,
+                video_request=video_request,
+            )
+            await _finalize(content_with_urls)
+
+            run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
+            run.status = "succeeded"
+            run.output_preview = f"[视频] {prompt[:60]}".strip()
+            run.response_payload = content_with_urls
+            db.add(run)
+            db.commit()
+
+            if stream:
+                yield _encode_sse_event(
+                    event_type="message.completed",
+                    data={
+                        "type": "message.completed",
+                        "conversation_id": str(conversation_id),
+                        "assistant_message_id": str(assistant_message_id) if assistant_message_id else None,
+                        "baseline_run": _run_to_summary(run),
+                        "kind": "video_generation",
+                        "video_generation": _hydrate_video_generation_content(content_with_urls),
+                    },
+                )
+                yield _encode_sse_event(event_type="done", data="[DONE]")
+            else:
+                return
+
+        if stream:
+            return StreamingResponse(_gen(), media_type="text/event-stream")
+
+        content_with_urls = await execute_video_generation_inline(
+            db=db,
+            redis=redis,
+            client=client,
+            api_key=api_key,
+            prompt=prompt,
+            video_request=video_request,
+        )
+        await _finalize(content_with_urls)
+        run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
+        run.status = "succeeded"
+        run.output_preview = f"[视频] {prompt[:60]}".strip()
+        run.response_payload = content_with_urls
+        db.add(run)
+        db.commit()
+        return MessageCreateResponse(message_id=user_message_id, baseline_run=_run_to_summary(run))
+
+    (
+        _message_id,
+        run_id,
+        assistant_message_id,
+        created_payload,
+        created_seq,
+        _api_key,
+    ) = create_video_generation_and_queue_run(
+        db,
+        redis=redis,
+        current_user=current_user,
+        conversation_id=conversation_id,
+        prompt=prompt,
+        video_request=video_request,
+        streaming=stream,
+    )
+
+    try:
+        from app.celery_app import celery_app
+
+        celery_app.send_task(
+            "tasks.execute_video_generation_run",
+            args=[str(run_id), str(assistant_message_id) if assistant_message_id is not None else None, bool(stream)],
+        )
+    except Exception:
+        raise
+
+    ReplaySessionLocal = sessionmaker(
+        bind=db.get_bind(),
+        autoflush=False,
+        autocommit=False,
+        future=True,
+        expire_on_commit=False,
+    )
+
+    def _iter_db_message_events(*, run_id: UUID, after_seq: int):
+        with ReplaySessionLocal() as replay_db:
+            for ev in list_run_events(replay_db, run_id=run_id, after_seq=after_seq, limit=1000):
+                seq = int(getattr(ev, "seq", 0) or 0)
+                et = str(getattr(ev, "event_type", "") or "")
+                if not et.startswith("message."):
+                    continue
+                data = getattr(ev, "payload", None) or {}
+                yield seq, et, data
+
+    async def _wait_for_terminal_event(*, run_id: UUID, after_seq: int) -> None:
+        last_seq = int(after_seq or 0)
+        for seq, et, _data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+            if seq <= last_seq:
+                continue
+            last_seq = seq
+            if et in {"message.completed", "message.failed"}:
+                return
+
+        async for env in subscribe_run_events(
+            redis,
+            run_id=run_id,
+            after_seq=last_seq,
+            request=request,
+            heartbeat_seconds=1,
+        ):
+            if not isinstance(env, dict):
+                continue
+            if str(env.get("type") or "") == "heartbeat":
+                for seq, et, _data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                    if seq <= last_seq:
+                        continue
+                    last_seq = seq
+                    if et in {"message.completed", "message.failed"}:
+                        return
+                continue
+            try:
+                seq = int(env.get("seq") or 0)
+            except Exception:
+                seq = 0
+            if seq <= last_seq:
+                continue
+            last_seq = seq
+            et = str(env.get("event_type") or "")
+            if et in {"message.completed", "message.failed"}:
+                return
+
+    if stream:
+        async def _gen():
+            last_seq = int(created_seq or 0)
+            yield _encode_sse_event(event_type="message.created", data=created_payload)
+
+            for seq, et, data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+                if et == "message.completed" and isinstance(data, dict):
+                    vid = data.get("video_generation")
+                    if isinstance(vid, dict):
+                        data["video_generation"] = _hydrate_video_generation_content(vid)
+                yield _encode_sse_event(event_type=et, data=data)
+                if et in {"message.completed", "message.failed"}:
+                    yield _encode_sse_event(event_type="done", data="[DONE]")
+                    return
+
+            async for env in subscribe_run_events(
+                redis,
+                run_id=run_id,
+                after_seq=last_seq,
+                request=request,
+                heartbeat_seconds=1,
+            ):
+                if not isinstance(env, dict):
+                    continue
+                if str(env.get("type") or "") == "heartbeat":
+                    for seq, et, data in _iter_db_message_events(run_id=run_id, after_seq=last_seq):
+                        if seq <= last_seq:
+                            continue
+                        last_seq = seq
+                        if et == "message.completed" and isinstance(data, dict):
+                            vid = data.get("video_generation")
+                            if isinstance(vid, dict):
+                                data["video_generation"] = _hydrate_video_generation_content(vid)
+                        yield _encode_sse_event(event_type=et, data=data)
+                        if et in {"message.completed", "message.failed"}:
+                            yield _encode_sse_event(event_type="done", data="[DONE]")
+                            return
+                    continue
+                try:
+                    seq = int(env.get("seq") or 0)
+                except Exception:
+                    seq = 0
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+
+                et = str(env.get("event_type") or "")
+                if not et.startswith("message."):
+                    continue
+                data = env.get("payload") if isinstance(env.get("payload"), dict) else {}
+                if et == "message.completed" and isinstance(data, dict):
+                    vid = data.get("video_generation")
+                    if isinstance(vid, dict):
+                        data["video_generation"] = _hydrate_video_generation_content(vid)
+                yield _encode_sse_event(event_type=et, data=data)
+                if et in {"message.completed", "message.failed"}:
+                    break
+
+            yield _encode_sse_event(event_type="done", data="[DONE]")
+
+        return StreamingResponse(_gen(), media_type="text/event-stream")
+
+    await _wait_for_terminal_event(run_id=run_id, after_seq=int(created_seq or 0))
+    run = get_run_detail(db, run_id=run_id, user_id=UUID(str(current_user.id)))
+    return MessageCreateResponse(message_id=_message_id, baseline_run=_run_to_summary(run))
 
 
 @router.get("/v1/runs/{run_id}", response_model=RunDetailResponse)

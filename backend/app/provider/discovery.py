@@ -133,6 +133,14 @@ def _infer_capabilities(raw_model: dict[str, Any]) -> list[ModelCapability]:
         )
         if (is_openai_image or is_google_image) and ModelCapability.IMAGE_GENERATION not in caps:
             caps.append(ModelCapability.IMAGE_GENERATION)
+
+        # Heuristic: infer video generation capability from model id when upstream
+        # does not provide explicit capabilities (common for /models lists).
+        # Keep this narrow to avoid mislabeling general multimodal models.
+        is_openai_video = model_id_str.startswith("sora-")
+        is_google_video = model_id_str.startswith("veo-")
+        if (is_openai_video or is_google_video) and ModelCapability.VIDEO_GENERATION not in caps:
+            caps.append(ModelCapability.VIDEO_GENERATION)
     return caps
 
 

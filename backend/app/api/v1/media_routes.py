@@ -21,6 +21,14 @@ from app.services.image_storage_service import (
     presign_image_get_url,
     verify_signed_image_request,
 )
+from app.services.video_storage_service import (
+    SignedVideoUrlError,
+    VideoStorageNotConfigured,
+    get_effective_video_storage_mode,
+    load_video_bytes,
+    presign_video_get_url,
+    verify_signed_video_request,
+)
 
 router = APIRouter(tags=["media"])
 
@@ -106,6 +114,47 @@ async def get_user_audio(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio not found") from exc
+
+    return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND, headers={"Cache-Control": "no-store"})
+
+
+@router.get("/media/videos/{object_key:path}", include_in_schema=False)
+async def get_generated_video(
+    object_key: str,
+    expires: int = Query(..., description="Unix timestamp (seconds)"),
+    sig: str = Query(..., description="HMAC signature"),
+):
+    """
+    通过“网关短链签名”访问生成的视频（video generation 产物）。
+
+    说明：
+    - 不要求 API Key/JWT 鉴权；
+    - 通过 expires+sig 做短链校验；
+    - 视频可存储在本地磁盘或 OSS/S3；
+      - 本地模式：网关校验签名后直接返回视频二进制；
+      - OSS/S3 模式：网关校验签名后 302 跳转到对象存储预签名 URL（直下）。
+    """
+    try:
+        verify_signed_video_request(object_key, expires=expires, sig=sig)
+    except SignedVideoUrlError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+    if get_effective_video_storage_mode() == "local":
+        try:
+            body, content_type = await load_video_bytes(object_key)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video not found") from exc
+        except Exception as exc:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video not found") from exc
+        return Response(content=body, media_type=content_type, headers={"Cache-Control": "no-store"})
+
+    try:
+        remaining = max(1, int(expires) - int(time.time()))
+        url = await presign_video_get_url(object_key, expires_seconds=remaining)
+    except VideoStorageNotConfigured as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video not found") from exc
 
     return RedirectResponse(url=url, status_code=status.HTTP_302_FOUND, headers={"Cache-Control": "no-store"})
 

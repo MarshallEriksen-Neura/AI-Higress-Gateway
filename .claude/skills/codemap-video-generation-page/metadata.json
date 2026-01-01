@@ -1,0 +1,104 @@
+{
+  "feature": "AI Video Generation Page",
+  "normalized_name": "video-generation-page",
+  "generated_at": "2026-01-01T12:00:00.000Z",
+  "tool_used": "claude-opus-4.5 (direct analysis)",
+  "files_analyzed": [
+    "backend/app/schemas/video.py",
+    "backend/app/services/video_app_service.py",
+    "backend/app/services/video_generation_chat_service.py",
+    "backend/app/services/video_storage_service.py",
+    "frontend/lib/stores/image-generation-store.ts",
+    "frontend/lib/stores/chat-composer-store.ts",
+    "frontend/lib/swr/use-image-generations.ts",
+    "frontend/components/ui/sheet.tsx",
+    "frontend/components/ui/drawer.tsx",
+    "frontend/components.json",
+    "docs/video-generation-plan.md"
+  ],
+  "analysis_summary": {
+    "total_files": 11,
+    "modules_traced": 12,
+    "functions_traced": 28,
+    "patterns_discovered": 8
+  },
+  "design_patterns": [
+    {
+      "pattern": "Zustand Store",
+      "location": "frontend/lib/stores/",
+      "description": "集中式状态管理，配合persist中间件实现本地持久化"
+    },
+    {
+      "pattern": "SWR Mutation",
+      "location": "frontend/lib/swr/",
+      "description": "声明式数据获取，自动处理loading/error状态"
+    },
+    {
+      "pattern": "Provider Selector",
+      "location": "backend/app/services/video_app_service.py",
+      "description": "策略模式实现多候选负载均衡和故障转移"
+    },
+    {
+      "pattern": "Adapter Pattern",
+      "location": "backend/app/services/video_app_service.py",
+      "description": "统一内部接口适配不同上游API规范"
+    },
+    {
+      "pattern": "Repository Pattern",
+      "location": "backend/app/services/video_storage_service.py",
+      "description": "抽象存储后端，支持local/OSS/S3无缝切换"
+    },
+    {
+      "pattern": "Polling Pattern",
+      "location": "backend/app/services/video_app_service.py",
+      "description": "异步长时任务通过轮询获取最终结果"
+    },
+    {
+      "pattern": "Circuit Breaker",
+      "location": "backend/app/services/video_app_service.py",
+      "description": "故障累积触发冷却期，避免持续重试失败provider"
+    },
+    {
+      "pattern": "Glassmorphism UI",
+      "location": "frontend (待实现)",
+      "description": "毛玻璃效果营造高级感"
+    }
+  ],
+  "key_technologies": {
+    "frontend": {
+      "framework": "Next.js 16.1.0 + React 19",
+      "state_management": "Zustand v5.0.9",
+      "data_fetching": "SWR v2.3.7",
+      "ui_library": "shadcn/ui (new-york style)",
+      "styling": "Tailwind CSS v4"
+    },
+    "backend": {
+      "framework": "FastAPI",
+      "orm": "SQLAlchemy",
+      "cache": "Redis",
+      "http_client": "httpx"
+    },
+    "storage": {
+      "local": "Filesystem",
+      "cloud": "Aliyun OSS / AWS S3"
+    }
+  },
+  "api_endpoints": {
+    "video_generation": "POST /v1/videos/generations",
+    "video_media": "GET /media/videos/{object_key}"
+  },
+  "upstream_providers": [
+    {
+      "name": "OpenAI Sora",
+      "api_style": "multipart form",
+      "polling_interval": "2s",
+      "timeout": "600s"
+    },
+    {
+      "name": "Google Veo",
+      "api_style": "JSON + operations",
+      "polling_interval": "5s",
+      "timeout": "900s"
+    }
+  ]
+}

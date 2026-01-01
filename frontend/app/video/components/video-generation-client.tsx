@@ -1,0 +1,301 @@
+"use client";
+
+import { useState, useCallback, useEffect } from "react";
+import { nanoid } from "nanoid";
+import {
+  Settings2,
+  Sparkles,
+  RectangleHorizontal,
+  RectangleVertical,
+  Square,
+  Loader2,
+  Video,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
+  useVideoComposerStore,
+  selectVideoConfig,
+  selectIsGenerating,
+  type VideoGenTask,
+} from "@/lib/stores/video-composer-store";
+import { useVideoGenerations } from "@/lib/swr/use-video-generations";
+import { useLogicalModels } from "@/lib/swr/use-logical-models";
+import { VideoConfigSheet } from "./video-config-sheet";
+import { VideoFilmstrip } from "./video-filmstrip";
+import type { VideoAspectRatio } from "@/lib/api-types";
+
+const ASPECT_RATIOS: {
+  value: VideoAspectRatio;
+  icon: typeof RectangleHorizontal;
+  label: string;
+}[] = [
+  { value: "16:9", icon: RectangleHorizontal, label: "Landscape 16:9" },
+  { value: "9:16", icon: RectangleVertical, label: "Portrait 9:16" },
+  { value: "1:1", icon: Square, label: "Square 1:1" },
+];
+
+export function VideoGenerationClient() {
+  const [isConfigOpen, setIsConfigOpen] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState<VideoGenTask | null>(null);
+
+  const config = useVideoComposerStore(selectVideoConfig);
+  const isGenerating = useVideoComposerStore(selectIsGenerating);
+  const {
+    setPrompt,
+    setAspectRatio,
+    setModel,
+    setIsGenerating,
+    addTask,
+    updateTask,
+    buildRequest,
+  } = useVideoComposerStore();
+
+  const { generateVideo } = useVideoGenerations();
+  const { models } = useLogicalModels();
+
+  // Filter models that support video generation
+  const videoModels = models.filter((m) =>
+    m.capabilities?.includes("video_generation")
+  );
+
+  // Auto-select first video model if none selected
+  useEffect(() => {
+    if (!config.model && videoModels.length > 0) {
+      setModel(videoModels[0].id);
+    }
+  }, [config.model, videoModels, setModel]);
+
+  const handleGenerate = useCallback(async () => {
+    if (!config.prompt.trim() || !config.model || isGenerating) return;
+
+    const taskId = nanoid();
+    const request = buildRequest();
+
+    // Create task entry
+    const task: VideoGenTask = {
+      id: taskId,
+      status: "generating",
+      prompt: config.prompt,
+      params: {
+        model: request.model,
+        aspect_ratio: request.aspect_ratio,
+        resolution: request.resolution,
+        seconds: request.seconds,
+        fps: request.fps,
+        negative_prompt: request.negative_prompt,
+        seed: request.seed,
+        enhance_prompt: request.enhance_prompt,
+        generate_audio: request.generate_audio,
+      },
+      createdAt: Date.now(),
+    };
+
+    addTask(task);
+    setIsGenerating(true);
+
+    try {
+      const response = await generateVideo(request);
+      updateTask(taskId, {
+        status: "success",
+        result: response,
+        completedAt: Date.now(),
+      });
+    } catch (error) {
+      updateTask(taskId, {
+        status: "failed",
+        error: error instanceof Error ? error.message : "Generation failed",
+        completedAt: Date.now(),
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [
+    config.prompt,
+    config.model,
+    isGenerating,
+    buildRequest,
+    addTask,
+    updateTask,
+    setIsGenerating,
+    generateVideo,
+  ]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        handleGenerate();
+      }
+    },
+    [handleGenerate]
+  );
+
+  return (
+    <div className="relative flex flex-col h-full w-full overflow-hidden">
+      {/* Aurora/Gradient Background */}
+      <div className="absolute inset-0 bg-gradient-to-br from-violet-500/10 via-background to-cyan-500/10" />
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent" />
+
+      {/* Main Content Area */}
+      <div className="relative flex-1 flex flex-col items-center justify-center p-4 md:p-8">
+        {/* Video Preview Area */}
+        {selectedVideo?.status === "success" && selectedVideo.result?.data?.[0]?.url ? (
+          <div className="w-full max-w-4xl mb-8">
+            <video
+              src={selectedVideo.result.data[0].url}
+              controls
+              autoPlay
+              className="w-full rounded-xl shadow-2xl"
+            />
+          </div>
+        ) : (
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center space-y-4">
+              <Video className="h-16 w-16 mx-auto text-muted-foreground/50" />
+              <p className="text-muted-foreground">
+                Describe your video and click Generate
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Magic Bar - Central Input Area */}
+        <div
+          className={cn(
+            "w-full max-w-2xl",
+            "bg-white/10 dark:bg-black/20",
+            "backdrop-blur-xl",
+            "border border-white/20 dark:border-white/10",
+            "rounded-2xl",
+            "shadow-[0_8px_32px_rgba(0,0,0,0.12)]",
+            "p-4",
+            "transition-all duration-300",
+            "hover:shadow-[0_12px_48px_rgba(0,0,0,0.16)]"
+          )}
+        >
+          {/* Prompt Input */}
+          <Textarea
+            placeholder="Describe the video you want to create..."
+            value={config.prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            className={cn(
+              "w-full min-h-[80px] max-h-[200px] resize-none",
+              "bg-transparent border-0 focus-visible:ring-0",
+              "text-base placeholder:text-muted-foreground/60",
+              "scrollbar-thin scrollbar-thumb-white/10"
+            )}
+            autoFocus
+          />
+
+          {/* Quick Toolbar */}
+          <div className="flex items-center justify-between mt-3 pt-3 border-t border-white/10">
+            <div className="flex items-center gap-2">
+              {/* Aspect Ratio Buttons */}
+              <TooltipProvider>
+                {ASPECT_RATIOS.map((ratio) => (
+                  <Tooltip key={ratio.value}>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant={
+                          config.aspectRatio === ratio.value
+                            ? "default"
+                            : "ghost"
+                        }
+                        size="icon"
+                        className={cn(
+                          "h-8 w-8",
+                          config.aspectRatio === ratio.value
+                            ? "bg-primary/80"
+                            : "hover:bg-white/10"
+                        )}
+                        onClick={() => setAspectRatio(ratio.value)}
+                      >
+                        <ratio.icon className="h-4 w-4" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>{ratio.label}</TooltipContent>
+                  </Tooltip>
+                ))}
+              </TooltipProvider>
+
+              {/* Settings Button */}
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 hover:bg-white/10"
+                      onClick={() => setIsConfigOpen(true)}
+                    >
+                      <Settings2 className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Advanced Settings</TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            </div>
+
+            {/* Generate Button */}
+            <Button
+              onClick={handleGenerate}
+              disabled={!config.prompt.trim() || !config.model || isGenerating}
+              className={cn(
+                "px-6 gap-2",
+                "bg-gradient-to-r from-primary to-primary/80",
+                "hover:from-primary/90 hover:to-primary/70",
+                "shadow-lg shadow-primary/25"
+              )}
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Generating...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Generate
+                </>
+              )}
+            </Button>
+          </div>
+
+          {/* Model indicator */}
+          {config.model && (
+            <div className="mt-2 text-xs text-muted-foreground/60 text-center">
+              Using {videoModels.find((m) => m.id === config.model)?.name || config.model}
+            </div>
+          )}
+        </div>
+
+        {/* Keyboard Shortcut Hint */}
+        <p className="mt-3 text-xs text-muted-foreground/50">
+          Press <kbd className="px-1.5 py-0.5 rounded bg-muted/50 text-[10px]">⌘</kbd> +{" "}
+          <kbd className="px-1.5 py-0.5 rounded bg-muted/50 text-[10px]">Enter</kbd> to generate
+        </p>
+      </div>
+
+      {/* Bottom Filmstrip */}
+      <div className="relative px-4 pb-4 md:px-8 md:pb-6">
+        <VideoFilmstrip onSelectVideo={setSelectedVideo} />
+      </div>
+
+      {/* Config Sheet */}
+      <VideoConfigSheet
+        open={isConfigOpen}
+        onOpenChange={setIsConfigOpen}
+        models={videoModels}
+      />
+    </div>
+  );
+}

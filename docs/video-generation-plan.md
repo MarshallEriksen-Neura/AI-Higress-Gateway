@@ -8,7 +8,7 @@
 - `sora-2` - 基础版本
 - `sora-2-pro` - 专业版，更高质量
 
-**API 端点**: `POST https://api.openai.com/v1/video/generations`
+**API 端点**: `POST https://api.openai.com/v1/videos`
 
 **支持的生成模式**:
 | 模式 | 说明 |
@@ -69,9 +69,10 @@ interface SoraResultResponse {
 
 **API 调用流程**:
 ```
-1. POST /v1/video/generations     → 创建生成任务，返回 task_id
-2. GET  /v1/video/generations/{id} → 轮询查询状态
-3. 状态为 completed 时获取 video_url
+1. POST /v1/videos                 → 创建生成任务，返回 video_id
+2. GET  /v1/videos/{video_id}      → 轮询查询状态
+3. 状态为 completed 时：
+   - GET /v1/videos/{video_id}/content → 下载 MP4（或用 variant 下载 thumbnail/spritesheet）
 ```
 
 **定价** (ChatGPT Plus/Pro):
@@ -219,6 +220,102 @@ interface VeoOperationResponse {
 | API 可用性 | ChatGPT Plus/Pro + API | Vertex AI |
 | 生成速度 | 30s-2min | 1-3min |
 | 水印 | 有 (可移除) | 有 SynthID |
+
+---
+
+## 二点五、跨厂商统一参数画像（参考 TTS 的分层做法）
+
+目标：在不让厂商 DTO 泄露到业务层的前提下，定义一套“尽可能覆盖主流视频生成”的统一语义参数集合，并允许通过少量 `extra_body` 做差异化补齐。
+
+### 2.5.1 现状：网关已落地的统一字段（最小稳定核）
+
+当前网关侧已实现的“会话内视频生成”入口（JWT）对外实际可用字段等价于：
+- `model`：逻辑模型 ID（网关选路）
+- `prompt`：文本提示词
+- `size`：分辨率（如 `1280x720`）
+- `seconds`：视频时长（秒）
+- `extra_body`：保留扩展字段容器（建议结构 `{ openai: {...}, google: {...} }`）
+
+这套字段能覆盖：
+- OpenAI Sora：`POST /v1/videos`（multipart：`prompt/model/size/seconds`）
+- Gemini Veo（Gemini API）：`...:predictLongRunning`（JSON：`instances[].prompt + parameters`）
+
+### 2.5.2 建议：三层参数模型（Core / Standard / Advanced）
+
+参照 `docs/tts-parameter-catalog.md` 的做法，建议把视频生成统一语义拆成三层：
+
+1) **Core（必须）**：任何厂商都应能落地
+- `prompt`
+- `model`
+- `seconds`
+- `size`（或 `aspect_ratio + resolution`，二选一，推荐保留 `size` 作为网关“真实落地字段”）
+
+2) **Standard（推荐）**：主流平台普遍具备、且语义可归一
+- `aspect_ratio`：`16:9|9:16|1:1|4:3|3:4|21:9`（可由 `size` 推导；或反向映射到 `size`）
+- `resolution`：`480p|720p|1080p|2k|4k`（不同厂商支持不同，网关负责降级/映射）
+- `negative_prompt`：负向提示词（Veo/Pika/多数平台支持）
+- `seed`：随机种子（Runway/豆包等常见；不保证跨厂商完全可复现）
+- `fps`：帧率（部分平台支持，如豆包/Pika）
+- `num_outputs`：生成数量（Veo 常见 `numberOfVideos`）
+- `generate_audio`：是否生成音频（Veo 3.1+）
+
+3) **Advanced（可选）**：覆盖差异较大的“控制/参考/编辑”能力
+- `input_image_url` / `input_image_id`：图生视频（首帧/参考图）
+- `input_images`：多参考图（Sora 参考图、Veo up to N、Pika ingredient 等）
+- `last_frame_url`：首尾帧/插值
+- `remix_video_id`：remix（基于已生成视频做局部修改）
+- `extend_video_id`：延长（通常要求“必须是同平台生成的视频”）
+- `style` / `camera_control` / `motion_strength` / `guidance_scale`：不同平台参数名差异大，优先走 `extra_body` 分流
+- `watermark`：水印开关（Runway/部分平台）
+
+建议的统一请求（示意，不代表已全部落地）：
+```ts
+// 统一入口：SpeechRequest 的视频版本（建议）
+export interface VideoRequest {
+  // Core
+  model: string
+  prompt: string
+  size?: string            // "1280x720"
+  seconds?: number         // 4/6/8/...
+
+  // Standard（可选）
+  aspect_ratio?: "16:9" | "9:16" | "1:1" | "4:3" | "3:4" | "21:9"
+  resolution?: "480p" | "720p" | "1080p" | "2k" | "4k"
+  negative_prompt?: string
+  seed?: number
+  fps?: number
+  num_outputs?: number
+  generate_audio?: boolean
+
+  // Advanced（可选）
+  input_image_url?: string
+  input_images?: string[]
+  last_frame_url?: string
+  remix_video_id?: string
+  extend_video_id?: string
+  style?: string
+  watermark?: boolean
+
+  // 厂商扩展（推荐保留，避免为每个“怪字段”都改 schema）
+  extra_body?: { openai?: Record<string, unknown>; google?: Record<string, unknown> }
+}
+```
+
+### 2.5.3 统一字段与主流平台映射建议（摘要）
+
+> 规则：网关内部尽量只依赖统一字段；遇到“语义无法归一/字段结构过深”的，收敛进 `extra_body.<vendor>`，并在选路层做能力过滤（类似 TTS 的 `requires_reference_audio` 思路）。
+
+| 统一语义 | OpenAI Sora | Gemini Veo | Runway | Pika | 豆包 |
+|---|---|---|---|---|---|
+| `prompt` | `prompt` | `instances[].prompt` | `promptText` | `promptText` | `promptText` |
+| `seconds` | `seconds` | `durationSeconds` | `duration` | `options.*` | `duration` |
+| `size` | `size` | `parameters.resolution + aspectRatio`（映射） | `ratio`（映射） | `options.aspectRatio + frameRate`（映射） | `resolution + ratio`（映射） |
+| `negative_prompt` | `extra_body.openai`（若支持） | `parameters.negativePrompt` | - | `options.parameters.negativePrompt` | - |
+| `seed` | `extra_body.openai`（若支持） | `extra_body.google`（若支持） | `seed` | - | `seed` |
+| `generate_audio` | - | `generateAudio` | - | `pikaffect`（效果侧） | - |
+| `input_image_url` | `input_reference`（file/url） | `image` / `first_frame` | `promptImage` | `image` | `image` |
+| `last_frame_url` | - | `lastFrame` | - | - | `image_tail` |
+| `watermark` | - | - | `watermark` | - | `watermark` |
 
 ---
 
@@ -1724,3 +1821,97 @@ function MessageBubble({ message }) {
    - OpenAI Sora API 目前需要 ChatGPT Plus/Pro
    - Google Veo 通过 Vertex AI 访问，需要 GCP 账户
    - 建议同时支持两个 Provider，互为备份
+
+
+主流AI视频生成平台API参数差异对比
+
+1. Runway ML
+核心API参数
+参数名称	类型	必填	描述	可选值/范围
+promptImage	string	否	输入图片URL或Base64编码，支持设置首帧、尾帧或多图	图片URL / Base64字符串
+seed	int	否	随机种子，控制生成结果一致性	0-4294967295
+model	enum	否	模型版本	gen3aturbo、gen4turbo
+promptText	string	否	文本提示词，描述期望的视频动态效果	1000字符以内
+watermark	bool	否	是否添加RunwayML水印	默认false
+duration	enum	否	视频时长（秒）	5、10
+ratio	enum	否	视频画面比例，不同模型支持不同	gen3aturbo: 1280:768 / 768:1280<br>gen4turbo: 1280:720 / 720:1280 / 1:1 / 4:3 / 3:4 / 21:9
+
+2. Pika Labs
+核心API参数
+参数名称	类型	必填	描述	可选值/范围
+pikaffect	string	否	官方视频效果，可添加配音和特效	Levitate、Decapitate、Eye-pop等
+promptText	string	是	视频描述提示词	不限长度
+model	string	是	模型版本	1.0、1.5、2.0、2.2
+image	string	否	输入图片URL或Base64（图生视频时必填）	有效的图片URL或Base64编码
+ingredient	array	否	多图生成时的图片列表（model需为2.0）	图片URL数组
+options	object	否	视频设置选项	aspectRatio、frameRate、camera、parameters、extend
+options.aspectRatio	float	否	宽高比	如16:9对应1.7777777777777777
+options.frameRate	int	否	帧率	24
+options.parameters.guidanceScale	int	否	引导系数	12
+options.parameters.motion	int	否	动态强度	1
+options.parameters.negativePrompt	string	否	负向提示词	描述不希望出现的内容
+
+3. OpenAI Sora
+核心API参数
+参数名称	类型	必填	描述	可选值/范围
+model	string	否	模型版本	sora-2、sora-2-pro
+prompt	string	是	视频描述提示词	1-32000字符
+input_reference	string	否	参考图片URL（多部分表单上传）	二进制文件
+seconds	enum	否	视频时长（秒）	4、8、12
+size	enum	否	视频分辨率	720x1280、1280x720、1024x1792、1792x1024
+
+Remix功能参数
+参数名称	类型	必填	描述	可选值/范围
+video_id	string	是	已完成视频的ID	视频任务唯一标识符
+prompt	string	是	更新的文本提示词，指导 remix 生成	1-32000字符
+
+4. 字节跳动豆包
+基础API参数
+参数名称	类型	必填	描述	可选值/范围
+model	string	是	模型ID	doubao-seedance-1-0-lite / doubao-seedance-1-0-pro等
+promptText	string	是	视频描述提示词，可追加--参数名 参数值格式的配置项	500字符以内，支持--rs（分辨率）、--dur（时长）、--cf（固定摄像头）等
+
+结构化配置参数
+参数名称	类型	必填	描述	可选值/范围
+resolution	string	否	视频分辨率	480p、720p、1080p
+ratio	string	否	视频宽高比	16:9、4:3、1:1、9:16、3:4、21:9等
+duration	int	否	视频时长（秒）	Seedance: 3-12秒 / Wan2.1: 5秒
+fps	int	否	视频帧率	16、24
+watermark	bool	否	是否添加水印	true/false
+seed	int	否	随机种子	-1到2^31-1
+camera_fixed	bool	否	是否固定摄像头	true/false
+
+图生视频扩展参数
+参数名称	类型	必填	描述	可选值/范围
+image	string	是	首帧图像URL或Base64	有效的图片URL或Base64编码
+image_tail	string	否	尾帧图像URL或Base64（首尾帧图生视频时必填）	有效的图片URL或Base64编码
+image_role	string	否	首帧图片角色	first_frame
+image_tail_role	string	否	尾帧图片角色	last_frame
+
+5. 百度文心一言
+视频脚本生成API参数
+参数名称	类型	必填	描述	可选值/范围
+text_input	string	是	用户自然语言指令	任意文本
+target_duration	int	否	视频总时长（秒）	推荐15-60秒
+output_format	string	否	输出格式	shot_list（结构化分镜）
+style_preference	string	否	风格偏好	warmromantic、scientificillustration等
+temperature	float	否	控制生成内容随机性	0-2，默认0.8
+top_p	float	否	核采样概率阈值	0-1，默认0.9
+
+视频生成API参数
+参数名称	类型	必填	描述	可选值/范围
+prompt	string	是	视频描述提示词	500字符以内
+negative_prompt	string	否	负向提示词，排除不希望出现的内容	200字符以内
+cfg_scale	float	否	生成视频自由度	0-1，值越大相关性越强
+mode	string	否	生成模式	std（高性能）、pro（高表现）
+camera_control	object	否	控制摄像机运动	包含horizontal、vertical、pan、tilt、roll、zoom等字段
+aspect_ratio	string	否	视频宽高比	16:9、9:16、1:1
+duration	int	否	视频时长（秒）	5、10
+
+6. 阿里通义千问（wan2.2-s2v）
+核心API参数
+参数名称	类型	必填	描述	可选值/范围
+model	string	是	模型ID	wan2.2-s2v
+input.image_url	string	是	输入图片URL	支持JPG、JPEG、PNG、BMP、WEBP格式，分辨率400-7000像素
+input.audio_url	string	否	输入音频URL（需包含清晰语音）	支持WAV、MP3格式，文件大小≤15MB，时长≤20秒
+parameters.resolution	string	否	视频分辨率	480P（默认）、720P

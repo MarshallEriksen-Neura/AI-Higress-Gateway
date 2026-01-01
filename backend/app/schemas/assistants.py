@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.schemas.image import ImageGenerationRequest
+from app.schemas.video import VideoGenerationRequest
 
 
 class AssistantPresetCreateRequest(BaseModel):
@@ -212,6 +213,23 @@ class ConversationImageGenerationRequest(ImageGenerationRequest):
     model_config = ConfigDict(extra="forbid")
 
 
+class ConversationVideoGenerationRequest(VideoGenerationRequest):
+    """
+    Chat 应用侧的“会话内视频生成”请求。
+
+    说明：
+    - JWT 鉴权（而非 X-API-Key）；
+    - 结果会写入会话历史（chat_messages），用于“历史记录/回放/多端同步”；
+    - 推荐使用 SSE（等待体验更好）。
+    """
+
+    prompt: str = Field(..., min_length=1, max_length=20000)
+    model: str = Field(..., min_length=1, max_length=128)
+    streaming: bool = Field(default=False, description="是否使用 SSE 推送生成状态与最终结果")
+
+    model_config = ConfigDict(extra="forbid")
+
+
 class RunDetailResponse(RunSummary):
     message_id: UUID
     selected_provider_id: str | None = None
@@ -239,6 +257,7 @@ __all__ = [
     "MessageItem",
     "MessageListResponse",
     "ConversationImageGenerationRequest",
+    "ConversationVideoGenerationRequest",
     "RunDetailResponse",
     "RunSummary",
 ]

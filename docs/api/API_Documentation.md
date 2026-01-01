@@ -1402,6 +1402,26 @@ data: {"error":{"type":"upstream_error","status":429,"message":"insufficient_quo
 - OSS/S3 模式：`302 Found`，响应头 `Location` 为对象存储预签名 GET URL；客户端跟随跳转后由对象存储返回音频二进制内容（`Content-Type` 为 `audio/*`，取决于上传时的 MIME 类型）
 - 本地模式：`200 OK`，响应体为音频二进制内容（`Content-Type` 为 `audio/*`，取决于文件类型推断）
 
+### 4. 短链视频读取（签名 URL）
+
+当网关返回视频短链（`/media/videos/...`）时，该 URL 可在有效期内直接访问视频内容（无需登录/无需 API Key）。
+
+**接口**: `GET /media/videos/{object_key}`
+
+**描述**:
+- 当视频存储在 OSS/S3 时：通过签名短链获取私有桶视频对象的预签名下载地址（网关返回 302 跳转，直下）。
+- 当视频存储在本地磁盘时：通过签名短链直接返回视频二进制内容（`200 OK`）。
+
+**认证**: 无（通过签名参数校验）
+
+**查询参数**:
+- `expires` (int, 必填): 过期时间戳（Unix seconds）
+- `sig` (string, 必填): HMAC 签名
+
+**成功响应**:
+- OSS/S3 模式：`302 Found`，响应头 `Location` 为对象存储预签名 GET URL；客户端跟随跳转后由对象存储返回视频二进制内容（`Content-Type` 为 `video/*`，取决于写入时的 MIME 类型）
+- 本地模式：`200 OK`，响应体为视频二进制内容（`Content-Type` 为 `video/*`，取决于文件类型推断）
+
 ### 计费规则
 
 网关在记录一次 LLM 调用的 usage 时，会根据 token 用量和配置计算本次应扣的积分：

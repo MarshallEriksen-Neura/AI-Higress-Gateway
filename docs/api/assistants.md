@@ -409,6 +409,86 @@ Request:
 说明：
 - 服务端会基于 `object_key` 动态生成新的 `/media/images` 签名短链 `url`，避免历史里长期存储过期签名。
 
+### POST `/v1/conversations/{conversation_id}/video-generations`
+
+会话内视频生成（写入聊天历史），用于在 Chat 页面里“像发消息一样出视频”。
+
+特点：
+- 认证：JWT（同 Messages）
+- 结果会持久化到 `chat_messages`，可用于历史记录/多端同步
+- 推荐使用 SSE（等待体验更好）
+- 返回内容走 `/media/videos` 签名短链，避免把大文件直链长期写入历史
+
+Request:
+```json
+{
+  "prompt": "A cinematic shot of a majestic lion in the savannah.",
+  "model": "sora-2 | veo-3.1-generate-preview",
+  "size": "1280x720",
+  "seconds": 8,
+  "aspect_ratio": "16:9",
+  "resolution": "720p",
+  "negative_prompt": "cartoon, drawing, low quality",
+  "extra_body": {
+    "google": {
+      "parameters": {
+        "negativePrompt": "cartoon, low quality"
+      }
+    }
+  },
+  "streaming": true
+}
+```
+
+说明：
+- `streaming=true` 或请求头包含 `Accept: text/event-stream` 时返回 SSE
+- `extra_body`（可选）：网关保留扩展字段；当选中对应 lane 时会合并到上游请求体中（覆盖同名字段）
+  - `negative_prompt` 会自动映射到 Gemini Veo 的 `parameters.negativePrompt`（若 `extra_body.google.parameters.negativePrompt` 已提供，则以扩展字段为准）
+
+#### Streaming (SSE) Response
+
+- `event: message.created`：包含 `user_message_id` / `assistant_message_id` / `baseline_run`
+- `event: message.delta`：阶段提示（字段 `delta`，例如“正在生成视频…”）
+- `event: message.completed` / `message.failed`：结束事件，包含最终 `baseline_run`
+  - `video_generation`：结构化结果（用于前端渲染视频卡片）
+- `event: done` + `data: [DONE]`
+
+`message.completed` 示例（截断）：
+```json
+{
+  "type": "message.completed",
+  "conversation_id": "uuid",
+  "assistant_message_id": "uuid",
+  "baseline_run": { "run_id": "uuid", "requested_logical_model": "sora-2", "status": "succeeded" },
+  "kind": "video_generation",
+  "video_generation": {
+    "type": "video_generation",
+    "status": "succeeded",
+    "prompt": "A cinematic shot of a majestic lion in the savannah.",
+    "params": { "model": "sora-2", "size": "1280x720", "seconds": 8 },
+    "videos": [{ "url": "https://<gateway>/media/videos/<object_key>?expires=...&sig=..." }],
+    "created": 1700000000
+  }
+}
+```
+
+#### 历史消息 content（assistant）
+
+拉取消息列表 `GET /v1/conversations/{conversation_id}/messages` 时，assistant 的 `content` 会包含：
+```json
+{
+  "type": "video_generation",
+  "status": "pending|succeeded|failed",
+  "prompt": "...",
+  "params": { "model": "...", "size": "1280x720", "seconds": 8 },
+  "videos": [{ "object_key": "...", "url": "https://<gateway>/media/videos/...&sig=..." }],
+  "error": "..." 
+}
+```
+
+说明：
+- 服务端会基于 `object_key` 动态生成新的 `/media/videos` 签名短链 `url`，避免历史里长期存储过期签名。
+
 ### POST `/v1/messages/{assistant_message_id}/regenerate`
 
 基于已有的 user 消息重新生成一条 assistant 回复（会清空原 assistant 消息并生成新内容）。

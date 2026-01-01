@@ -16,6 +16,7 @@ class ModelCapability(str, Enum):
     AUDIO = "audio"
     FUNCTION_CALLING = "function_calling"
     IMAGE_GENERATION = "image_generation"
+    VIDEO_GENERATION = "video_generation"
 
 
 class Model(BaseModel):
