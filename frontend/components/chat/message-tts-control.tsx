@@ -76,7 +76,7 @@ export function MessageTtsControl({
   const effectiveVoice = preferredTtsVoice || "alloy";
   const effectiveSpeedRaw = Number.isFinite(preferredTtsSpeed) ? (preferredTtsSpeed as number) : 1.0;
   const effectiveSpeed = Math.min(4.0, Math.max(0.25, effectiveSpeedRaw));
-  // 当语音模式开启且有选定参考音频时，传递 prompt_audio_id
+  // 只有当语音克隆开关打开且有选定参考音频时，才传递 prompt_audio_id
   const effectivePromptAudioId = speechModeEnabled && selectedVoiceAudio?.audio_id
     ? selectedVoiceAudio.audio_id
     : undefined;

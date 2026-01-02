@@ -226,6 +226,8 @@ export const chatTranslations: Record<Language, Record<string, string>> = {
     "chat.voice_selector.speech_mode_on": "Speech output enabled",
     "chat.voice_selector.speech_mode_off": "Speech output disabled",
     "chat.voice_selector.no_voice_selected": "Please select a voice first",
+    "chat.voice_selector.enabled": "Voice cloning enabled",
+    "chat.voice_selector.disabled": "Voice cloning disabled",
 
     // ===== Voice Card =====
     "chat.voice_card.preview": "Preview",
@@ -766,6 +768,8 @@ export const chatTranslations: Record<Language, Record<string, string>> = {
     "chat.voice_selector.speech_mode_on": "语音输出已开启",
     "chat.voice_selector.speech_mode_off": "语音输出已关闭",
     "chat.voice_selector.no_voice_selected": "请先选择一个语音",
+    "chat.voice_selector.enabled": "语音克隆已开启",
+    "chat.voice_selector.disabled": "语音克隆已关闭",
 
     // ===== 语音卡片 =====
     "chat.voice_card.preview": "试听",

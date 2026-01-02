@@ -37,6 +37,15 @@ services:
       timeout: 5s
       retries: 5
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: apiproxy-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+
   api:
     image: marshalleriksen/apiproxy-api:${IMAGE_TAG:-latest}
     container_name: apiproxy-api
@@ -94,3 +103,4 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  qdrant-data:

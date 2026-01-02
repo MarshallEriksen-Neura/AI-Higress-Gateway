@@ -512,16 +512,22 @@ def test_project_chat_settings_get_and_update(app_with_mock_chat):
         assert data["project_id"] == str(api_key_id)
         assert data["default_logical_model"] == "auto"
         assert data["title_logical_model"] is None
+        assert data["kb_embedding_logical_model"] is None
 
         resp = client.put(
             f"/v1/projects/{api_key_id}/chat-settings",
             headers=headers,
-            json={"default_logical_model": "test-model-2", "title_logical_model": "test-model"},
+            json={
+                "default_logical_model": "test-model-2",
+                "title_logical_model": "test-model",
+                "kb_embedding_logical_model": "test-embedding-model",
+            },
         )
         assert resp.status_code == 200
         data = resp.json()
         assert data["default_logical_model"] == "test-model-2"
         assert data["title_logical_model"] == "test-model"
+        assert data["kb_embedding_logical_model"] == "test-embedding-model"
 
 
 def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_chat, monkeypatch):

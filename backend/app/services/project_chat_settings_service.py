@@ -34,6 +34,7 @@ def get_project_chat_settings(
         default_logical_model=_normalize_optional_model(getattr(api_key, "chat_default_logical_model", None))
         or DEFAULT_PROJECT_CHAT_MODEL,
         title_logical_model=_normalize_optional_model(getattr(api_key, "chat_title_logical_model", None)),
+        kb_embedding_logical_model=_normalize_optional_model(getattr(api_key, "kb_embedding_logical_model", None)),
     )
 
 
@@ -51,6 +52,8 @@ def update_project_chat_settings(
         api_key.chat_default_logical_model = _normalize_optional_model(payload.default_logical_model)
     if "title_logical_model" in payload.model_fields_set:
         api_key.chat_title_logical_model = _normalize_optional_model(payload.title_logical_model)
+    if "kb_embedding_logical_model" in payload.model_fields_set:
+        api_key.kb_embedding_logical_model = _normalize_optional_model(payload.kb_embedding_logical_model)
 
     repo_persist_api_key(db, api_key=api_key, allowed_provider_ids=None)
 

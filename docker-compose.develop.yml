@@ -45,6 +45,18 @@ services:
       timeout: 3s
       retries: 5
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: apiproxy-qdrant
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:16333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    networks:
+      apiproxy-net:
+        ipv4_address: 172.20.0.12
+
   api:
     build:
       context: ./backend
@@ -162,6 +174,7 @@ services:
 volumes:
   postgres-data:
   redis-data:
+  qdrant-data:
 
 networks:
   apiproxy-net:

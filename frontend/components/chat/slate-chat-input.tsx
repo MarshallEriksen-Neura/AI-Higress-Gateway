@@ -114,6 +114,7 @@ export function SlateChatInput({
   const {
     preferences,
     setSelectedVoiceAudio,
+    setSpeechModeEnabled,
   } = useUserPreferencesStore();
   const [editor] = useState(() => withHistory(withReact(createEditor())));
   const [isSending, setIsSending] = useState(false);
@@ -133,6 +134,11 @@ export function SlateChatInput({
   const selectedVoiceAudio = projectId
     ? preferences.selectedVoiceAudioByProject[projectId] ?? null
     : null;
+
+  // 语音克隆开关状态
+  const voiceEnabled = projectId
+    ? preferences.speechModeEnabledByProject[projectId] ?? false
+    : false;
 
   // 模型参数状态（持久化）：用户设置后后续每次发送都会沿用
   const parameters = useChatModelParametersStore((s) => s.parameters);
@@ -474,6 +480,14 @@ export function SlateChatInput({
     [projectId, setSelectedVoiceAudio]
   );
 
+  const handleVoiceEnabledChange = useCallback(
+    (enabled: boolean) => {
+      if (!projectId) return;
+      setSpeechModeEnabled(projectId, enabled);
+    },
+    [projectId, setSpeechModeEnabled]
+  );
+
   const handleOpenVoiceSelector = useCallback(() => {
     setVoiceSelectorOpen(true);
   }, []);
@@ -504,24 +518,6 @@ export function SlateChatInput({
                 variant="outline"
                 disabled={disabled || isSending}
                 onClick={() => setAudioSettingsOpen(true)}
-              >
-                {t("chat.action.edit")}
-              </Button>
-            </div>
-          ) : null}
-
-          {mode === "speech" && selectedVoiceAudio ? (
-            <div className="flex items-center justify-between gap-2 rounded-md border border-primary/50 bg-primary/5 px-3 py-2">
-              <div className="text-xs text-primary truncate">
-                {t("chat.voice_selector.selected")}:{" "}
-                {selectedVoiceAudio.filename || selectedVoiceAudio.audio_id}
-              </div>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={disabled || isSending}
-                onClick={() => setVoiceSelectorOpen(true)}
               >
                 {t("chat.action.edit")}
               </Button>
@@ -580,7 +576,10 @@ export function SlateChatInput({
                   : undefined
               }
               onOpenAudioSettings={mode === "chat" ? () => setAudioSettingsOpen(true) : undefined}
-              onOpenVoiceSelector={mode === "speech" && projectId ? handleOpenVoiceSelector : undefined}
+              onOpenVoiceSelector={projectId ? handleOpenVoiceSelector : undefined}
+              selectedVoiceAudio={selectedVoiceAudio}
+              voiceEnabled={voiceEnabled}
+              onVoiceEnabledChange={projectId ? handleVoiceEnabledChange : undefined}
             />
           </div>
 

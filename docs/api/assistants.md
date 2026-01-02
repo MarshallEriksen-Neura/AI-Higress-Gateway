@@ -161,13 +161,15 @@ Response:
 {
   "project_id": "uuid",
   "default_logical_model": "auto",
-  "title_logical_model": "gpt-4.1"
+  "title_logical_model": "gpt-4.1",
+  "kb_embedding_logical_model": "your-embedding-logical-model"
 }
 ```
 
 说明：
 - `default_logical_model`：项目默认聊天模型；当助手的 `default_logical_model` 设置为 `"__project__"` 时生效。
 - `title_logical_model`：项目默认标题模型；当助手的 `title_logical_model` 设置为 `"__project__"` 时生效；为空表示不自动命名。
+- `kb_embedding_logical_model`：项目级 embedding 模型（用于知识库/向量化能力，例如 Qdrant/RAG）。为空表示未配置（由上层策略决定是否启用/如何选择）。
 
 ### PUT `/v1/projects/{project_id}/chat-settings`
 
@@ -177,7 +179,8 @@ Request:
 ```json
 {
   "default_logical_model": "auto",
-  "title_logical_model": "gpt-4.1"
+  "title_logical_model": "gpt-4.1",
+  "kb_embedding_logical_model": "your-embedding-logical-model"
 }
 ```
 

@@ -53,6 +53,13 @@ class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         doc="项目级会话标题生成逻辑模型；为空表示不自动命名",
     )
 
+    # Knowledge base / embedding defaults (project-level)
+    kb_embedding_logical_model: Mapped[str | None] = Column(
+        String(128),
+        nullable=True,
+        doc="项目级知识库 embedding 逻辑模型；为空表示未配置（由上层策略决定是否启用/如何选择）。",
+    )
+
     user: Mapped[User] = relationship("User", back_populates="api_keys")
     allowed_provider_links: Mapped[list[APIKeyAllowedProvider]] = relationship(
         "APIKeyAllowedProvider",

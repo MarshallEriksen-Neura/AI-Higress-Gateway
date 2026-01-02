@@ -111,6 +111,44 @@ class Settings(BaseSettings):
         alias="DATABASE_URL",
         description="SQLAlchemy database URL, e.g. postgresql+psycopg://user:pass@host:port/db",
     )
+
+    # Qdrant (vector DB) - Knowledge Base / Semantic Cache (optional)
+    qdrant_enabled: bool = Field(
+        False,
+        alias="QDRANT_ENABLED",
+        description="是否启用 Qdrant 集成（用于知识库/语义缓存等）；默认关闭。",
+    )
+    qdrant_url: str | None = Field(
+        default=None,
+        alias="QDRANT_URL",
+        description="Qdrant HTTP base URL，例如 http://qdrant:6333（Docker）或 http://127.0.0.1:6333（本地）。",
+    )
+    qdrant_api_key: str | None = Field(
+        default=None,
+        alias="QDRANT_API_KEY",
+        description="Qdrant API Key（如启用了鉴权）；留空表示不带鉴权头。",
+    )
+    qdrant_timeout_seconds: float = Field(
+        10.0,
+        alias="QDRANT_TIMEOUT_SECONDS",
+        description="Qdrant 请求超时（秒）。",
+        ge=0.1,
+        le=120.0,
+    )
+    qdrant_kb_system_collection: str = Field(
+        "kb_system",
+        alias="QDRANT_KB_SYSTEM_COLLECTION",
+        description="system 维度知识库的 collection 名。",
+    )
+    qdrant_kb_user_collection: str = Field(
+        "kb_user",
+        alias="QDRANT_KB_USER_COLLECTION",
+        description=(
+            "user 维度知识库的 collection 名/前缀。"
+            "若采用“每用户一个 collection”的策略，实际 collection 名通常为 "
+            "<QDRANT_KB_USER_COLLECTION>_<user_id_hex>。"
+        ),
+    )
     auto_apply_db_migrations: bool = Field(
         True,
         alias="AUTO_APPLY_DB_MIGRATIONS",
