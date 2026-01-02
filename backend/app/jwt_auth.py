@@ -244,8 +244,24 @@ async def require_jwt_refresh_token(
     )
 
 
+async def require_superuser(
+    current_user: AuthenticatedUser = Depends(require_jwt_token),
+) -> AuthenticatedUser:
+    """
+    验证 JWT 并要求当前用户为超级管理员。
+    用于系统级管理接口（/v1/admin/*）。
+    """
+    if not bool(getattr(current_user, "is_superuser", False)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Superuser access required",
+        )
+    return current_user
+
+
 __all__ = [
     "AuthenticatedUser",
     "require_jwt_refresh_token",
     "require_jwt_token",
+    "require_superuser",
 ]

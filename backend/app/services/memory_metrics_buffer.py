@@ -18,7 +18,7 @@ from uuid import UUID
 from sqlalchemy import Float, cast
 from sqlalchemy.dialects.postgresql import insert
 
-from app.database import SessionLocal
+from app.db import SessionLocal
 from app.models.memory_metrics_history import MemoryMetricsHistory
 
 logger = logging.getLogger(__name__)
