@@ -2000,12 +2000,30 @@ async def message_speech_endpoint(
     if not requested_model:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing model")
 
+    reference_audio_url = None
+    if payload.prompt_audio_id is not None:
+        asset = db.get(AudioAsset, payload.prompt_audio_id)
+        if asset is None:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="audio asset not found")
+        try:
+            owner_ok = UUID(str(getattr(asset, "owner_id", ""))) == UUID(str(current_user.id))
+        except Exception:
+            owner_ok = False
+        shared_ok = str(getattr(asset, "visibility", "") or "").strip().lower() == "public"
+        if not (owner_ok or shared_ok or current_user.is_superuser):
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="forbidden")
+        object_key = str(getattr(asset, "object_key", "") or "").strip()
+        if not object_key:
+            raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="audio asset object_key empty")
+        reference_audio_url = build_signed_audio_url(object_key)
+
     req = SpeechRequest(
         model=requested_model,
         input=text,
         voice=payload.voice,
         response_format=payload.response_format,
         speed=float(payload.speed),
+        reference_audio_url=reference_audio_url,
     )
 
     service = TTSAppService(client=client, redis=redis, db=db, api_key=auth_key)

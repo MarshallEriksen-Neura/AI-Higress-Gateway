@@ -4087,7 +4087,8 @@ X-API-Key: {api_key}
   "model": "string | null (为空则跟随会话默认)",
   "voice": "alloy | echo | fable | onyx | nova | shimmer",
   "response_format": "mp3 | opus | aac | wav | pcm | ogg | flac | aiff",
-  "speed": 1.0
+  "speed": 1.0,
+  "prompt_audio_id": "string | null (可选：参考音频资产 ID，用于语音克隆/音色迁移；网关会转换为 reference_audio_url)"
 }
 ```
 

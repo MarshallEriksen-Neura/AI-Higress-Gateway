@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from uuid import UUID
 from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
@@ -69,6 +70,13 @@ class MessageSpeechRequest(BaseModel):
         description="输出格式",
     )
     speed: float = Field(1.0, ge=0.25, le=4.0, description="语速（0.25-4.0）")
+    prompt_audio_id: UUID | None = Field(
+        default=None,
+        description=(
+            "可选：参考音频资产 ID（用于语音克隆/音色迁移场景）。"
+            "网关会将其转换为 reference_audio_url 并参与 TTS 选路/上游请求。"
+        ),
+    )
 
 
 __all__ = ["MessageSpeechRequest", "SpeechRequest"]

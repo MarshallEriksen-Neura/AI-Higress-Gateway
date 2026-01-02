@@ -21,7 +21,7 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     Redis = object  # type: ignore[misc,assignment]
 
-from app.auth import AuthenticatedUser, require_jwt_token
+from app.jwt_auth import AuthenticatedUser, require_jwt_token
 from app.database import get_db_session
 from app.models.memory_metrics_history import MemoryMetricsHistory, MemoryMetricsHourly
 from app.redis_utils import get_redis, redis_get_json, redis_set_json
