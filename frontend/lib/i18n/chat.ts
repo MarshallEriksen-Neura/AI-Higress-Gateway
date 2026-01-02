@@ -270,6 +270,9 @@ export const chatTranslations: Record<Language, Record<string, string>> = {
     "chat.mcp.tools_select_all": "Select all",
     "chat.mcp.tools_clear": "Clear",
 
+    // ===== Slash Commands =====
+    "chat.slash_command.title": "Switch Mode",
+
     // ===== Image Generation =====
     "chat.image_gen.mode_chat": "Chat",
     "chat.image_gen.mode_image": "Text to Image",
@@ -811,6 +814,9 @@ export const chatTranslations: Record<Language, Record<string, string>> = {
     "chat.mcp.tools_pick_hint": "勾选某个 Server 会注入其下所有工具；不勾选则不使用。",
     "chat.mcp.tools_select_all": "全选",
     "chat.mcp.tools_clear": "清空",
+
+    // ===== 斜杠命令 =====
+    "chat.slash_command.title": "切换模式",
 
     // ===== Image Generation =====
     "chat.image_gen.mode_chat": "聊天",

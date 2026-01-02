@@ -18,13 +18,6 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Switch } from "@/components/ui/switch";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { ClearHistoryAction } from "@/components/chat/chat-input/clear-history-action";
 import { ImageUploadAction } from "@/components/chat/chat-input/image-attachments";
 import { ModelParametersPopover } from "@/components/chat/chat-input/model-parameters-popover";
@@ -33,7 +26,6 @@ import { useI18n } from "@/lib/i18n-context";
 import type { ModelParameters } from "@/components/chat/chat-input/types";
 import { composerModeLabelKeys, composerModes } from "@/lib/chat/composer-modes";
 import type { ComposerMode } from "@/lib/chat/composer-modes";
-import type { SelectedVoiceAudio } from "@/lib/stores/user-preferences-store";
 
 export type { ComposerMode } from "@/lib/chat/composer-modes";
 
@@ -57,10 +49,6 @@ interface ChatToolbarProps {
   onOpenImageSettings?: () => void;
   onOpenAudioSettings?: () => void;
   onOpenVoiceSelector?: () => void;
-  // 语音克隆相关
-  selectedVoiceAudio?: SelectedVoiceAudio | null;
-  voiceEnabled?: boolean;
-  onVoiceEnabledChange?: (enabled: boolean) => void;
 }
 
 export function ChatToolbar({
@@ -83,9 +71,6 @@ export function ChatToolbar({
   onOpenImageSettings,
   onOpenAudioSettings,
   onOpenVoiceSelector,
-  selectedVoiceAudio,
-  voiceEnabled = false,
-  onVoiceEnabledChange,
 }: ChatToolbarProps) {
   const { t } = useI18n();
   const modeIcons: Record<ComposerMode, typeof MessageSquare> = {
@@ -205,42 +190,6 @@ export function ChatToolbar({
       </div>
 
       <div className="flex items-center gap-1.5 md:gap-2">
-        {/* 语音克隆开关：只要选择了语音就显示 */}
-        {selectedVoiceAudio && onOpenVoiceSelector && onVoiceEnabledChange ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <div className="flex items-center gap-1.5">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={onOpenVoiceSelector}
-                    disabled={disabled || isSending}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <Volume2 className="size-4" />
-                  </Button>
-                  <Switch
-                    checked={voiceEnabled}
-                    onCheckedChange={onVoiceEnabledChange}
-                    disabled={disabled || isSending}
-                    className="scale-75"
-                  />
-                </div>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                <div className="text-xs">
-                  <div className="font-medium">{selectedVoiceAudio.filename || selectedVoiceAudio.audio_id}</div>
-                  <div className="text-muted-foreground">
-                    {voiceEnabled ? t("chat.voice_selector.enabled") : t("chat.voice_selector.disabled")}
-                  </div>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : null}
-
         {isSending ? (
           <div className="flex items-center gap-1 text-xs text-muted-foreground">
             <Loader2 className="size-3 animate-spin" />

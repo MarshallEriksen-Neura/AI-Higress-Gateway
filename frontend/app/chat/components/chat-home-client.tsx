@@ -12,7 +12,6 @@ import { useQuickStartChat } from "@/lib/hooks/use-quick-start-chat";
 import type { ComposerMode } from "@/components/chat/chat-input/chat-toolbar";
 import type { ImageGenParams } from "@/components/chat/slate-chat-input";
 import { ChatWelcomeContent } from "@/components/chat/chat-welcome-content";
-import { ChatModeButtons } from "@/components/chat/chat-mode-buttons";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -136,14 +135,6 @@ export function ChatHomeClient({ assistantId }: { assistantId?: string | null } 
           <div className="h-full flex flex-col">
             <div className="flex-1 min-h-0 flex flex-col justify-end p-4 pb-6">
               <div className="mx-auto w-full max-w-3xl flex flex-col gap-3 min-h-0">
-                {/* 模式切换按钮 */}
-                <ChatModeButtons
-                  mode={mode}
-                  onModeChange={setMode}
-                  disabled={!canSubmit || isSubmitting}
-                  className="mb-2"
-                />
-
                 <div className="flex-1 min-h-0">
                   <SlateChatInput
                     conversationId="welcome"

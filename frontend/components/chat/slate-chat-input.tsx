@@ -28,6 +28,7 @@ import {
   type UploadedAudioAttachment,
 } from "./chat-input/audio-input-settings-drawer";
 import { VoiceSelectorDrawer } from "./chat-input/voice-selector-drawer";
+import { SlashCommandMenu, isSlashCommandInput } from "./chat-input/slash-command-menu";
 import { audioService } from "@/http/audio";
 import { Button } from "@/components/ui/button";
 import type { SelectedVoiceAudio } from "@/lib/stores/user-preferences-store";
@@ -129,6 +130,8 @@ export function SlateChatInput({
   const [isTranscribingAudio, setIsTranscribingAudio] = useState(false);
   const [audioLocalFile, setAudioLocalFile] = useState<File | null>(null);
   const [voiceSelectorOpen, setVoiceSelectorOpen] = useState(false);
+  const [slashCommandInput, setSlashCommandInput] = useState("");
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
 
   // 语音模式：选中的参考音频
   const selectedVoiceAudio = projectId
@@ -492,6 +495,31 @@ export function SlateChatInput({
     setVoiceSelectorOpen(true);
   }, []);
 
+  // 处理斜杠命令选择
+  const handleSlashCommandSelect = useCallback(
+    (selectedMode: ComposerMode) => {
+      // 清空编辑器
+      clearEditor();
+      setSlashCommandInput("");
+      setShowSlashMenu(false);
+      // 切换模式
+      onModeChange?.(selectedMode);
+    },
+    [clearEditor, onModeChange]
+  );
+
+  // 监听编辑器内容变化，检测斜杠命令
+  useEffect(() => {
+    const content = getTextContent();
+    if (isSlashCommandInput(content)) {
+      setSlashCommandInput(content);
+      setShowSlashMenu(true);
+    } else {
+      setSlashCommandInput("");
+      setShowSlashMenu(false);
+    }
+  }, [editor.children, getTextContent]);
+
   return (
     <div className={cn("relative flex h-full flex-col bg-background", className)}>
       <div className="flex min-h-0 flex-1 flex-col justify-end px-2 md:px-4 pt-1 pb-2 md:pb-[calc(env(safe-area-inset-bottom)+1.25rem)]">
@@ -532,6 +560,15 @@ export function SlateChatInput({
               "focus-within:ring-2 focus-within:ring-ring/40"
             )}
           >
+            {/* 斜杠命令菜单 */}
+            {showSlashMenu && (
+              <SlashCommandMenu
+                inputText={slashCommandInput}
+                onSelectCommand={handleSlashCommandSelect}
+                onClose={() => setShowSlashMenu(false)}
+              />
+            )}
+
             <ChatEditor
               editor={editor}
               editorRef={editorRef}
@@ -577,9 +614,6 @@ export function SlateChatInput({
               }
               onOpenAudioSettings={mode === "chat" ? () => setAudioSettingsOpen(true) : undefined}
               onOpenVoiceSelector={projectId ? handleOpenVoiceSelector : undefined}
-              selectedVoiceAudio={selectedVoiceAudio}
-              voiceEnabled={voiceEnabled}
-              onVoiceEnabledChange={projectId ? handleVoiceEnabledChange : undefined}
             />
           </div>
 
@@ -687,6 +721,8 @@ export function SlateChatInput({
         selectedVoice={selectedVoiceAudio}
         onSelectVoice={handleSelectVoice}
         conversationId={conversationId}
+        voiceEnabled={voiceEnabled}
+        onVoiceEnabledChange={projectId ? handleVoiceEnabledChange : undefined}
       />
     </div>
   );

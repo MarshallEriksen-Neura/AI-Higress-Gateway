@@ -162,7 +162,8 @@ Response:
   "project_id": "uuid",
   "default_logical_model": "auto",
   "title_logical_model": "gpt-4.1",
-  "kb_embedding_logical_model": "your-embedding-logical-model"
+  "kb_embedding_logical_model": "your-embedding-logical-model",
+  "kb_memory_router_logical_model": "your-memory-router-logical-model"
 }
 ```
 
@@ -170,6 +171,7 @@ Response:
 - `default_logical_model`：项目默认聊天模型；当助手的 `default_logical_model` 设置为 `"__project__"` 时生效。
 - `title_logical_model`：项目默认标题模型；当助手的 `title_logical_model` 设置为 `"__project__"` 时生效；为空表示不自动命名。
 - `kb_embedding_logical_model`：项目级 embedding 模型（用于知识库/向量化能力，例如 Qdrant/RAG）。为空表示未配置（由上层策略决定是否启用/如何选择）。
+- `kb_memory_router_logical_model`：项目级“聊天记忆路由模型”，用于判断是否写入记忆，以及写入 user/system 维度。为空表示由后端选择默认。
 
 ### PUT `/v1/projects/{project_id}/chat-settings`
 
@@ -180,12 +182,50 @@ Request:
 {
   "default_logical_model": "auto",
   "title_logical_model": "gpt-4.1",
-  "kb_embedding_logical_model": "your-embedding-logical-model"
+  "kb_embedding_logical_model": "your-embedding-logical-model",
+  "kb_memory_router_logical_model": "your-memory-router-logical-model"
 }
 ```
 
 说明：
 - 传 `null` 可清空对应字段（恢复默认行为）。
+
+## Memory Route (Dry Run)
+
+### POST `/v1/projects/{project_id}/memory-route/dry-run`
+
+灰测“聊天记忆路由模型”的决策能力：给定一段对话片段，返回模型的原始输出与解析后的决策结果。
+
+Request:
+```json
+{
+  "transcript": "user: ...\\nassistant: ...",
+  "router_logical_model": "可选：临时覆盖模型"
+}
+```
+
+Response:
+```json
+{
+  "project_id": "uuid",
+  "router_logical_model": "your-memory-router-logical-model",
+  "should_store": true,
+  "scope": "user",
+  "memory_text": "...\n...",
+  "memory_items": [
+    {
+      "content": "独立陈述句",
+      "category": "preference",
+      "keywords": ["k1", "k2"]
+    }
+  ],
+  "raw_model_output": "{...}"
+}
+```
+
+说明：
+- `router_logical_model`：优先使用请求里传入的覆盖值；否则使用项目设置 `kb_memory_router_logical_model`。
+- `raw_model_output`：便于灰测对齐模型输出格式与边界判断；线上写入流程不建议存储该字段。
 
 ## Messages / Runs
 

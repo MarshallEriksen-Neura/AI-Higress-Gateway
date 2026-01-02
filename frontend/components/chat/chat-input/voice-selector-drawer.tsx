@@ -245,6 +245,9 @@ export interface VoiceSelectorDrawerProps {
   selectedVoice: SelectedVoiceAudio | null;
   onSelectVoice: (voice: SelectedVoiceAudio | null) => void;
   conversationId: string;
+  // 语音克隆开关
+  voiceEnabled?: boolean;
+  onVoiceEnabledChange?: (enabled: boolean) => void;
 }
 
 export function VoiceSelectorDrawer({
@@ -254,6 +257,8 @@ export function VoiceSelectorDrawer({
   selectedVoice,
   onSelectVoice,
   conversationId,
+  voiceEnabled = false,
+  onVoiceEnabledChange,
 }: VoiceSelectorDrawerProps) {
   const { t } = useI18n();
   const direction = useResponsiveDrawerDirection();
@@ -369,6 +374,35 @@ export function VoiceSelectorDrawer({
             <UploadCloud className="size-4 mr-2" />
             {isUploading ? t("chat.audio_input.uploading") : t("chat.voice_selector.upload_new")}
           </Button>
+
+          {/* Selected Voice with Enable Switch */}
+          {selectedVoice && onVoiceEnabledChange && (
+            <Card className={cn(
+              "p-3 transition-all",
+              voiceEnabled && "ring-2 ring-primary shadow-md"
+            )}>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-xs text-muted-foreground mb-0.5">
+                    {t("chat.voice_selector.selected")}
+                  </div>
+                  <div className="text-sm font-medium truncate">
+                    {selectedVoice.filename || selectedVoice.audio_id}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-xs text-muted-foreground">
+                    {voiceEnabled ? t("chat.voice_selector.enabled") : t("chat.voice_selector.disabled")}
+                  </span>
+                  <Switch
+                    checked={voiceEnabled}
+                    onCheckedChange={onVoiceEnabledChange}
+                    disabled={disabled || isUploading}
+                  />
+                </div>
+              </div>
+            </Card>
+          )}
 
           {/* Toggle: Show shared */}
           <div className="flex items-center justify-between">

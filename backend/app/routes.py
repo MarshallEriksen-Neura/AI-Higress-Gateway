@@ -42,6 +42,7 @@ from .api.v1.media_routes import router as media_router
 from .api.v1.notification_routes import router as notification_router
 from .api.v1.private_provider_routes import router as private_provider_router
 from .api.v1.project_chat_settings_routes import router as project_chat_settings_router
+from .api.v1.project_memory_routes import router as project_memory_router
 from .api.v1.project_eval_config_routes import router as project_eval_config_router
 from .api.v1.provider_key_routes import router as provider_key_router
 from .api.v1.provider_submission_routes import (
@@ -136,6 +137,14 @@ async def lifespan(app: FastAPI):
         await get_workflow_runtime().ensure_started()
     except Exception:
         logger.exception("WorkflowRuntime 启动失败（将影响 /v1/workflow-runs 执行能力）")
+
+    # Qdrant system collection bootstrap (best-effort, should not block startup)
+    try:
+        from app.services.qdrant_bootstrap_service import ensure_system_collection_ready
+
+        await ensure_system_collection_ready()
+    except Exception:
+        logger.debug("Qdrant system collection bootstrap failed", exc_info=True)
 
     # 让应用继续启动并处理请求
     yield
@@ -296,6 +305,7 @@ def create_app() -> FastAPI:
     app.include_router(eval_router)
     app.include_router(project_eval_config_router)
     app.include_router(project_chat_settings_router)
+    app.include_router(project_memory_router)
 
     # 用户私有 Provider
     app.include_router(private_provider_router)

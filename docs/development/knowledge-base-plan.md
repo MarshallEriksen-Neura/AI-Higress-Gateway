@@ -33,6 +33,35 @@
 6) **主模型生成**：拿到“必要上下文”即可，不强行塞满。
 7) **异步写入（核心）**：把“值得记忆/可缓存/可复用的精华”送入离线管道（聊天即记忆的主入口）。
 
+#### 2.1.1 旁路异步：不阻塞聊天回复（推荐落地形态）
+建议将“记忆提取 + embedding + Qdrant upsert”作为 **Celery 旁路任务**，避免任何额外延迟影响用户拿到回复。
+
+```mermaid
+graph TD
+    UserChat[用户发送消息] --> Gateway
+    Gateway --> LLM_Reply[立即返回 LLM 回复]
+
+    Gateway -.->|异步触发| MemoryWorker[记忆提取 Worker]
+
+    subgraph "后台静默处理"
+        MemoryWorker --> Extract{包含有价值信息?}
+        Extract -- No --> Finish[结束]
+        Extract -- Yes --> GetConfig[获取 Embedding 配置]
+
+        GetConfig --> Check[用户是否已有 Collection?]
+        Check -- Yes --> UseExisting[使用现有配置]
+        Check -- No --> InitDefault[使用项目默认模型初始化]
+
+        InitDefault --> Embed[转向量]
+        UseExisting --> Embed
+        Embed --> Upsert[存入 Qdrant]
+    end
+```
+
+仓库内已落地的代码入口（旁路触发点）：
+- `backend/app/tasks/chat_run.py`：在 baseline run 完成后入队 `tasks.extract_chat_memory`（延迟触发）。
+- `backend/app/tasks/chat_memory.py`：执行“抽取→embedding→ensure_collection_ready→upsert”的后台任务（best-effort）。
+
 ### 2.2 控制面：慢路径（配置、审核、评估、离线任务）
 控制面负责：
 - 开关与灰度：哪些用户/项目启用哪些能力（缓存/检索/few-shot/风控）。
@@ -124,6 +153,10 @@ system 维度的写入必须走管道：
 - 可支持“用户级别一键删除整个知识库”（drop collection）实现更简单。
 - 代价：collection 数量随用户增长；需要运维侧关注（Qdrant collection 过多会增加管理成本）。
 
+向量字段约定（避免“向量名称/维度”在环境变量里漂移）：
+- 统一使用 **named vector**，向量名固定为 `text`（由后端代码内置，不通过环境变量配置）。
+- 向量维度不通过环境变量手填：由 embedding 结果长度决定；system collection 在启动时尝试从已有用户库推断维度，若无法推断则在首次成功 embedding 后自动补齐创建。
+
 ---
 
 ## 5. 离线管道（Ingestion / 总结 / 增强）
@@ -139,6 +172,12 @@ system 维度的写入必须走管道：
   3) **落库**：写入 `kb_user_<user_id>`（并在关系库中留审计索引，便于列表/删除/导出）
 - 输出：
   - 可检索的记忆单元（chunk）+ 绑定来源（conversation_id、message_ids、时间戳等，拟新增审计字段）
+
+触发策略（Trigger Policy，先做简单可靠的版本）：
+- **idle 5 分钟**后触发一次“最近 10 条消息”的提取（避免每句话都存）。
+- 记忆路由模型建议使用“低成本 chat 逻辑模型”（由项目设置 `kb_memory_router_logical_model` 决定，避免写死）。
+- 路由模型输出结构化决策：是否存储、存储到 `user` 还是 `system`。
+- 只有当路由决策为 should_store=true 且 memory_text 非空时才会做 embedding 与写入 Qdrant。
 
 ### 5.2 用户内容“提升到 system”的发布流程
 - 输入：候选 user 记忆/文档片段
@@ -209,6 +248,8 @@ system 维度的写入必须走管道：
   - 新增 `qdrant` service（HTTP 端口 6333，宿主映射到 `127.0.0.1:16333`）。
 - Qdrant 客户端封装：`backend/app/qdrant_client.py`
   - 按 event loop 缓存 client，并提供 `close_qdrant_client_for_current_loop()` 供 Celery/短生命周期 loop 使用。
+- Collection 初始化辅助：`backend/app/services/qdrant_collection_service.py`
+  - `ensure_collection_ready()`：当 `preferred_model=None`（聊天自动记忆）时，使用项目默认 embedding 模型初始化；并支持传入 `preferred_vector_size` 避免额外探测调用。
 - 连通性探测：`backend/app/storage/qdrant_service.py`
   - `qdrant_ping()`：用于未来做健康探测/熔断的最小能力。
 

@@ -4,7 +4,6 @@ import { memo, useCallback } from "react";
 
 import { SlateChatInput, type ImageGenParams } from "@/components/chat/slate-chat-input";
 import { useClearConversationMessages } from "@/lib/swr/use-messages";
-import { ChatModeButtons } from "@/components/chat/chat-mode-buttons";
 import { cn } from "@/lib/utils";
 import { useConversationComposer } from "@/lib/hooks/use-conversation-composer";
 import { useConversationComposerSubmit } from "@/lib/hooks/use-conversation-composer-submit";
@@ -44,14 +43,6 @@ export const ConversationChatInput = memo(function ConversationChatInput({
 
   return (
     <div className="h-full flex flex-col">
-      <div className="px-4 pt-3">
-        <ChatModeButtons
-          mode={mode}
-          onModeChange={setMode}
-          disabled={disabled}
-          className="mb-2"
-        />
-      </div>
       <div className="min-h-0 flex-1">
         <SlateChatInput
           conversationId={conversationId}

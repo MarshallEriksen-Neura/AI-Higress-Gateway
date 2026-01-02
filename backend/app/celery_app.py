@@ -51,6 +51,7 @@ celery_app.conf.update(
         "app.tasks.user_probe",
         "app.tasks.upstream_proxy_pool",
         "app.tasks.model_catalog",
+        "app.tasks.chat_memory",
         "app.metrics.tasks",
     ),
 )

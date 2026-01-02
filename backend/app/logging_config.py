@@ -540,6 +540,26 @@ def setup_logging() -> None:
         image_debug_logger.propagate = False
         image_debug_logger.addHandler(image_debug_handler)
 
+    # Debug file for memory routing / extraction，仅非生产环境启用，便于灰测与排查。
+    memory_debug_logger = logging.getLogger("apiproxy.memory_debug")
+    # Always avoid propagating to console/server logs; prod should be silent.
+    memory_debug_logger.propagate = False
+    if getattr(settings, "environment", "development").lower() != "production":
+        memory_debug_handler = DailyFolderFileHandler(
+            log_dir=log_dir,
+            filename="memory-debug.log",
+            backup_days=backup_days,
+            encoding="utf-8",
+            timezone_name=getattr(settings, "log_timezone", None),
+        )
+        memory_debug_handler.setFormatter(formatter)
+        memory_debug_handler.addFilter(FixedBizFilter("memory_debug"))
+        memory_debug_logger.setLevel(logging.DEBUG)
+        memory_debug_logger.addHandler(memory_debug_handler)
+    else:
+        # Ensure debug calls remain no-op even if someone bumps root log level.
+        memory_debug_logger.setLevel(logging.CRITICAL)
+
     server_file_handler = DailyFolderFileHandler(
         log_dir=log_dir,
         filename="server.log",

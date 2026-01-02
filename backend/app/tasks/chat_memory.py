@@ -1,0 +1,343 @@
+from __future__ import annotations
+
+import asyncio
+import logging
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+from celery import shared_task
+from sqlalchemy import func, select
+
+from app.db.session import SessionLocal
+from app.http_client import CurlCffiClient
+from app.logging_config import logger
+from app.models import APIKey, Conversation, Message, User
+from app.qdrant_client import QdrantNotConfigured, close_qdrant_client_for_current_loop, get_qdrant_client, qdrant_is_configured
+from app.redis_client import close_redis_client_for_current_loop, get_redis_client
+from app.settings import settings
+from app.services.embedding_service import embed_text
+from app.services.project_eval_config_service import (
+    DEFAULT_PROVIDER_SCOPES,
+    get_effective_provider_ids_for_user,
+    get_or_default_project_eval_config,
+)
+from app.services.qdrant_collection_service import ensure_collection_ready
+from app.services.qdrant_bootstrap_service import ensure_system_collection_ready
+from app.services.chat_memory_router import route_chat_memory
+from app.storage.qdrant_kb_store import upsert_point
+from app.utils.response_utils import safe_text_from_message_content
+
+
+_IDLE_SECONDS = 300
+_RECENT_MESSAGES = 10
+
+memory_debug_logger = logging.getLogger("apiproxy.memory_debug")
+
+
+def _preview_text(value: str | None, *, limit: int = 200) -> str:
+    text = (value or "").strip().replace("\r", " ").replace("\n", " ")
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+def _build_transcript(messages: list[Message]) -> str:
+    lines: list[str] = []
+    for msg in messages:
+        role = str(getattr(msg, "role", "") or "").strip() or "user"
+        text = safe_text_from_message_content(getattr(msg, "content", None))
+        text = (text or "").strip()
+        if not text:
+            continue
+        lines.append(f"{role}: {text}")
+    return "\n".join(lines).strip()
+
+
+def _to_authenticated_api_key(*, api_key: APIKey, user: User):
+    from app.auth import AuthenticatedAPIKey
+
+    return AuthenticatedAPIKey(
+        id=UUID(str(api_key.id)),
+        user_id=UUID(str(api_key.user_id)),
+        user_username=str(user.username or ""),
+        is_superuser=bool(user.is_superuser),
+        name=str(api_key.name or ""),
+        is_active=bool(api_key.is_active),
+        disabled_reason=getattr(api_key, "disabled_reason", None),
+        has_provider_restrictions=bool(api_key.has_provider_restrictions),
+        allowed_provider_ids=list(api_key.allowed_provider_ids),
+    )
+
+
+async def extract_and_store_chat_memory(
+    *,
+    conversation_id: UUID,
+    user_id: UUID,
+    until_sequence: int,
+) -> str:
+    if not qdrant_is_configured():
+        return "skipped:qdrant_disabled"
+
+    if until_sequence <= 0:
+        return "skipped:bad_until_sequence"
+
+    with SessionLocal() as db:
+        user = db.get(User, user_id)
+        if user is None or not bool(user.is_active):
+            return "skipped:user_missing_or_inactive"
+
+        conv = db.get(Conversation, conversation_id)
+        if conv is None or str(getattr(conv, "user_id", "")) != str(user_id):
+            return "skipped:conversation_missing"
+
+        api_key = db.get(APIKey, UUID(str(getattr(conv, "api_key_id"))))
+        if api_key is None or str(getattr(api_key, "user_id", "")) != str(user_id):
+            return "skipped:project_missing"
+
+        last_activity = getattr(conv, "last_activity_at", None)
+        if last_activity is not None:
+            try:
+                idle_s = (datetime.now(UTC) - last_activity).total_seconds()
+                if idle_s < _IDLE_SECONDS:
+                    return "skipped:not_idle"
+            except Exception:
+                pass
+
+        max_seq = (
+            db.execute(
+                select(func.max(Message.sequence)).where(Message.conversation_id == conversation_id)
+            )
+            .scalars()
+            .first()
+        )
+        max_seq_int = int(max_seq or 0)
+        if max_seq_int > int(until_sequence):
+            return "skipped:new_messages"
+
+        stmt = (
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.sequence.desc())
+            .limit(_RECENT_MESSAGES)
+        )
+        recent_desc = list(db.execute(stmt).scalars().all())
+        recent = list(reversed(recent_desc))
+        transcript = _build_transcript(recent)
+        if not transcript:
+            return "skipped:empty_transcript"
+
+        cfg = get_or_default_project_eval_config(db, project_id=UUID(str(api_key.id)))
+        effective_provider_ids = get_effective_provider_ids_for_user(
+            db,
+            user_id=UUID(str(user.id)),
+            api_key=api_key,
+            provider_scopes=list(getattr(cfg, "provider_scopes", None) or DEFAULT_PROVIDER_SCOPES),
+        )
+
+        auth_key = _to_authenticated_api_key(api_key=api_key, user=user)
+
+        router_model = (getattr(api_key, "kb_memory_router_logical_model", None) or "").strip()
+        if not router_model:
+            router_model = (getattr(api_key, "chat_title_logical_model", None) or "").strip()
+        if not router_model:
+            router_model = (getattr(api_key, "chat_default_logical_model", None) or "").strip() or "auto"
+
+        embedding_model = (getattr(api_key, "kb_embedding_logical_model", None) or "").strip()
+        if not embedding_model:
+            if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                memory_debug_logger.debug(
+                    "chat_memory: skipped (conversation_id=%s user_id=%s until=%s reason=%s)",
+                    str(conversation_id),
+                    str(user.id),
+                    int(until_sequence),
+                    "kb_embedding_model_not_configured",
+                )
+            return "skipped:kb_embedding_model_not_configured"
+
+        redis = get_redis_client()
+        qdrant = get_qdrant_client()
+        try:
+            async with CurlCffiClient(timeout=60.0, impersonate="chrome120", trust_env=True) as client:
+                if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                    memory_debug_logger.debug(
+                        "chat_memory: route_start (conversation_id=%s user_id=%s until=%s msgs=%s transcript_chars=%s router_model=%s embedding_model=%s)",
+                        str(conversation_id),
+                        str(user.id),
+                        int(until_sequence),
+                        len(recent),
+                        len(transcript),
+                        router_model,
+                        embedding_model,
+                    )
+                decision = await route_chat_memory(
+                    db,
+                    redis=redis,
+                    client=client,
+                    api_key=auth_key,
+                    effective_provider_ids=effective_provider_ids,
+                    router_logical_model=router_model,
+                    transcript=transcript,
+                    idempotency_key=f"mem_route:{conversation_id}:{until_sequence}",
+                )
+
+                if not decision.should_store or not decision.memory_text:
+                    if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                        memory_debug_logger.debug(
+                            "chat_memory: route_done (conversation_id=%s user_id=%s until=%s should_store=%s scope=%s items=%s memory_preview=%s) -> skipped",
+                            str(conversation_id),
+                            str(user.id),
+                            int(until_sequence),
+                            bool(decision.should_store),
+                            str(decision.scope),
+                            len(decision.memory_items or []),
+                            _preview_text(decision.memory_text, limit=160),
+                        )
+                    return "skipped:no_new_memory"
+
+                if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                    memory_debug_logger.debug(
+                        "chat_memory: route_done (conversation_id=%s user_id=%s until=%s should_store=%s scope=%s items=%s memory_preview=%s)",
+                        str(conversation_id),
+                        str(user.id),
+                        int(until_sequence),
+                        bool(decision.should_store),
+                        str(decision.scope),
+                        len(decision.memory_items or []),
+                        _preview_text(decision.memory_text, limit=160),
+                    )
+
+                vec = await embed_text(
+                    db,
+                    redis=redis,
+                    client=client,
+                    api_key=auth_key,
+                    effective_provider_ids=effective_provider_ids,
+                    embedding_logical_model=embedding_model,
+                    text=decision.memory_text,
+                    idempotency_key=f"mem_embed:{conversation_id}:{until_sequence}",
+                )
+                if not vec:
+                    if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                        memory_debug_logger.debug(
+                            "chat_memory: skipped (conversation_id=%s user_id=%s until=%s reason=%s)",
+                            str(conversation_id),
+                            str(user.id),
+                            int(until_sequence),
+                            "embedding_failed",
+                        )
+                    return "skipped:embedding_failed"
+
+                if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                    memory_debug_logger.debug(
+                        "chat_memory: embedded (conversation_id=%s user_id=%s until=%s vector_dim=%s)",
+                        str(conversation_id),
+                        str(user.id),
+                        int(until_sequence),
+                        len(vec),
+                    )
+
+                # Ensure system collection exists using the known vector size (best-effort).
+                try:
+                    await ensure_system_collection_ready(vector_size_hint=len(vec))
+                except Exception:
+                    pass
+
+                suggested_scope = str(decision.scope or "user").strip().lower()
+                target_scope = suggested_scope if suggested_scope in ("user", "system") else "user"
+
+                if target_scope == "system":
+                    collection_name = (
+                        str(getattr(settings, "qdrant_kb_system_collection", "kb_system") or "kb_system").strip()
+                        or "kb_system"
+                    )
+                    vector_size = len(vec)
+                else:
+                    collection_name, vector_size, _resolved_model = await ensure_collection_ready(
+                        db,
+                        qdrant=qdrant,
+                        user_id=UUID(str(user.id)),
+                        api_key=api_key,
+                        preferred_model=embedding_model,
+                        preferred_vector_size=len(vec),
+                    )
+
+                if int(vector_size) != len(vec):
+                    return "skipped:vector_size_mismatch"
+
+                categories: list[str] = []
+                keywords: list[str] = []
+                if getattr(decision, "memory_items", None):
+                    for it in decision.memory_items:
+                        cat = it.get("category")
+                        if isinstance(cat, str) and cat.strip():
+                            categories.append(cat.strip())
+                        kws = it.get("keywords")
+                        if isinstance(kws, list):
+                            for kw in kws:
+                                if isinstance(kw, str) and kw.strip():
+                                    keywords.append(kw.strip())
+
+                point_id = uuid4().hex
+                payload = {
+                    "scope": target_scope,
+                    "owner_user_id": str(user.id) if target_scope == "user" else None,
+                    # system scope is always treated as "pending approval" by default.
+                    "approved": True if target_scope == "user" else False,
+                    "submitted_by_user_id": str(user.id) if target_scope == "system" else None,
+                    "source_type": "chat_memory_route",
+                    "source_id": str(conversation_id),
+                    "text": decision.memory_text,
+                    "categories": categories or None,
+                    "keywords": keywords or None,
+                    "memory_items": decision.memory_items if getattr(decision, "memory_items", None) else None,
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "embedding_model": str(embedding_model),
+                }
+                await upsert_point(
+                    qdrant,
+                    collection_name=collection_name,
+                    point_id=point_id,
+                    vector=vec,
+                    payload=payload,
+                    wait=True,
+                )
+                if memory_debug_logger.isEnabledFor(logging.DEBUG):
+                    memory_debug_logger.debug(
+                        "chat_memory: stored (conversation_id=%s user_id=%s until=%s scope=%s collection=%s point_id=%s approved=%s vector_dim=%s)",
+                        str(conversation_id),
+                        str(user.id),
+                        int(until_sequence),
+                        target_scope,
+                        collection_name,
+                        point_id,
+                        bool(payload.get("approved")),
+                        len(vec),
+                    )
+                return f"stored:{target_scope}"
+        except QdrantNotConfigured:
+            return "skipped:qdrant_not_configured"
+        finally:
+            await close_redis_client_for_current_loop()
+            await close_qdrant_client_for_current_loop()
+
+
+@shared_task(name="tasks.extract_chat_memory")
+def extract_chat_memory_task(
+    conversation_id: str,
+    user_id: str,
+    until_sequence: int,
+) -> str:
+    try:
+        return asyncio.run(
+            extract_and_store_chat_memory(
+                conversation_id=UUID(str(conversation_id)),
+                user_id=UUID(str(user_id)),
+                until_sequence=int(until_sequence or 0),
+            )
+        )
+    except Exception as exc:  # pragma: no cover
+        logger.exception("chat_memory task failed: %s", exc)
+        return "failed"
+
+
+__all__ = ["extract_and_store_chat_memory", "extract_chat_memory_task"]

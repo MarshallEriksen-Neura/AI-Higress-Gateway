@@ -59,6 +59,11 @@ class APIKey(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         nullable=True,
         doc="项目级知识库 embedding 逻辑模型；为空表示未配置（由上层策略决定是否启用/如何选择）。",
     )
+    kb_memory_router_logical_model: Mapped[str | None] = Column(
+        String(128),
+        nullable=True,
+        doc="项目级聊天记忆路由模型：用于判断是否存储以及存储到 user/system 维度；为空表示由上层选择默认。",
+    )
 
     user: Mapped[User] = relationship("User", back_populates="api_keys")
     allowed_provider_links: Mapped[list[APIKeyAllowedProvider]] = relationship(

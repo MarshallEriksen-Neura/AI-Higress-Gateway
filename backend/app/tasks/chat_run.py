@@ -74,6 +74,35 @@ def _to_authenticated_api_key(db, *, api_key: APIKey) -> AuthenticatedAPIKey:
     )
 
 
+def _enqueue_chat_memory_task(
+    *,
+    conversation_id: UUID,
+    user_id: UUID,
+    until_sequence: int,
+) -> None:
+    """
+    旁路任务：聊天完成后延迟触发“记忆提取与写入”。
+
+    必须 best-effort，入队失败不影响主流程。
+    """
+    if int(until_sequence or 0) <= 0:
+        return
+    try:
+        from app.celery_app import celery_app
+
+        celery_app.send_task(
+            "tasks.extract_chat_memory",
+            args=[str(conversation_id), str(user_id), int(until_sequence)],
+            countdown=300,
+        )
+    except Exception:  # pragma: no cover
+        logger.debug(
+            "enqueue chat_memory task failed (conversation_id=%s)",
+            str(conversation_id),
+            exc_info=True,
+        )
+
+
 def _extract_tool_invocations(run: Run) -> list[dict[str, Any]]:
     try:
         payload = getattr(run, "response_payload", None)
@@ -484,7 +513,15 @@ async def execute_chat_run(
                             "chat_run: conversation summary update failed (conversation_id=%s)",
                             str(conv.id),
                             exc_info=True,
-                    )
+                        )
+                    try:
+                        _enqueue_chat_memory_task(
+                            conversation_id=UUID(str(conv.id)),
+                            user_id=UUID(str(auth_key.user_id)),
+                            until_sequence=int(getattr(assistant_msg, "sequence", 0) or 0),
+                        )
+                    except Exception:  # pragma: no cover
+                        pass
 
                 await _append_run_event_and_publish(
                     db,
@@ -719,6 +756,14 @@ async def execute_chat_run(
                         str(conv.id),
                         exc_info=True,
                     )
+                try:
+                    _enqueue_chat_memory_task(
+                        conversation_id=UUID(str(conv.id)),
+                        user_id=UUID(str(auth_key.user_id)),
+                        until_sequence=int(message.sequence or 0) + 1,
+                    )
+                except Exception:  # pragma: no cover
+                    pass
 
             await _append_run_event_and_publish(
                 db,

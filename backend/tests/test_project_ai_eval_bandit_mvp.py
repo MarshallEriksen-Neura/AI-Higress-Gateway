@@ -27,6 +27,37 @@ def _mock_send(request: httpx.Request) -> httpx.Response:
                 system_text = m["content"]
                 break
 
+        if "AI 记忆网关" in system_text and "memory_items" in system_text:
+            data = {
+                "id": "cmpl-test",
+                "object": "chat.completion",
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": json.dumps(
+                                {
+                                    "should_store": True,
+                                    "scope": "user",
+                                    "memory_text": "用户偏好：回答尽量简洁",
+                                    "memory_items": [
+                                        {
+                                            "content": "用户偏好：回答尽量简洁",
+                                            "category": "preference",
+                                            "keywords": ["简洁", "风格"],
+                                        }
+                                    ],
+                                },
+                                ensure_ascii=False,
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+            }
+            return httpx.Response(200, json=data)
+
         if "上下文特征" in system_text and "risk_tier" in system_text:
             data = {
                 "id": "cmpl-test",
@@ -513,6 +544,7 @@ def test_project_chat_settings_get_and_update(app_with_mock_chat):
         assert data["default_logical_model"] == "auto"
         assert data["title_logical_model"] is None
         assert data["kb_embedding_logical_model"] is None
+        assert data["kb_memory_router_logical_model"] is None
 
         resp = client.put(
             f"/v1/projects/{api_key_id}/chat-settings",
@@ -521,6 +553,7 @@ def test_project_chat_settings_get_and_update(app_with_mock_chat):
                 "default_logical_model": "test-model-2",
                 "title_logical_model": "test-model",
                 "kb_embedding_logical_model": "test-embedding-model",
+                "kb_memory_router_logical_model": "test-memory-router",
             },
         )
         assert resp.status_code == 200
@@ -528,6 +561,7 @@ def test_project_chat_settings_get_and_update(app_with_mock_chat):
         assert data["default_logical_model"] == "test-model-2"
         assert data["title_logical_model"] == "test-model"
         assert data["kb_embedding_logical_model"] == "test-embedding-model"
+        assert data["kb_memory_router_logical_model"] == "test-memory-router"
 
 
 def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_chat, monkeypatch):
@@ -585,6 +619,36 @@ def test_assistant_follow_project_settings_for_model_and_title(app_with_mock_cha
             json={"content": "你好"},
         )
         assert resp.status_code == 200
+
+
+def test_project_memory_route_dry_run(app_with_mock_chat):
+    app, SessionLocal, _ = app_with_mock_chat
+    user_id, api_key_id = _get_seed_ids(SessionLocal)
+    headers = jwt_auth_headers(str(user_id))
+
+    with TestClient(app) as client:
+        # set router model in project settings
+        resp = client.put(
+            f"/v1/projects/{api_key_id}/chat-settings",
+            headers=headers,
+            json={"kb_memory_router_logical_model": "test-model"},
+        )
+        assert resp.status_code == 200
+
+        resp = client.post(
+            f"/v1/projects/{api_key_id}/memory-route/dry-run",
+            headers=headers,
+            json={"transcript": "user: 我希望回答简洁\\nassistant: 好的"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["project_id"] == str(api_key_id)
+        assert data["router_logical_model"] == "test-model"
+        assert data["should_store"] is True
+        assert data["scope"] == "user"
+        assert "简洁" in data["memory_text"]
+        assert isinstance(data["memory_items"], list)
+        assert data["raw_model_output"]
         message_id = resp.json()["message_id"]
         requested_model = resp.json()["baseline_run"]["requested_logical_model"]
         assert requested_model == "test-model-2"

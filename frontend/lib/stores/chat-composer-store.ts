@@ -21,6 +21,8 @@ export interface ConversationComposerState {
 interface ChatComposerState {
   byConversationId: Record<string, ConversationComposerState>;
   imageDefaults: ImageComposerState;
+  /** 全局默认模式：新会话继承此模式 */
+  defaultMode: ComposerMode;
 
   ensureConversation: (conversationId: string) => void;
   setActiveMode: (conversationId: string, mode: ComposerMode) => void;
@@ -40,8 +42,8 @@ const defaultImageState = (): ImageComposerState => ({
   sendResponseFormat: true,
 });
 
-const defaultConversationState = (): ConversationComposerState => ({
-  activeMode: "chat",
+const defaultConversationState = (mode: ComposerMode = "chat"): ConversationComposerState => ({
+  activeMode: mode,
   image: defaultImageState(),
 });
 
@@ -59,6 +61,7 @@ export const useChatComposerStore = create<ChatComposerState>()(
     (set) => ({
       byConversationId: {},
       imageDefaults: defaultImageState(),
+      defaultMode: "chat",
 
       ensureConversation: (conversationId) =>
         set((state) => {
@@ -66,11 +69,13 @@ export const useChatComposerStore = create<ChatComposerState>()(
           if (!key) return state;
           if (state.byConversationId[key]) return state;
           const defaults = state.imageDefaults || defaultImageState();
+          // 新会话继承全局默认模式
+          const mode = state.defaultMode || "chat";
           return {
             ...state,
             byConversationId: {
               ...state.byConversationId,
-              [key]: { activeMode: "chat", image: { ...defaults } },
+              [key]: { activeMode: mode, image: { ...defaults } },
             },
           };
         }),
@@ -79,10 +84,12 @@ export const useChatComposerStore = create<ChatComposerState>()(
         set((state) => {
           const key = String(conversationId || "").trim();
           if (!key) return state;
-          const prev = state.byConversationId[key] ?? defaultConversationState();
+          const prev = state.byConversationId[key] ?? defaultConversationState(state.defaultMode);
           if (prev.activeMode === mode) return state;
           return {
             ...state,
+            // 同时更新全局默认模式，让下次新会话继承
+            defaultMode: mode,
             byConversationId: {
               ...state.byConversationId,
               [key]: { ...prev, activeMode: mode },
@@ -184,7 +191,13 @@ export const useChatComposerStore = create<ChatComposerState>()(
           }
           byConversationId[conversationId] = normalized;
         }
-        return { byConversationId, imageDefaults };
+        // 迁移时保留 defaultMode，若无则默认 "chat"
+        const defaultMode = (state as any).defaultMode;
+        return {
+          byConversationId,
+          imageDefaults,
+          defaultMode: defaultMode === "chat" || defaultMode === "image" || defaultMode === "speech" ? defaultMode : "chat",
+        };
       },
     }
   )

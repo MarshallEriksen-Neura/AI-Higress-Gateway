@@ -15,12 +15,19 @@ class ProjectChatSettingsResponse(BaseModel):
         max_length=128,
         description="项目级知识库 embedding 模型（用于 Qdrant/RAG 等向量化场景）",
     )
+    kb_memory_router_logical_model: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        description="项目级聊天记忆路由模型（判断是否存储、存到 user/system 维度）",
+    )
 
 
 class ProjectChatSettingsUpdateRequest(BaseModel):
     default_logical_model: str | None = Field(default=None, min_length=1, max_length=128)
     title_logical_model: str | None = Field(default=None, min_length=1, max_length=128)
     kb_embedding_logical_model: str | None = Field(default=None, min_length=1, max_length=128)
+    kb_memory_router_logical_model: str | None = Field(default=None, min_length=1, max_length=128)
 
     model_config = ConfigDict(extra="forbid")
 

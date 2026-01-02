@@ -149,6 +149,22 @@ class Settings(BaseSettings):
             "<QDRANT_KB_USER_COLLECTION>_<user_id_hex>。"
         ),
     )
+    qdrant_kb_user_collection_strategy: str = Field(
+        "per_user",
+        alias="QDRANT_KB_USER_COLLECTION_STRATEGY",
+        description=(
+            "user 维度 collection 拆分策略："
+            "per_user（每用户一个 collection，物理隔离）；"
+            "sharded_by_model（按 embedding 模型分片，collection 数量与用户规模解耦）。"
+        ),
+    )
+    qdrant_kb_user_collection_shards: int = Field(
+        16,
+        alias="QDRANT_KB_USER_COLLECTION_SHARDS",
+        description="当 QDRANT_KB_USER_COLLECTION_STRATEGY=sharded_by_model 时的分片数量（>0）。",
+        ge=1,
+        le=1024,
+    )
     auto_apply_db_migrations: bool = Field(
         True,
         alias="AUTO_APPLY_DB_MIGRATIONS",
