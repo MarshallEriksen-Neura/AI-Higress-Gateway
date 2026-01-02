@@ -10,12 +10,11 @@
 - [x] 结构化属性闭环：`structured_ops` → `kb_attributes`（Postgres）→ system block 确定性注入（偏好/约束）
 - [x] 灰测接口：`POST /v1/projects/{project_id}/memory-route/dry-run`
 - [x] 开发专用日志：`apiproxy.memory_debug`（非生产落盘 `memory-debug.log`）+ 生产结构化 `biz=memory` INFO 日志
-
-- [ ] system 投稿审核/发布闭环（防投毒）：列表/审核/发布/回滚 + 只读检索 `approved=true`
-- [ ] 检索 Query 改写（小模型）：从启发式升级为结构化改写，保留成本门禁
-- [ ] 检索阈值与去噪：score 阈值、去重、top-k 动态调整，避免检索污染
-- [ ] 记忆管理 API：用户侧“列表/删除/导出我的记忆”（shared 下必须按 owner filter 删除）
-- [ ] embedding 版本迁移：`kb_shared_v2` 双写 + backfill + 切读（Plan B）
+- [x] 结构化属性白名单与 Schema 校验：`kb_attribute_schema` + `chat_memory_router`集成
+- [x] 记忆管理 API：用户侧“列表/删除/导出我的记忆”（支持向量记忆与结构化属性）
+- [x] 检索 Query 改写（小模型）：`chat_memory_retrieval.py` 引入 `rewrite_search_query`，处理代词与上下文补全
+- [x] system 投稿审核/发布闭环（防投毒）：Admin API `/v1/admin/memories/*` 支持候选列表/审核发布/手动创建
+- [x] 检索阈值与去噪：`chat_memory_retrieval.py` 增加 `MIN_SCORE_THRESHOLD=0.75` 及简单的去重逻辑
 
 ---
 

@@ -177,11 +177,79 @@ async def search_points(
     return []
 
 
+async def scroll_points(
+    qdrant: httpx.AsyncClient,
+    *,
+    collection_name: str,
+    limit: int = 20,
+    query_filter: dict[str, Any] | None = None,
+    with_payload: bool = True,
+    offset: Any | None = None,
+) -> tuple[list[dict[str, Any]], Any | None]:
+    """
+    Scroll points from Qdrant. Returns (items, next_page_offset).
+    """
+    name = str(collection_name or "").strip()
+    if not name:
+        raise ValueError("empty collection_name")
+
+    body: dict[str, Any] = {
+        "limit": max(1, min(int(limit or 0), 100)),
+        "with_payload": bool(with_payload),
+        "with_vector": False,
+    }
+    if query_filter:
+        body["filter"] = query_filter
+    if offset:
+        body["offset"] = offset
+
+    resp = await qdrant.post(f"/collections/{name}/points/scroll", json=body)
+    if resp.status_code == 404:
+        return [], None
+    resp.raise_for_status()
+    payload = resp.json()
+    result = payload.get("result", {})
+    points = result.get("points", [])
+    next_offset = result.get("next_page_offset")
+    return [it for it in points if isinstance(it, dict)], next_offset
+
+
+async def delete_points(
+    qdrant: httpx.AsyncClient,
+    *,
+    collection_name: str,
+    points_ids: list[str] | None = None,
+    query_filter: dict[str, Any] | None = None,
+    wait: bool = True,
+) -> None:
+    """
+    Delete points by IDs or by filter.
+    """
+    name = str(collection_name or "").strip()
+    if not name:
+        raise ValueError("empty collection_name")
+
+    params = {"wait": "true" if wait else "false"}
+    body: dict[str, Any] = {}
+    if points_ids:
+        body["points"] = points_ids
+    if query_filter:
+        body["filter"] = query_filter
+
+    if not body:
+        return
+
+    resp = await qdrant.post(f"/collections/{name}/points/delete", params=params, json=body)
+    resp.raise_for_status()
+
+
 __all__ = [
     "QDRANT_DEFAULT_VECTOR_NAME",
     "create_collection",
+    "delete_points",
     "ensure_collection_vector_size",
     "get_collection_vector_size",
+    "scroll_points",
     "search_points",
     "upsert_point",
 ]

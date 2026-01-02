@@ -13,6 +13,7 @@ except ModuleNotFoundError:  # pragma: no cover
 
 from app.api.v1.chat.request_handler import RequestHandler
 from app.auth import AuthenticatedAPIKey
+from app.services.kb_attribute_schema import filter_structured_ops, get_allowed_keys_description
 from app.utils.response_utils import extract_first_choice_text, parse_json_response_body
 
 MemoryScope = Literal["none", "user", "system"]
@@ -58,9 +59,10 @@ _SYSTEM_PROMPT = (
     "- 仅提取“明确、稳定、会影响后续行为”的偏好/约束（不要写临时状态）。\n"
     "- scope 只能是：user（用户偏好）或 project（项目约束）。\n"
     "- op 目前仅支持：UPSERT（同一个 subject + key 覆盖更新）。\n"
-    "- key 使用稳定的 dotted path（例如 response.style、tech_stack.backend_framework）。\n"
-    "- value 必须是 JSON（string/number/bool/object/array）。\n"
     "- 严禁写入任何密钥/密码/token/API key/私钥/手机号/邮箱/地址等敏感信息；如对话包含敏感信息，structured_ops 也必须为空。\n"
+    "\n"
+    "Key 白名单（严格限制，只允许使用以下 key）：\n"
+    f"{get_allowed_keys_description()}\n"
     "\n"
     "输出格式：必须且只能输出 JSON（不要 Markdown、不要解释），字段如下：\n"
     "{\n"
@@ -198,6 +200,9 @@ def parse_memory_route_decision(text: str) -> MemoryRouteDecision:
                     "reason": reason if isinstance(reason, str) else None,
                 }
             )
+
+    # Apply strict schema validation/filtering
+    structured_ops = filter_structured_ops(structured_ops)
 
     if not should_store:
         return MemoryRouteDecision(

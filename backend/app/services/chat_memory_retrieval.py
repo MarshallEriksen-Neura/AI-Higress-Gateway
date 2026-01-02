@@ -12,12 +12,14 @@ try:
 except ModuleNotFoundError:  # pragma: no cover
     Redis = object  # type: ignore[misc,assignment]
 
+from app.api.v1.chat.request_handler import RequestHandler
 from app.auth import AuthenticatedAPIKey
 from app.qdrant_client import QdrantNotConfigured, get_qdrant_client, qdrant_is_configured
 from app.settings import settings
 from app.services.embedding_service import embed_text
 from app.storage.qdrant_kb_collections import get_kb_user_collection_name
 from app.storage.qdrant_kb_store import QDRANT_DEFAULT_VECTOR_NAME, search_points
+from app.utils.response_utils import extract_first_choice_text, parse_json_response_body
 
 
 memory_debug_logger = logging.getLogger("apiproxy.memory_debug")
@@ -27,6 +29,84 @@ _MEMORY_HINT_RE = re.compile(
     re.IGNORECASE,
 )
 _PRONOUN_RE = re.compile(r"(它|那个|这(个|里|段)|上面|前面|刚才|之前那个)", re.IGNORECASE)
+
+_REWRITE_SYSTEM_PROMPT = (
+    "Role: Query Rewriter\n"
+    "Goal: Resolve pronouns and implicit references in the user's latest query based on conversation history, "
+    "outputting a standalone search query for a vector database.\n"
+    "\n"
+    "Rules:\n"
+    "1. If the query contains pronouns (e.g., 'it', 'that', 'he', 'previous one'), replace them with specific entities from history.\n"
+    "2. If the query depends on context (e.g., 'how about Python?'), add the missing context.\n"
+    "3. Remove conversational fillers (e.g., 'please', 'hello', 'can you tell me').\n"
+    "4. If the query is already self-contained, output it as is.\n"
+    "5. Output ONLY the rewritten query string. No explanations.\n"
+)
+
+
+async def rewrite_search_query(
+    db: DbSession,
+    *,
+    redis: Redis,
+    client: Any,
+    api_key: AuthenticatedAPIKey,
+    effective_provider_ids: set[str],
+    router_logical_model: str,
+    user_text: str,
+    summary_text: str | None,
+    idempotency_key: str,
+) -> str:
+    """
+    Use an LLM to rewrite the user query into a standalone search query.
+    """
+    model = str(router_logical_model or "").strip()
+    if not model:
+        return user_text
+
+    text = (user_text or "").strip()
+    if not text:
+        return ""
+
+    # Context construction: summary + last user query.
+    # We don't send full history to save tokens/latency for this lightweight task.
+    context_str = ""
+    if summary_text:
+        context_str = f"Conversation Summary:\n{summary_text}\n\n"
+
+    user_content = f"{context_str}Latest User Query:\n{text}"
+
+    payload = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": _REWRITE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ],
+        "temperature": 0.0,
+        "max_tokens": 128,
+    }
+
+    try:
+        handler = RequestHandler(api_key=api_key, db=db, redis=redis, client=client)
+        resp = await handler.handle(
+            payload=payload,
+            requested_model=model,
+            lookup_model_id=model,
+            api_style="openai",
+            effective_provider_ids=effective_provider_ids,
+            idempotency_key=idempotency_key,
+            billing_reason="chat_memory_rewrite",
+        )
+        response_payload = parse_json_response_body(resp)
+        rewritten = (extract_first_choice_text(response_payload) or "").strip()
+        # Fallback if model outputs nothing or hallucinated empty string
+        if not rewritten:
+            return text
+        return rewritten
+    except Exception:
+        # Fallback to original text on any error to ensure resilience
+        if memory_debug_logger.isEnabledFor(logging.DEBUG):
+            memory_debug_logger.debug("memory_rewrite: failed, fallback to original", exc_info=True)
+        return text
 
 
 def should_retrieve_user_memory(user_text: str) -> bool:
@@ -152,6 +232,32 @@ async def maybe_retrieve_user_memory_context(
         return ""
 
     query = build_retrieval_query(user_text=user_text, summary_text=summary_text)
+    
+    # 2. Enhanced Rewriting (LLM-based)
+    # Trigger condition: Heuristic detected pronouns OR short query with summary context available.
+    # We reuse the project's configured router model (often a cheaper/faster model).
+    router_model = (getattr(api_key, "kb_memory_router_logical_model", None) or "").strip()
+    # Also fallback to chat_title_logical_model if router not set, as it's usually cheap.
+    if not router_model:
+        router_model = (getattr(api_key, "chat_title_logical_model", None) or "").strip()
+        
+    should_rewrite = bool(router_model and (_PRONOUN_RE.search(user_text) or (summary_text and len(user_text) < 20)))
+    
+    if should_rewrite:
+        rewritten = await rewrite_search_query(
+            db,
+            redis=redis,
+            client=client,
+            api_key=api_key,
+            effective_provider_ids=effective_provider_ids,
+            router_logical_model=router_model,
+            user_text=user_text,
+            summary_text=summary_text,
+            idempotency_key=f"{idempotency_key}:rewrite",
+        )
+        if rewritten:
+            query = rewritten
+
     if not query:
         return ""
 
@@ -176,31 +282,75 @@ async def maybe_retrieve_user_memory_context(
 
         collection_name = get_kb_user_collection_name(owner_user_id, embedding_model=embedding_model)
         qfilter = _build_secure_user_memory_filter(owner_user_id=owner_user_id, project_id=project_id)
-        hits = await search_points(
+        
+        # 3. Dynamic Retrieval (Top-K + Score Threshold)
+        # We ask for a bit more candidates (limit=10) to allow for score filtering and deduplication.
+        raw_hits = await search_points(
             qdrant,
             collection_name=collection_name,
             vector=vec,
-            limit=max(1, min(int(top_k or 0), 10)),
+            limit=10,
             query_filter=qfilter,
             vector_name=QDRANT_DEFAULT_VECTOR_NAME,
         )
-        payloads: list[dict[str, Any]] = []
-        for h in hits:
-            if isinstance(h, dict):
-                p = h.get("payload")
-                if isinstance(p, dict):
-                    payloads.append(p)
+        
+        # Minimum score to be considered relevant (0.0-1.0 cosine similarity)
+        # TODO: Move to project config
+        MIN_SCORE_THRESHOLD = 0.75
+        
+        valid_hits = []
+        seen_content_hashes = set()
+        
+        for h in raw_hits:
+            if not isinstance(h, dict):
+                continue
+                
+            score = h.get("score")
+            # If score is available and too low, skip
+            if isinstance(score, (int, float)) and score < MIN_SCORE_THRESHOLD:
+                continue
+                
+            p = h.get("payload")
+            if not isinstance(p, dict):
+                continue
+                
+            text = (p.get("text") or "").strip()
+            if not text:
+                continue
+                
+            # Deduplication: simple exact match or very short content collision
+            # For more advanced dedup, we could use MinHash or just Levenshtein, but exact match is a safe start.
+            # We also dedupe based on ID just in case.
+            pid = str(h.get("id"))
+            if pid in seen_content_hashes:
+                continue
+            
+            # Content-based hash (simple)
+            content_hash = hash(text[:128]) # Optimization: only hash prefix
+            if content_hash in seen_content_hashes:
+                continue
+                
+            seen_content_hashes.add(pid)
+            seen_content_hashes.add(content_hash)
+            
+            valid_hits.append(p)
+            
+            # Dynamic Top-K: stop if we have enough high-quality hits
+            if len(valid_hits) >= top_k:
+                break
 
-        ctx = _format_retrieved_payloads(payloads, limit=top_k)
+        ctx = _format_retrieved_payloads(valid_hits, limit=top_k)
         if memory_debug_logger.isEnabledFor(logging.DEBUG):
             memory_debug_logger.debug(
-                "memory_retrieval: done (user_id=%s project_id=%s should=%s query_chars=%s dim=%s hits=%s)",
+                "memory_retrieval: done (user_id=%s project_id=%s should=%s rewritten=%s query_chars=%s dim=%s raw_hits=%s valid_hits=%s)",
                 str(owner_user_id),
                 str(project_id),
                 True,
+                should_rewrite,
                 len(query),
                 len(vec),
-                len(payloads),
+                len(raw_hits),
+                len(valid_hits),
             )
         return ctx
     except Exception:

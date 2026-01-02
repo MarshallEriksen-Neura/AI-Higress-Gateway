@@ -67,3 +67,10 @@ export { evalService } from './eval';
 export { adminEvalService } from './admin-evals';
 export { evalConfigService } from './eval-config';
 export { projectChatSettingsService } from './project-chat-settings';
+export {
+  adminMemoryService,
+  type AdminMemoryItem,
+  type AdminMemoryListResponse,
+  type AdminMemoryApproveRequest,
+  type AdminMemoryCreateRequest
+} from './admin-memory';

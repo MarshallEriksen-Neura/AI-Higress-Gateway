@@ -15,6 +15,7 @@ from .api.provider_routes import router as provider_router
 from .api.routing_routes import router as routing_router
 from .api.system_routes import router as system_router
 from .api.v1.admin_eval_routes import router as admin_eval_router
+from .api.v1.admin_memory_routes import router as admin_memory_router
 from .api.v1.admin_notification_routes import router as admin_notification_router
 from .api.v1.admin_provider_preset_routes import (
     router as admin_provider_preset_router,
@@ -51,6 +52,7 @@ from .api.v1.provider_submission_routes import (
 from .api.v1.workflow_routes import router as workflow_router
 from .api.v1.session_routes import router as user_session_router
 from .api.v1.user_provider_routes import router as user_provider_router
+from .api.v1.user_memory_routes import router as user_memory_router
 from .api.v1.user_routes import router as user_router
 from .api.v1.request_logs_routes import router as request_logs_router
 from .db import SessionLocal
@@ -293,6 +295,7 @@ def create_app() -> FastAPI:
 
     # 用户与 API Key 管理
     app.include_router(user_router)
+    app.include_router(user_memory_router)
     app.include_router(notification_router)
     app.include_router(api_key_router)
     app.include_router(provider_key_router)
@@ -326,6 +329,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_registration_router)
     app.include_router(admin_notification_router)
     app.include_router(admin_eval_router)
+    app.include_router(admin_memory_router)
     app.include_router(admin_upstream_proxy_router)
 
     # 基础网关路由（health/models/context 等）

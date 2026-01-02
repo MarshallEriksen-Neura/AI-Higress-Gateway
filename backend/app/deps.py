@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator, Iterator
 
+import httpx
 from fastapi import Header, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -11,6 +12,7 @@ except ModuleNotFoundError:  # pragma: no cover - safety fallback for minimal en
 
 from .db import get_db_session
 from .http_client import CurlCffiClient
+from .qdrant_client import get_qdrant_client
 from .redis_client import get_redis_client
 from .settings import settings
 
@@ -27,6 +29,13 @@ async def get_redis() -> Redis:
     are expected to override this dependency with a fake implementation.
     """
     return get_redis_client()
+
+
+async def get_qdrant() -> httpx.AsyncClient:
+    """
+    FastAPI dependency that provides a shared Qdrant client.
+    """
+    return get_qdrant_client()
 
 
 async def get_http_client() -> AsyncIterator[CurlCffiClient]:
